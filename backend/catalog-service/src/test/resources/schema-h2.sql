@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS apis (
     api_version VARCHAR(50),
     documentation TEXT,
     rate_limits TEXT,
+    error_policy TEXT,
     source VARCHAR(50) DEFAULT 'import',
     deprecated_at TIMESTAMP WITH TIME ZONE,
     created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000,

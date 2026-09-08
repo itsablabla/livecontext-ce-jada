@@ -55,7 +55,7 @@ import static org.mockito.Mockito.mock;
  * {@code CatalogExecuteModule} and {@code GenerationExecutionService} send the
  * three scope headers and nothing else, so all five defaulted to 0 on every
  * call. Two generations in one chat turn, or ten iterations of a
- * {@code core:generate} node in one loop, therefore all reserved the SAME key -
+ * {@code agent:generate} node in one loop, therefore all reserved the SAME key -
  * and exactly one of them was ever charged.
  *
  * <p><b>What is asserted here.</b> Not "reserve was called N times" - it always
@@ -225,7 +225,7 @@ class ToolExecutionManagerPerCallChargeTest {
                 USER_ID, null, "req-" + UUID.randomUUID());
     }
 
-    /** One execution of a {@code core:generate} node: RUN scope, same step id every time. */
+    /** One execution of a {@code agent:generate} node: RUN scope, same step id every time. */
     private void loopIteration() {
         manager.executeTool(TOOL_SLUG,
                 ToolExecutionRequest.builder()
@@ -234,7 +234,7 @@ class ToolExecutionManagerPerCallChargeTest {
                         .platformCredentialId(42L)
                         .billingScopeKind("RUN")
                         .billingScopeId("run-1")
-                        .billingStepId("core:generate")
+                        .billingStepId("agent:generate")
                         .build(),
                 USER_ID, null, "req-" + UUID.randomUUID());
     }
@@ -296,7 +296,7 @@ class ToolExecutionManagerPerCallChargeTest {
 
             String sourceId = reservedSourceIds.iterator().next();
             assertThat(sourceId).startsWith(
-                    SourceIdBuilder.MARKUP_DEBIT_PREFIX + ":RUN:run-1:step:core:generate:");
+                    SourceIdBuilder.MARKUP_DEBIT_PREFIX + ":RUN:run-1:step:agent:generate:");
             assertThat(SourceIdBuilder.isMarkupDebit(sourceId)).isTrue();
         }
     }
@@ -321,7 +321,7 @@ class ToolExecutionManagerPerCallChargeTest {
                     .platformCredentialId(42L)
                     .billingScopeKind("RUN")
                     .billingScopeId("run-1")
-                    .billingStepId("core:generate")
+                    .billingStepId("agent:generate")
                     .build();
 
             // Same request instance, same X-Request-Id, twice: nothing the

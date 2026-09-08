@@ -37,6 +37,7 @@ public class AgentClient {
     private static final Logger log = LoggerFactory.getLogger(AgentClient.class);
 
     private final RestTemplate restTemplate;
+    private final RestTemplate memoryRestTemplate = createMemoryRestTemplate();
     private final RestTemplate executionRestTemplate;
     // Dedicated bounded-timeout template used ONLY by
     // {@link #getRecentActivity} - 2s connect / 3s read. Prevents the
@@ -78,6 +79,23 @@ public class AgentClient {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(10));
         factory.setReadTimeout(EXECUTION_READ_TIMEOUT);
+        return new RestTemplate(factory);
+    }
+
+    /**
+     * 2s connect / 2s read for the memory block.
+     *
+     * <p>This call sits directly in front of a user's chat message on the CLI
+     * path, and the default template has open-ended JDK timeouts. Catching the
+     * exception is not enough: an agent-service that ACCEPTS connections and never
+     * answers would hang every claude-code / codex chat at dispatch rather than
+     * running it without memory. Memory is an enrichment, so its budget has to be
+     * short enough that losing it costs less than waiting for it.
+     */
+    private static RestTemplate createMemoryRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(2));
+        factory.setReadTimeout(Duration.ofSeconds(2));
         return new RestTemplate(factory);
     }
 
@@ -1235,8 +1253,8 @@ public class AgentClient {
     // ========== Storage Usage ==========
 
     /**
-     * Get storage usage for agents and skills categories.
-     * Returns map with keys "AGENTS" and "SKILLS".
+     * Get storage usage for the agents, skills and long-term memory categories.
+     * Returns map with keys "AGENTS", "SKILLS" and "MEMORIES".
      */
     @SuppressWarnings("unchecked")
     public Map<String, Object> getAgentStorageUsage(String tenantId) {
@@ -1396,6 +1414,40 @@ public class AgentClient {
     }
 
     // ========== Helpers ==========
+
+    /**
+     * Append the workspace's long-term memory block to a system prompt that was
+     * assembled in another service.
+     *
+     * <p>Only conversation-service needs this, and only on its bridge branch: when
+     * the chat model is a CLI provider it posts to the bridge itself and never calls
+     * agent-service, so the injection that every other execution gets on the way in
+     * cannot happen. Without this call, a chat on claude-code, codex or gemini-cli
+     * would run with no memory at all while every other path had it - the silent
+     * per-path drift the skills tree already suffers from.
+     *
+     * <p>Returns the prompt UNCHANGED on any failure. Memory is an enrichment: a run
+     * without it is degraded, a run that fails because a memory read timed out is
+     * broken.
+     */
+    public String appendMemoryBlock(String systemPrompt, String tenantId,
+                                    String organizationId, String agentEntityId) {
+        String url = baseUrl + "/api/internal/memories/append-block";
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("systemPrompt", systemPrompt == null ? "" : systemPrompt);
+        body.put("agentId", agentEntityId);
+        try {
+            ResponseEntity<Map<String, String>> response = memoryRestTemplate.exchange(
+                url, HttpMethod.POST,
+                new HttpEntity<>(body, buildHeaders(tenantId, organizationId)),
+                new ParameterizedTypeReference<>() {});
+            String enriched = response.getBody() != null ? response.getBody().get("systemPrompt") : null;
+            return enriched != null ? enriched : systemPrompt;
+        } catch (Exception e) {
+            log.warn("Failed to append the memory block for org {}: {}", organizationId, e.getMessage());
+            return systemPrompt;
+        }
+    }
 
     private HttpHeaders buildHeaders(String tenantId) {
         return buildHeaders(tenantId, null);

@@ -170,7 +170,8 @@ public class CoreToolsCache {
                 || t.equals("wait"))) {
             fetchToolsFrom(orchestratorUrl + "/api/agent-tools", "orchestrator");
         }
-        if (missing.contains("agent") || missing.contains("skill")) {
+        if (missing.contains("agent") || missing.contains("skill")
+                || missing.contains("memory") || missing.contains("ask_user")) {
             fetchToolsFrom(agentServiceUrl + "/api/agent-tools", "agent-service");
         }
         if (missing.contains("table")) {
@@ -259,7 +260,7 @@ public class CoreToolsCache {
     /**
      * Fetch core tools from all owning services.
      * Orchestrator provides: workflow, application, web_search.
-     * Agent-service (local) provides: agent, skill.
+     * Agent-service (local) provides: agent, skill, memory.
      * Datasource-service provides: table.
      * Interface-service provides: interface.
      */
@@ -270,7 +271,7 @@ public class CoreToolsCache {
         // Fetch from orchestrator (workflow, application, web_search)
         fetchToolsFrom(orchestratorUrl + "/api/agent-tools", "orchestrator");
 
-        // Fetch from agent-service (agent, skill)
+        // Fetch from agent-service (agent, skill, memory)
         fetchToolsFrom(agentServiceUrl + "/api/agent-tools", "agent-service");
 
         // Fetch from datasource-service (table)

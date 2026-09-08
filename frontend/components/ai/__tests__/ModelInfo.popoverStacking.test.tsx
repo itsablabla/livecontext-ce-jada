@@ -9,9 +9,13 @@
  *   - ModelPicker SelectContents                   z-[100000]
  *   - the (i) ModelInfoPopover card                z-[100001]
  *   - hover tooltips (tier/capability/star/...)    z-[100002]
- * The shared ui defaults (PopoverContent z-50, TooltipContent z-[9999]) sat
- * BELOW those hosts, so the (i) card and the hover tooltips painted BEHIND
- * the menus (the reported bug for the card).
+ * The shared ui defaults sat BELOW those hosts, so the (i) card and the hover
+ * tooltips painted BEHIND the menus (the reported bug for the card).
+ * PopoverContent still defaults to z-50 and is overridden here; TooltipContent's
+ * default has since been raised to z-[100002] at the source, because the same bug
+ * reappeared on the plan-comparison dialog and a per-call-site patch was never
+ * going to be the last one. The overrides below are now belt and braces, and the
+ * assertions still hold either way.
  *
  * These tests render the REAL ui primitives (Radix + cn/tailwind-merge): the
  * fix only works if twMerge resolves the z-* conflict in favour of the

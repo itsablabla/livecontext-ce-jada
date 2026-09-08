@@ -1131,7 +1131,7 @@ public class CredentialClient {
         if (organizationId != null && !organizationId.isBlank()) {
             headers.set("X-Organization-ID", organizationId);
         }
-        applyGatewaySignature(headers, tenantId);
+        applyGatewaySignature(headers);
         return headers;
     }
 
@@ -1144,11 +1144,28 @@ public class CredentialClient {
         // PR16 - forward X-Organization-ID / X-Organization-Role from the
         // inbound request to keep workspace context across cross-service hops.
         OrgContextHeaderForwarder.forward(headers);
-        applyGatewaySignature(headers, tenantId);
+        applyGatewaySignature(headers);
         return headers;
     }
 
-    private void applyGatewaySignature(HttpHeaders headers, String userId) {
+    /**
+     * Sign the identity the request ACTUALLY carries, never the one the caller
+     * had in hand.
+     *
+     * <p>{@code GatewayAuthenticationFilter} recomputes the HMAC over the
+     * {@code X-User-ID} / {@code X-Organization-ID} headers it reads off the
+     * wire, so those headers are the only safe input. The {@code userId}
+     * argument is not equivalent: {@link #buildHeaders} runs
+     * {@code OrgContextHeaderForwarder.forward} first, which copies
+     * {@code X-User-ID} off the inbound servlet request whenever the caller
+     * passed none. Signing the argument would then sign an empty user while
+     * shipping an inherited one, and the filter answers 401 "Invalid gateway
+     * secret" - the exact shape that silently killed markup commits from
+     * {@code CreditConsumptionClient}. The org id was already read from the
+     * headers; the user id now is too. The method takes NO identity argument,
+     * so there is nothing left to pass that could disagree with what is sent.
+     */
+    private void applyGatewaySignature(HttpHeaders headers) {
         if (gatewaySecretKey == null || gatewaySecretKey.isBlank()) {
             return;
         }
@@ -1157,7 +1174,7 @@ public class CredentialClient {
         headers.set("X-Gateway-Timestamp", timestamp);
         headers.set("X-Gateway-Secret", computeGatewaySignature(
                 INTERNAL_PROVIDER_ID,
-                userId,
+                headers.getFirst("X-User-ID"),
                 headers.getFirst("X-Organization-ID"),
                 timestamp));
     }

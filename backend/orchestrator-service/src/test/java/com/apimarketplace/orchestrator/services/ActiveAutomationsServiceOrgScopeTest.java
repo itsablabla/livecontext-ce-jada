@@ -4,6 +4,7 @@ import com.apimarketplace.agent.client.AgentClient;
 import com.apimarketplace.orchestrator.controllers.dto.ActiveAutomationDto;
 import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
+import com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService;
 import com.apimarketplace.trigger.client.TriggerClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,6 +53,7 @@ class ActiveAutomationsServiceOrgScopeTest {
     @Mock private WorkflowRunRepository runRepository;
     @Mock private TriggerClient triggerClient;
     @Mock private AgentClient agentClient;
+    @Mock private WorkflowEpochService epochService;
 
     private ActiveAutomationsService service;
 
@@ -62,7 +64,7 @@ class ActiveAutomationsServiceOrgScopeTest {
     @BeforeEach
     void setUp() {
         service = new ActiveAutomationsService(workflowRepository, runRepository,
-                triggerClient, agentClient);
+                triggerClient, agentClient, epochService);
     }
 
     @Test

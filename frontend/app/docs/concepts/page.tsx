@@ -46,7 +46,7 @@ export default function ConceptsPage() {
         <ul>
           <li><code>trigger:</code> - entry points (webhook, schedule, chat, form, manual, table)</li>
           <li><code>mcp:</code> - integration / tool operations (an API call, an HTTP request)</li>
-          <li><code>agent:</code> - AI nodes (Agent, Guardrail, Classify)</li>
+          <li><code>agent:</code> - AI nodes (Agent, Browser Agent, Guardrail, Classify, Generate)</li>
           <li><code>core:</code> - control flow and utilities (Decision, Loop, Transform, Wait...)</li>
           <li><code>table:</code> - built-in spreadsheet operations (find, create, update, delete rows)</li>
           <li><code>interface:</code> - web pages, and <code>note:</code> - canvas notes</li>

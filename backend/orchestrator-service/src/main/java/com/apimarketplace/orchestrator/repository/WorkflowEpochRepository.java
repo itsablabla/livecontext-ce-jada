@@ -4,8 +4,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -430,6 +433,97 @@ public class WorkflowEpochRepository {
         return result;
     }
 
+    /**
+     * Batch-fetch the LAST epoch header of each given run - the raw material of the "how did
+     * this automation's last fire end" badge.
+     *
+     * <p><b>Selected by {@code MAX(epoch)}.</b> {@code epoch} is a GLOBAL counter per run, not
+     * a per-DAG one: {@code TriggerEpochManager.incrementEpoch(run, triggerId)} keeps the
+     * per-trigger tally in {@code metadata.dagFireCount} and returns
+     * {@code previousGlobal + 1}, which is the value {@code openEpoch} writes here. So the
+     * highest epoch of a run IS its most recent fire, whichever trigger caused it. That also
+     * makes this indexable - by the partial {@code idx_we_header (run_id, trigger_id, epoch)
+     * WHERE entry_type = 'EPOCH_HEADER'}, which covers both the filter and the grouping key;
+     * ordering by {@code started_at}
+     * instead would sort on an unindexed column, and would additionally pick a REOPENED older
+     * epoch's original stamp (see {@link #REOPEN_HEADER_SQL}: {@code started_at} is never
+     * rewritten), which is a rerun, not a fire.
+     *
+     * <p><b>The run filter is repeated on the outer relation on purpose.</b> Postgres does not
+     * push an {@code IN (...)} list from the grouped subquery into the joined table, so leaving
+     * it out turns this into a full scan of {@code workflow_epochs} - the largest table in the
+     * schema, carrying a counter row per node per epoch per run - on an endpoint the frontend
+     * polls. Hence the bind list is passed twice.
+     *
+     * <p>Runs with no epoch header (never fired) are absent from the map: callers render no
+     * badge rather than inventing one.
+     *
+     * <p>Written as a join against a grouped subquery rather than {@code DISTINCT ON} so the
+     * H2 test repository inherits it unchanged.
+     */
+    public Map<String, LatestEpochHeaderRow> getLatestEpochHeaderByRunIds(List<String> runIds) {
+        if (runIds == null || runIds.isEmpty()) return Map.of();
+        String placeholders = runIds.stream().map(id -> "?").collect(java.util.stream.Collectors.joining(", "));
+        String sql = "SELECT e.run_id, e.epoch, e.trigger_id, e.epoch_state, e.is_active, e.started_at, e.closed_at " +
+                "FROM workflow_epochs e " +
+                "JOIN (SELECT run_id, MAX(epoch) AS latest_epoch FROM workflow_epochs " +
+                "      WHERE run_id IN (" + placeholders + ") AND entry_type = 'EPOCH_HEADER' " +
+                "      GROUP BY run_id) m " +
+                "  ON m.run_id = e.run_id AND m.latest_epoch = e.epoch " +
+                "WHERE e.run_id IN (" + placeholders + ") AND e.entry_type = 'EPOCH_HEADER'";
+        Object[] args = new Object[runIds.size() * 2];
+        for (int i = 0; i < runIds.size(); i++) {
+            args[i] = runIds.get(i);
+            args[runIds.size() + i] = runIds.get(i);
+        }
+        Map<String, LatestEpochHeaderRow> result = new java.util.HashMap<>();
+        jdbcTemplate.query(sql, rs -> {
+            String runId = rs.getString("run_id");
+            java.sql.Timestamp startedTs = rs.getTimestamp("started_at");
+            java.sql.Timestamp closedTs = rs.getTimestamp("closed_at");
+            LatestEpochHeaderRow row = new LatestEpochHeaderRow(
+                    rs.getInt("epoch"),
+                    rs.getString("trigger_id"),
+                    rs.getString("epoch_state"),
+                    rs.getBoolean("is_active"),
+                    startedTs != null ? startedTs.toInstant() : null,
+                    closedTs != null ? closedTs.toInstant() : null);
+            result.merge(runId, row, WorkflowEpochRepository::preferSettledRow);
+        }, args);
+        return result;
+    }
+
+    /**
+     * Deterministic pick when a run somehow has two headers at its highest epoch.
+     *
+     * <p>A global epoch belongs to ONE fire, so a live run produces one row per run here. The
+     * merge is for legacy data: the V2 to V3 migration left {@code "trigger:default"} rows
+     * alongside real trigger ids, and the header key includes {@code trigger_id}. Preferring
+     * the CLOSED row keeps the only header that can state an outcome, and between two closed
+     * ones the later close is the more recent word - so the answer never depends on the order
+     * the driver happens to return the rows in.
+     */
+    private static LatestEpochHeaderRow preferSettledRow(LatestEpochHeaderRow a, LatestEpochHeaderRow b) {
+        if (a.isActive() != b.isActive()) return a.isActive() ? b : a;
+        if (a.closedAt() != null && b.closedAt() != null && !a.closedAt().equals(b.closedAt())) {
+            return b.closedAt().isAfter(a.closedAt()) ? b : a;
+        }
+        if (a.closedAt() == null && b.closedAt() != null) return b;
+        if (b.closedAt() == null && a.closedAt() != null) return a;
+        // Nothing left to rank them by outcome or recency - both open, or closed at the same
+        // instant. Fall back to the trigger id, which is stable and is what the caller reads
+        // to decide whose fire this was: without it the answer would be whichever row the
+        // driver happened to hand over first.
+        return compareTriggerIds(a, b) <= 0 ? a : b;
+    }
+
+    /** Null-safe, nulls last, so the tie-break is total. */
+    private static int compareTriggerIds(LatestEpochHeaderRow a, LatestEpochHeaderRow b) {
+        if (a.triggerId() == null) return b.triggerId() == null ? 0 : 1;
+        if (b.triggerId() == null) return -1;
+        return a.triggerId().compareTo(b.triggerId());
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Delete
     // ═══════════════════════════════════════════════════════════════════════════
@@ -523,6 +617,18 @@ public class WorkflowEpochRepository {
     }
 
     /**
+     * The most recently fired epoch header of ONE run, as stored: the raw material of the
+     * last-run badge. Same "internal payload, never the wire shape" contract as
+     * {@link EpochTimelineRow} - the {@code epochStateJson} must be turned into an outcome
+     * before it leaves the backend.
+     *
+     * <p>{@code triggerId} says WHICH trigger fired this epoch, which is what lets a caller
+     * showing one row per trigger decide whether this fire is the row's own.
+     */
+    public record LatestEpochHeaderRow(int epoch, String triggerId, String epochStateJson,
+                                       boolean isActive, Instant startedAt, Instant closedAt) {}
+
+    /**
      * One epoch of the timeline, as stored: its timestamps plus the raw material of its
      * status badge ({@code isActive} + the persisted {@code EpochState} JSON).
      *
@@ -548,6 +654,97 @@ public class WorkflowEpochRepository {
             Instant closedAt,
             String triggerId,
             Long durationMs
+    ) {
+    }
+
+    /**
+     * Every trigger fire inside a window for a whole WORKSPACE, with the resource it belongs
+     * to, in one query.
+     *
+     * <p>Joins outwards from the epoch headers rather than inwards from a list of run ids,
+     * for one reason: there is no pin predicate anywhere on this path. Resolving runs through
+     * {@code findProductionRunsBatch} (which requires {@code pinned_version IS NOT NULL AND
+     * plan_version = pinned_version}) made the calendar's history vanish the moment a
+     * workflow was unpinned, and lose everything before a re-pin. A run that happened last
+     * Tuesday happened whether or not the workflow is pinned today, and whichever plan
+     * version it was on.
+     *
+     * <p>It also stops the caller loading every {@code WorkflowEntity} in the workspace,
+     * whose eager JSONB {@code plan} column is by far the most expensive thing on the page.
+     * Only the four display fields are selected.
+     *
+     * <p><b>Two things this query deliberately does NOT filter on.</b>
+     * <ul>
+     *   <li>The pin, as above.</li>
+     *   <li>{@code w.is_active}. Archiving a workflow would otherwise retroactively erase
+     *       its runs from every past month - the same "quietly rewriting history" the pin
+     *       predicate caused. What ran, ran.</li>
+     * </ul>
+     *
+     * <p>{@code limit} bounds the answer and takes the NEWEST rows ({@code ORDER BY
+     * started_at DESC}); the caller re-sorts ascending. Truncating the oldest is the only
+     * useful direction: a busy workspace asking for a month would otherwise get the first
+     * two thousand fires and an empty second half, which is exactly the part the user is
+     * looking at. A caller that receives {@code limit} rows must assume the window holds
+     * more and say so, rather than presenting a partial day as a complete one.
+     */
+    public List<WorkspaceFireRow> findWorkspaceFiresBetween(String organizationId, Instant from,
+                                                            Instant to, int limit) {
+        if (organizationId == null || organizationId.isBlank()
+                || from == null || to == null || limit < 1) {
+            return List.of();
+        }
+        String sql = "SELECT e.run_id, e.trigger_id, e.epoch, e.started_at, e.closed_at, "
+                + "e.is_active, e.epoch_state, w.id AS workflow_id, w.name AS workflow_name, "
+                + "w.workflow_type, w.source_publication_id "
+                + "FROM workflow_epochs e "
+                + "JOIN workflow_runs r ON r.run_id_public = e.run_id "
+                + "JOIN workflows w ON w.id = r.workflow_id "
+                + "WHERE e.entry_type = 'EPOCH_HEADER' "
+                + "AND e.started_at >= ? AND e.started_at <= ? "
+                + "AND w.organization_id = ? "
+                + "ORDER BY e.started_at DESC LIMIT " + limit;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new WorkspaceFireRow(
+                new EpochFireRow(
+                        rs.getString("run_id"),
+                        rs.getString("trigger_id"),
+                        rs.getInt("epoch"),
+                        rs.getTimestamp("started_at") != null ? rs.getTimestamp("started_at").toInstant() : null,
+                        rs.getTimestamp("closed_at") != null ? rs.getTimestamp("closed_at").toInstant() : null,
+                        rs.getBoolean("is_active"),
+                        rs.getString("epoch_state")),
+                (java.util.UUID) rs.getObject("workflow_id"),
+                rs.getString("workflow_name"),
+                rs.getString("workflow_type"),
+                rs.getObject("source_publication_id") != null
+                        ? rs.getObject("source_publication_id").toString() : null
+        ), Timestamp.from(from), Timestamp.from(to), organizationId);
+    }
+
+    /** A past fire plus the resource that produced it, for the agenda's history rows. */
+    public record WorkspaceFireRow(
+            EpochFireRow fire,
+            java.util.UUID workflowId,
+            String workflowName,
+            String workflowType,
+            String sourcePublicationId
+    ) {
+    }
+
+    /**
+     * One trigger fire that actually happened: an epoch header located in time.
+     * {@code epochStateJson} is left raw so the caller decides whether it needs the
+     * outcome (deserializing is not free and the calendar only needs it for closed
+     * epochs).
+     */
+    public record EpochFireRow(
+            String runId,
+            String triggerId,
+            int epoch,
+            Instant startedAt,
+            Instant closedAt,
+            boolean isActive,
+            String epochStateJson
     ) {
     }
 

@@ -10,6 +10,7 @@ import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
 import com.apimarketplace.orchestrator.services.events.SignalsCancelledEvent;
 import com.apimarketplace.orchestrator.services.events.WorkflowApprovalPendingEvent;
+import com.apimarketplace.orchestrator.services.events.WorkflowBudgetReachedEvent;
 import com.apimarketplace.orchestrator.services.events.WorkflowEpochFailedEvent;
 import com.apimarketplace.orchestrator.services.events.WorkflowRunTerminatedEvent;
 import com.apimarketplace.orchestrator.services.streaming.redis.WorkflowRedisPublisher;
@@ -91,7 +92,14 @@ public class NotificationEmitter {
 
     private static final String CATEGORY_RUN_FAILED = "RUN_FAILED";
     private static final String CATEGORY_APPROVAL_PENDING = "APPROVAL_PENDING";
+    /**
+     * A workflow's spending cap stopped it from firing. Deliberately a WARNING,
+     * not an error: nothing broke, the automation did exactly what it was told,
+     * but a production workflow has stopped and the owner has to know.
+     */
+    private static final String CATEGORY_BUDGET_REACHED = "BUDGET_REACHED";
     private static final String SEVERITY_ERROR = "error";
+    private static final String SEVERITY_WARNING = "warning";
     private static final String SEVERITY_INFO = "info";
     /** Single source of truth shared with {@link SubjectNameResolver#WORKFLOW}. */
     private static final String SUBJECT_TYPE_WORKFLOW = SubjectNameResolver.WORKFLOW;
@@ -434,6 +442,110 @@ public class NotificationEmitter {
                     "type", ex.getClass().getSimpleName()).increment();
             logger.warn("[notification-emitter] swallowed approval-pending for signal {}: {}",
                     event.signalWaitId(), ex.getMessage());
+        }
+    }
+
+    /**
+     * One durable notification when a workflow's spending cap refuses a fire.
+     *
+     * <p>The websocket toast that already exists only reaches whoever has that
+     * run open, which is nobody at 3am - and an unattended nightly workflow is
+     * exactly the case the cap protects. Dedup is structural: {@code source_id}
+     * is the workflow plus the period, so the unique
+     * {@code (tenant_id, category, source_id)} index collapses every refused
+     * fire of the period into a single row, across replicas.
+     *
+     * <p><b>{@code fallbackExecution = true} is load-bearing here, unlike on the
+     * other listeners in this class.</b> They are published from inside a
+     * {@code @Transactional} method, so AFTER_COMMIT always has a transaction to
+     * hang off. This event is not: the trigger gate that refuses a fire lives in
+     * {@code ReusableTriggerService.executeTriggerInternal}, which carries no
+     * transaction, and a plain AFTER_COMMIT listener DROPS an event published
+     * with no transaction bound - silently, with no log line. Without the
+     * fallback the whole durable-notification path would be dead code that every
+     * test still passes. When a transaction IS active (the crossing detected in
+     * {@code RunCostService}) the phase is honoured exactly as before, so the
+     * insert still happens only once the spend it reports has committed.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void onBudgetReached(WorkflowBudgetReachedEvent event) {
+        try {
+            handleBudgetReached(event);
+        } catch (DataAccessException | PersistenceException ex) {
+            meterRegistry.counter("notification.emitter.errors",
+                    "type", ex.getClass().getSimpleName()).increment();
+            logger.warn("[notification-emitter] swallowed budget-reached for workflow {}: {}",
+                    event.workflowId(), ex.getMessage());
+        }
+    }
+
+    private void handleBudgetReached(WorkflowBudgetReachedEvent event) {
+        if (event == null || event.workflowId() == null || event.runIdPublic() == null) return;
+
+        WorkflowRunEntity run = workflowRunRepository.findByRunIdPublic(event.runIdPublic()).orElse(null);
+        if (run == null) return;
+        String tenantId = run.getTenantId();
+        if (tenantId == null) return;
+
+        Optional<WorkflowEntity> wfOpt = workflowRepository.findById(event.workflowId());
+        if (wfOpt.isEmpty()) return;
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        // `status` is NOT decoration: orchestrator.notifications carries
+        // chk_notif_payload_v1 CHECK (payload ? 'status') (V172, relaxed to this
+        // single key by V174). Omitting it makes every INSERT raise 23514, which
+        // this listener's own catch swallows into a WARN - so the notification
+        // would never exist and nothing would ever say so. Every producer in
+        // this class writes it; keep it first so the requirement is visible.
+        payload.put("status", "blocked");
+        payload.put("spentCredits", event.spentCredits());
+        payload.put("capCredits", event.capCredits());
+        payload.put("periodMode", event.periodMode());
+        payload.put("runIdPublic", run.getRunIdPublic());
+
+        String payloadJson;
+        try {
+            payloadJson = toJson(payload);
+        } catch (RuntimeException ex) {
+            meterRegistry.counter("notification.emitter.errors",
+                    "type", "JsonSerialization").increment();
+            return;
+        }
+
+        Instant occurredAt = event.occurredAt() != null ? event.occurredAt() : Instant.now();
+
+        @SuppressWarnings("unchecked")
+        List<Object> inserted = entityManager.createNativeQuery(
+                "INSERT INTO orchestrator.notifications " +
+                        "(tenant_id, organization_id, category, severity, subject_type, subject_id, " +
+                        " source_id, run_id, run_id_public, plan_version, payload, occurred_at) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?) " +
+                        "ON CONFLICT (tenant_id, category, source_id) DO NOTHING RETURNING id"
+        )
+                .setParameter(1, tenantId)
+                .setParameter(2, run.getOrgId())
+                .setParameter(3, CATEGORY_BUDGET_REACHED)
+                .setParameter(4, SEVERITY_WARNING)
+                .setParameter(5, SUBJECT_TYPE_WORKFLOW)
+                .setParameter(6, event.workflowId())
+                .setParameter(7, event.sourceId())
+                .setParameter(8, run.getId())
+                .setParameter(9, run.getRunIdPublic())
+                .setParameter(10, run.getPlanVersion())
+                .setParameter(11, payloadJson)
+                .setParameter(12, occurredAt)
+                .getResultList();
+
+        if (inserted.isEmpty()) return;
+
+        try {
+            Map<String, Object> wsPayload = Map.of("category", CATEGORY_BUDGET_REACHED, "severity", SEVERITY_WARNING);
+            redisPublisher.publishNotification(tenantId, "notification.created", wsPayload);
+            redisPublisher.publishOrgNotification(run.getOrgId(), "notification.created", wsPayload);
+        } catch (RedisConnectionFailureException ex) {
+            meterRegistry.counter("notification.emitter.errors",
+                    "type", "RedisPublish").increment();
         }
     }
 

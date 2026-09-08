@@ -15,8 +15,10 @@ import java.time.Instant;
  *
  * <p>The mapping is intentionally free: any billed pair may target any execution
  * provider/model. A {@link #scope} narrows the link to a single app surface (e.g.
- * only general chat, or only workflow agent nodes), with {@link ModelExecutionLinkScope#ALL}
- * the wildcard default. Resolution is centralised in {@code ModelExecutionLinkService};
+ * only general chat, or only workflow nodes - which covers the agent, classify and
+ * guardrail nodes alike), with {@link ModelExecutionLinkScope#ALL} the wildcard
+ * default; the wildcard also routes delegated sub-agents, whose surface matches no
+ * scope. Resolution is centralised in {@code ModelExecutionLinkService};
  * the feature is gated behind {@code model-catalog.execution-links.enabled} (cloud
  * only).
  *

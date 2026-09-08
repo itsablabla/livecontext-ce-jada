@@ -472,7 +472,7 @@ export function FormTriggerParametersForm({
   }, [(data as any).formTriggerData]);
 
   const [isInfoOpen, setIsInfoOpen] = React.useState(false);
-  const { buttonRef: infoButtonRef, popoverPosition } = usePopoverPosition(isInfoOpen, 300);
+  const { buttonRef: infoButtonRef, popoverStyle } = usePopoverPosition(isInfoOpen, 320);
 
   // Update handler for form trigger data
   const handleUpdate = React.useCallback((updates: Partial<FormTriggerData>) => {
@@ -586,8 +586,8 @@ export function FormTriggerParametersForm({
                 onClick={() => setIsInfoOpen(false)}
               />
               <div
-                className="fixed z-[9999] w-80 p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-lg"
-                style={{ top: popoverPosition.top, left: popoverPosition.left }}
+                className="fixed z-[9999] p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-lg"
+                style={popoverStyle}
               >
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <span className="font-medium text-sm text-slate-700 dark:text-slate-200">

@@ -158,7 +158,7 @@ export default function FilesPage() {
           fetches each file with your auth header behind the scenes and hands the iframe an in-memory URL.
           Your session token never appears in the interface&apos;s HTML.
         </p>
-        <CodeBlock language="html">{`<!-- variable_mapping: { "photo": "{{core:generate.output.file}}" } -->
+        <CodeBlock language="html">{`<!-- variable_mapping: { "photo": "{{agent:generate.output.file}}" } -->
 <img src="{{photo}}" alt="Generated" />`}</CodeBlock>
         <p>A download link needs both the file and its name mapped separately:</p>
         <CodeBlock language="text">{`variable_mapping:
@@ -187,7 +187,7 @@ export default function FilesPage() {
           the bytes for you and uploads them as a multipart file part.
         </p>
         <CodeBlock language="text">{`Telegram "Send Photo":
-  photo = {{core:generate.output.file}}`}</CodeBlock>
+  photo = {{agent:generate.output.file}}`}</CodeBlock>
         <p>
           Under the hood, each multipart field is one of three modes: <code>fileRef</code> (always
           uploads bytes from a FileRef), <code>param</code> (always sends the raw value as text), or{' '}

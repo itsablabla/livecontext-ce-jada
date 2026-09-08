@@ -1,10 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-  <defs>
-    <linearGradient id="heygen-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#6366F1"/>
-      <stop offset="100%" style="stop-color:#8B5CF6"/>
-    </linearGradient>
-  </defs>
-  <rect fill="url(#heygen-grad)" x="2" y="2" width="20" height="20" rx="4"/>
-  <path fill="#FFFFFF" d="M7 8h2v8H7V8zm4 0h2v3h2V8h2v8h-2v-3h-2v3h-2V8z"/>
-</svg>
+<svg width="33" height="32" viewBox="0 0 33 32" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill="#000" d="M.753 0h32v32h-32z"/><path d="M8.885 17.9c7.376 3.79 14.242-6.406 15.533-4.183C25.459 16.983 22.813 21.123 13.31 25c-1.215.828-3.601.218-4.642-1.742-.391-2.832-1.465-6.224.216-5.36z" fill="#fff" fill-opacity=".75"/><path d="M20.947 9.01c0 5.752-11.541 7.103-12.279 14.249C4.547 12.889 15.61 9.839 16.782 4c1.822 1.656 4.165 2.963 4.165 5.01zm-8.374 17.124c2.994 5.229 17.615-1.046 11.845-12.418-3.254 9.891-13.797 7.887-11.845 12.418z" fill="#fff"/></svg>

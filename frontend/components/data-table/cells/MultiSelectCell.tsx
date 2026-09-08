@@ -138,10 +138,10 @@ export function MultiSelectCell({ value, rowKey, field, displayConfig, onSaveAnd
                   <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
                     <div className={`flex h-4 w-4 items-center justify-center rounded border-2 transition-all ${
                       isSelected
-                        ? 'bg-black border-black dark:bg-white dark:border-white'
+                        ? 'bg-[var(--accent-primary)] border-[var(--accent-primary)]'
                         : 'border-slate-300 dark:border-slate-600'
                     }`}>
-                      {isSelected && <Check className="h-3 w-3 text-white dark:text-black" />}
+                      {isSelected && <Check className="h-3 w-3 text-[var(--accent-foreground)]" />}
                     </div>
                   </span>
 

@@ -84,7 +84,7 @@ class WorkflowPublicationControllerPendingReviewConflictTest {
     void publishWorkflowPendingReviewReturnsConflict() {
         when(publicationService.publishWorkflow(
                 any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), anyBoolean(), any()))
+                any(), any(), any(), any(), anyBoolean(), any(), any()))
                 .thenThrow(new PublicationPendingReviewException(PUBLISH_PENDING));
 
         WorkflowPublicationController.PublishWorkflowRequest request =
@@ -194,7 +194,7 @@ class WorkflowPublicationControllerPendingReviewConflictTest {
         // 5xx so the frontend retries - the 409 mapping is for conflicts only.
         when(publicationService.publishWorkflow(
                 any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), anyBoolean(), any()))
+                any(), any(), any(), any(), anyBoolean(), any(), any()))
                 .thenThrow(new IllegalStateException("Showcase snapshot capture failed"));
 
         WorkflowPublicationController.PublishWorkflowRequest request =

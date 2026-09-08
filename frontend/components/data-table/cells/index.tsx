@@ -17,6 +17,7 @@ import { EmailCell } from './EmailCell';
 import { PhoneCell } from './PhoneCell';
 import { UrlCell } from './UrlCell';
 import { NumberCell } from './NumberCell';
+import { VectorCell } from './VectorCell';
 
 export type { VisualCellProps } from './types';
 
@@ -114,6 +115,18 @@ export function renderVisualCellContent(opts: RenderVisualCellOptions): { conten
 
     case 'number':
       return { content: <NumberCell {...props} />, editable: true };
+
+    /**
+     * An embedding is not a value a person edits. The numbers live in a dedicated vector table, and
+     * the items endpoint merges the whole embedding back into the row as TEXT, so `value` here is a
+     * long "[-0.009573,...]" string with nothing to show a reader. Falling through to `default`
+     * handed it to the generic editable-text path, which rendered a box a click could turn into a
+     * text input over an embedding column. Harmless while vector columns were self-hosted-only and
+     * rare; not something to hand to every cloud workspace on a paid plan. Read-only, and it says
+     * what it is.
+     */
+    case 'vector':
+      return { content: <VectorCell {...props} />, editable: false };
 
     default:
       return null;

@@ -61,6 +61,14 @@ public class ClassifyService {
     private final ObjectMapper objectMapper;
     private final BridgeLoopDispatcher bridgeDispatcher;
     private final com.apimarketplace.agent.service.ModelCatalogService modelCatalogService;
+    private final ExecutionLinkRouter executionLinkRouter;
+
+    /**
+     * Activity source reported for link resolution. Classify requests are produced by
+     * one caller only, the workflow classify node, so a {@code WORKFLOW}-scoped link
+     * targets them exactly; an {@code ALL} link applies as it does everywhere else.
+     */
+    static final String ACTIVITY_SOURCE = "WORKFLOW";
 
     /**
      * Back-compat overload - async paths (queue worker) call without an inbound
@@ -82,13 +90,26 @@ public class ClassifyService {
         String userPrompt = buildPrompt(request);
 
         try {
+            // The budget guard prices the BILLED pair: a link changes where the run
+            // executes, never what the user is charged.
             PreIterationGuard guard = guardChainFactory.forAgent(
                 request.tenantId(), request.agentEntityId(),
                 providerName, request.model());
 
+            // Model execution link: the billed pair may have to run on another target
+            // (a CLI bridge, or another API provider). Without this the node would call
+            // the billed provider's own API key, i.e. exactly the key an admin linked
+            // away from - the failure shape being an upstream billing error on a key
+            // the platform deliberately stopped using.
+            var route = executionLinkRouter.runnableRoute(providerName, request.model(), ACTIVITY_SOURCE);
+            String execProvider = route != null ? route.executionProvider() : providerName;
+            String execModel = route != null ? route.executionModel() : request.model();
+
+            boolean useBridge = bridgeDispatcher.shouldDispatch(execProvider);
+
             AgentLoopContext context = AgentLoopContext.builder()
-                .provider(providerName)
-                .model(request.model())
+                .provider(execProvider)
+                .model(execModel)
                 .systemPrompt(SYSTEM_PROMPT)
                 .userPrompt(userPrompt)
                 .tools(null)
@@ -100,20 +121,37 @@ public class ClassifyService {
                 .userRoles(userRoles)
                 .agentId(request.agentEntityId())
                 .preIterationGuard(guard)
+                // EVERY bridge run of this node enters restricted "API mode", linked or
+                // not: an empty cwd and none of the CLI's native tools. A single-shot
+                // judge that must answer with one JSON object has no use for a source
+                // checkout, and without the marker the CLI keeps the repo cwd plus the
+                // repo/shell MCP tools, which run arbitrary commands in that checkout.
+                // On the direct-API path this node has no tools at all, so restricting is
+                // what makes the two transports agree.
+                .credentials(useBridge
+                    ? Map.of(ExecutionLinkRouter.RESTRICTED_TOOLSET_KEY, (Object) Boolean.TRUE)
+                    : null)
                 .purpose(CallPurpose.CLASSIFY)
                 .build();
 
-            boolean useBridge = bridgeDispatcher.shouldDispatch(providerName);
-            log.info("Executing classify via {}: provider={}, model={}, categories={}",
+            log.info("Executing classify via {}: billed={}/{}, exec={}/{}, linked={}, categories={}",
                 useBridge ? "bridge" : "agent loop",
-                providerName, context.model(),
+                providerName, request.model(), execProvider, execModel, route != null,
                 request.categories() != null ? request.categories().size() : 0);
 
             AgentLoopResult result = useBridge
                 ? bridgeDispatcher.execute(context)
                 : agentLoopService.execute(context, null);
 
+            // Re-stamp the BILLED model ONLY when a link moved the run, mirroring the
+            // agent path (which relabels solely on a link). Do not read this as cosmetic:
+            // the node output shows it, and on the ASYNC completion path the orchestrator
+            // takes the ledger's provider/model from the RESULT first, falling back to the
+            // node config - so without the re-stamp a linked run would be charged as the
+            // execution target. An UNLINKED bridge run keeps reporting the model id the CLI
+            // returned, exactly as before.
             return parseResponse(result, System.currentTimeMillis() - startTime, providerName,
+                route != null ? request.model() : null,
                 SYSTEM_PROMPT, userPrompt, result.conversationHistory());
 
         } catch (BridgeAccessDeniedException e) {
@@ -153,7 +191,15 @@ public class ClassifyService {
         return sb.toString();
     }
 
+    /**
+     * @param provider    the BILLED provider (never the execution target of a link)
+     * @param billedModel the BILLED model, set ONLY when a model execution link moved the
+     *                    run elsewhere: the run then reports and is charged as this model
+     *                    rather than the execution target. {@code null} on an unlinked run,
+     *                    which keeps the identity the loop reported.
+     */
     private ClassifyResponseDto parseResponse(AgentLoopResult result, long duration, String provider,
+                                                String billedModel,
                                                 String systemPrompt, String userPrompt,
                                                 List<Message> conversationHistory) {
         String content = result.content();
@@ -161,7 +207,7 @@ public class ClassifyService {
         int tokensUsed = usage != null ? usage.getTotal() : 0;
         int promptTokens = usage != null && usage.promptTokens() != null ? usage.promptTokens() : 0;
         int completionTokens = usage != null && usage.completionTokens() != null ? usage.completionTokens() : 0;
-        String model = result.model();
+        String model = billedModel != null ? billedModel : result.model();
         List<ConversationMessageDto> messages = toConversationMessages(conversationHistory);
 
         if (!result.success()) {

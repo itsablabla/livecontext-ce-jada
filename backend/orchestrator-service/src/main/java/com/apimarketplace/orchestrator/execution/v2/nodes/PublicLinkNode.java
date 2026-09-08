@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator.execution.v2.nodes;
 
+import com.apimarketplace.orchestrator.domain.file.FileRef;
 import com.apimarketplace.orchestrator.execution.v2.engine.ExecutionContext;
 import com.apimarketplace.orchestrator.execution.v2.engine.ServiceRegistry;
 import com.apimarketplace.orchestrator.services.file.PublicLinkService;
@@ -57,8 +58,12 @@ public class PublicLinkNode extends BaseNode {
         int effectiveTtl = PublicLinkService.clampTtlMinutes(ttlMinutes);
         String effectiveDisposition = "attachment".equalsIgnoreCase(disposition) ? "attachment" : "inline";
 
+        // `file`, the name the plan uses (stepProcessor writes params.file /
+        // params.ttl_minutes / params.disposition). `file_expression` was a fourth
+        // name for it: the label registry already declared `file`, so the Params
+        // column had a label ready for a key the node never sent.
         Map<String, Object> resolvedParams = new LinkedHashMap<>();
-        resolvedParams.put("file_expression", fileExpression);
+        resolvedParams.put("file", fileExpression);
         resolvedParams.put("ttl_minutes", effectiveTtl);
         resolvedParams.put("disposition", effectiveDisposition);
 
@@ -81,7 +86,9 @@ public class PublicLinkNode extends BaseNode {
             }
             String storageKey = String.valueOf(fileRef.get("path"));
             if (storageKey == null || storageKey.isBlank() || "null".equals(storageKey)) {
-                return failure(context, resolvedParams, startTime, "resolved file reference has no storage path");
+                return failure(context, resolvedParams, startTime,
+                    "The resolved file reference " + com.apimarketplace.orchestrator.domain.file
+                        .FileRefMessages.NO_STORAGE_PATH);
             }
 
             // Defense-in-depth: S3/MinIO keys are opaque (no ".." resolution today), but the
@@ -150,10 +157,20 @@ public class PublicLinkNode extends BaseNode {
         }
     }
 
-    /** Accept a FileRef-shaped map ({_type:'file'} or at least a 'path' key). */
+    /**
+     * Accept a FileRef-shaped map: the discriminator, or at least a 'path'.
+     *
+     * <p>The discriminator alone has to be enough. A table media cell resolves to the canonical
+     * asset, which carries {@code _type} and an id but only sometimes a path, and demanding a path
+     * HERE made that case fail with "map the WHOLE FileRef output" - telling the agent to fix a
+     * mapping that was already correct, instead of the missing-path message that names the real
+     * problem. Recognise the shape here; judge the path below, where the message can be accurate.
+     */
     @SuppressWarnings("unchecked")
     private static Map<String, Object> asFileRefMap(Object resolved) {
-        if (resolved instanceof Map<?, ?> map && map.get("path") instanceof String) {
+        if (resolved instanceof Map<?, ?> map
+                && (map.get("path") instanceof String
+                    || (FileRef.TYPE_FILE.equals(map.get("_type")) && map.get("path") == null))) {
             return (Map<String, Object>) map;
         }
         return null;

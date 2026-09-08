@@ -28,7 +28,7 @@ export default function GettingStartedPage() {
           place: your chat.
         </p>
 
-        <h3>Cloud: email code, profile, then a welcome gift</h3>
+        <h3>Cloud: email code, profile, then your first message</h3>
         <p>
           On LiveContext Cloud, onboarding is a short sequence. A step 0 only appears if your
           email isn&apos;t verified yet:
@@ -44,10 +44,13 @@ export default function GettingStartedPage() {
               '1. Profile',
               'Display name, role, and company/team size.',
             ],
-            ['2. Interests', 'What you’re interested in using LiveContext for.'],
             [
-              '3. Goals',
-              'Your intended use cases and experience level.',
+              '2. First goal',
+              'The one thing you want to automate first, and the tools you already work with.',
+            ],
+            [
+              '3. Context',
+              'What you automate with today, and how you heard about LiveContext.',
             ],
           ]}
         />
@@ -71,15 +74,21 @@ export default function GettingStartedPage() {
           ]}
         />
 
-        <h4>Welcome gift and suggested apps (cloud only)</h4>
+        <h4>A first message, written for you</h4>
         <p>
-          Finishing or skipping onboarding on Cloud triggers two modals in sequence. First, a{' '}
-          <strong>welcome gift</strong>: the free plan starts every account with an initial credit
-          balance, and the modal shows your current, live balance (not a fixed number), with the
-          note that it renews every month for free. Then, once the gift modal is dismissed, a{' '}
-          <strong>suggested apps</strong> modal offers up to four marketplace apps chosen from the
-          interests, use cases, and profession you gave during onboarding. Neither modal appears
-          on a self-hosted (CE) install.
+          When you finish onboarding, the chat you land on is not an empty box: the composer is
+          already filled with a starter request built from the goal you picked, naming the tools
+          you said you work with. It is a <strong>proposal</strong>, so nothing is sent until you
+          press send, and you can rewrite it or clear it first. If your answers were too general
+          to write anything useful, or you skipped the questions, the composer is simply left
+          empty rather than filled with something generic.
+        </p>
+        <p>
+          A <strong>suggested apps</strong> modal opens over that screen shortly after, offering up
+          to four marketplace apps chosen from the goal and role you gave during onboarding.
+          Dismiss it and the proposed message is still waiting in the composer underneath. Unlike
+          the proposed message, this modal also appears when you skip the questions. It does not
+          appear on a self-hosted (CE) install.
         </p>
 
         <h3>Self-hosted (CE): the admin setup wizard</h3>

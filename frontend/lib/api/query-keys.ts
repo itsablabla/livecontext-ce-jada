@@ -30,6 +30,8 @@ export const queryKeys = {
   // Billing - PAYG one-time top-up surface (V250)
   billing: {
     paygTiers: () => ['billing', 'payg-tiers'],
+    /** Multiplier + cost profiles behind the model pickers' credit estimate. */
+    estimateBasis: () => ['billing', 'estimate-basis'],
   },
 
   // Agent execution metrics

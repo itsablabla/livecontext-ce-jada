@@ -1,5 +1,6 @@
 'use client';
 
+import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useOrgScopedQuery } from '@/lib/hooks/useOrgScopedQuery';
 import { useAuth } from '@/lib/providers/smart-providers';
@@ -14,6 +15,18 @@ import {
 import type { ActiveAutomation } from '@/lib/api/orchestrator/dashboard.service';
 
 const QUERY_KEY = ['home-status'] as const;
+
+/**
+ * The key the home-status cache actually answers to.
+ *
+ * <p>`useOrgScopedQuery` prefixes every key with the active workspace, so a plain
+ * `['home-status']` matches no cached query: it invalidates nothing, throws nothing, and
+ * leaves the surface frozen. Three call sites in this file need that prefix and it is built
+ * here once, because the failure mode of them drifting is silence.
+ */
+function homeStatusKeyFor(orgKeySegment: string) {
+  return ['org', orgKeySegment, ...QUERY_KEY] as const;
+}
 /**
  * Query-key prefix for {@code useNotificationsPaged} - defined here too so the
  * mark-all-read mutation can flip the {@code unread} flag in every paged cache
@@ -70,7 +83,7 @@ export function useHomeStatus(): UseHomeStatusResult {
   // all miss the cache and the optimistic update for markAllRead is silently
   // skipped (UI keeps the blue-bg unread rows until the next refetch).
   const orgKeySegment = useCurrentOrgStore((s) => s.currentOrgId) ?? '__personal__';
-  const effectiveHomeKey = ['org', orgKeySegment, ...QUERY_KEY] as const;
+  const effectiveHomeKey = homeStatusKeyFor(orgKeySegment);
   const effectivePagedKeyBase = ['org', orgKeySegment, ...PAGED_QUERY_KEY_BASE] as const;
 
   // Phase 4 (2026-05-18) - org-scoped: home status (Activity tab + bell
@@ -178,4 +191,24 @@ export function useHomeStatus(): UseHomeStatusResult {
     error: query.error,
     markAllRead: () => markMutation.mutateAsync(),
   };
+}
+
+/**
+ * Ask for the bell's automation rows again, now.
+ *
+ * <p>The list polls on a 60 second interval, which is right for a passive countdown and
+ * wrong immediately after the user has just CHANGED one: acting on a row from its own menu
+ * and watching the fire time sit unmoved for up to a minute reads as "the action did
+ * nothing", which is exactly how the run-instead defect was reported.
+ *
+ * <p>Exported from here rather than rebuilt at the call site because the key is
+ * org-scoped: {@code useOrgScopedQuery} prefixes it with the active workspace, and a
+ * hand-written {@code ['home-status']} would invalidate nothing while looking correct.
+ */
+export function useRefreshHomeStatus(): () => void {
+  const queryClient = useQueryClient();
+  const orgKeySegment = useCurrentOrgStore((s) => s.currentOrgId) ?? '__personal__';
+  return useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: homeStatusKeyFor(orgKeySegment) });
+  }, [queryClient, orgKeySegment]);
 }

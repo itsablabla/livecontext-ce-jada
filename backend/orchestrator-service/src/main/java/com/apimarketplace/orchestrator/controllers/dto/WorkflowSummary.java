@@ -43,11 +43,34 @@ public record WorkflowSummary(
     boolean hasActiveRun,
     String boardColumn,
     /**
-     * Optional cost budget in credits (1 credit = $0.001), or null when none is
-     * set. Edited in the workflow settings "Advanced" section. The frontend
-     * renders it as dollars in CE and raw credits in cloud.
+     * Optional spending cap in credits (1 credit = $0.001), or null when none is
+     * set (the default: leave it empty and nothing is capped, exactly like an
+     * agent's budget). Applies to the agent spend of every run except a
+     * builder test fire, in one
+     * {@code budgetPeriodMode} period. The frontend renders it as dollars in CE
+     * and raw credits in cloud.
      */
     java.math.BigDecimal budgetCredits,
+    /** How the cap resets: {@code monthly} (default), {@code weekly}, {@code cumulative}. */
+    String budgetPeriodMode,
+    /**
+     * What the governed runs have spent in the period open RIGHT NOW, already
+     * rolled over server-side: a stored figure from an expired period reads as
+     * zero here, so the card never shows last month's spend against this
+     * month's cap. Always present (0 when nothing was spent), even when there
+     * is no cap, so the list can show the running cost either way.
+     */
+    java.math.BigDecimal budgetPeriodSpent,
+    /**
+     * When the open period rolls over and the allowance starts again, or
+     * {@code null} for a cap that never resets.
+     *
+     * <p>Computed server-side from the same rule the counter resets on. The
+     * client could derive it from the cadence alone, and that is exactly why it
+     * is sent instead: a second implementation of the calendar rule would agree
+     * until one of them was edited.
+     */
+    java.time.Instant budgetPeriodResetsAt,
     /**
      * Folder this workflow is filed under on the list page (V448), or {@code null} when it
      * sits at the top level. Lets the list show where a row lives without a second call -

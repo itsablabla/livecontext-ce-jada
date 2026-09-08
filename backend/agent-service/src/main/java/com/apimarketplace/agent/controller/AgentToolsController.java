@@ -109,7 +109,8 @@ public class AgentToolsController {
                 "agentAccessMode",
                 "applicationAccessMode",
                 "skillAccessMode",
-                "fileAccessMode")) {
+                "fileAccessMode",
+                "memoryAccessMode")) {
             if (request.get(accessModeKey) != null) {
                 credentials.put(accessModeKey, request.get(accessModeKey));
             }

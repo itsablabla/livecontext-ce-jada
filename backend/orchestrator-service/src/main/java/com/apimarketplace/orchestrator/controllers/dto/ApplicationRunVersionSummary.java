@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator.controllers.dto;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
@@ -19,5 +20,26 @@ import java.time.Instant;
 public record ApplicationRunVersionSummary(
         String applicationRunId,
         Instant lastExecutedAt,
-        Integer pinnedVersion
+        Integer pinnedVersion,
+        /** Spending cap in credits, or null when the app is uncapped (the default). */
+        BigDecimal budgetCredits,
+        /** How the cap resets: monthly | weekly | cumulative. */
+        String budgetPeriodMode,
+        /**
+         * Spent by the governed runs in the period open right now, already rolled
+         * over server-side, so a card never shows last period's spend against
+         * this period's cap. Present even without a cap: an app that costs
+         * something should say so whether or not it is capped.
+         */
+        BigDecimal budgetPeriodSpent,
+        /**
+         * When the open period rolls over and the allowance starts again, or
+         * {@code null} for a cap that never resets.
+         *
+         * <p>Computed server-side from the same rule the counter resets on. The
+         * client could derive it from the cadence alone, and that is exactly why it
+         * is sent instead: a second implementation of the calendar rule would agree
+         * until one of them was edited.
+         */
+        java.time.Instant budgetPeriodResetsAt
 ) {}

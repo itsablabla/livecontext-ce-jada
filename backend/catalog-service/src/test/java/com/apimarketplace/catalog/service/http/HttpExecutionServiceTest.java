@@ -5,6 +5,7 @@ import com.apimarketplace.catalog.domain.ApiToolEntity;
 import com.apimarketplace.catalog.domain.ApiToolParameterEntity;
 import com.apimarketplace.catalog.repository.ApiToolParameterRepository;
 import com.apimarketplace.catalog.service.UserCredentialService;
+import com.apimarketplace.catalog.service.execution.FileAttachmentException;
 import com.apimarketplace.common.security.CredentialEncryptionService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -75,7 +76,7 @@ class HttpExecutionServiceTest {
             objectMapper,
             jdbcTemplate,
             restTemplate
-        );
+        , new ErrorPolicyEngine(2, 10_000L));
     }
 
     // ========================================================================
@@ -1689,6 +1690,34 @@ class HttpExecutionServiceTest {
             assertEquals(input, service.convertToExpectedType(input, "array"));
         }
 
+        @Test
+        @DisplayName("dataType=array + a single JSON OBJECT written as a string → one-element list, not CSV fragments")
+        void arrayDataTypeParsesSingleJsonObjectString() {
+            // A FileRef that went through a core:transform arrives stringified. The
+            // CSV fallback below splits it on the commas between its OWN fields, so
+            // an attachment reached the provider as ["{\"_type\":\"file\"", ...].
+            Object result = service.convertToExpectedType(
+                "{\"_type\":\"file\",\"path\":\"t/report.pdf\",\"name\":\"report.pdf\"}", "array");
+
+            assertTrue(result instanceof List, "Expected List, got: " + result);
+            @SuppressWarnings("unchecked")
+            List<Object> list = (List<Object>) result;
+            assertEquals(1, list.size(), "an object is ONE element, never one per comma");
+            assertTrue(list.get(0) instanceof Map, "the element must be the object, not a fragment");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> fileRef = (Map<String, Object>) list.get(0);
+            assertEquals("t/report.pdf", fileRef.get("path"));
+            assertEquals("report.pdf", fileRef.get("name"));
+        }
+
+        @Test
+        @DisplayName("dataType=array + a brace-wrapped string that is NOT JSON still falls through to the CSV split")
+        void arrayDataTypeKeepsCsvFallbackForNonJsonBraces() {
+            Object result = service.convertToExpectedType("{not,json}", "array");
+
+            assertEquals(List.of("{not", "json}"), result);
+        }
+
         /** JSON-array string `[a,b]` is parsed into a list. Pre-existing behavior. */
         @Test
         @DisplayName("dataType=array + JSON-array string '[\"a\",\"b\"]' → parsed list")
@@ -1962,6 +1991,12 @@ class HttpExecutionServiceTest {
     @DisplayName("buildRfc2822Body()")
     class BuildRfc2822BodyTests {
 
+        /** The MIME text Gmail would receive, decoded back out of the base64url {@code raw}. */
+        private String decodeRaw(Map<String, Object> result) {
+            return new String(Base64.getUrlDecoder().decode((String) result.get("raw")),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        }
+
         @Test
         @DisplayName("should build RFC 2822 message body")
         void shouldBuildRfc2822MessageBody() {
@@ -1970,11 +2005,13 @@ class HttpExecutionServiceTest {
             params.put("subject", "Test Subject");
             params.put("body", "Test body content");
 
-            Map<String, String> result = service.buildRfc2822Body(params);
+            Map<String, Object> result = service.buildRfc2822Body(params);
 
-            assertNotNull(result);
-            assertTrue(result.containsKey("raw"));
-            assertFalse(result.get("raw").isEmpty());
+            String mime = decodeRaw(result);
+            assertTrue(mime.contains("To: recipient@test.com\r\n"));
+            assertTrue(mime.contains("Subject: Test Subject\r\n"));
+            assertTrue(mime.contains("Content-Type: text/plain; charset=utf-8\r\n"));
+            assertTrue(mime.endsWith("Test body content"));
         }
 
         @Test
@@ -1984,13 +2021,15 @@ class HttpExecutionServiceTest {
             params.put("to", "recipient@test.com");
             params.put("cc", "cc@test.com");
             params.put("bcc", "bcc@test.com");
+            params.put("replyTo", "reply@test.com");
             params.put("subject", "Test");
             params.put("body", "Content");
 
-            Map<String, String> result = service.buildRfc2822Body(params);
+            String mime = decodeRaw(service.buildRfc2822Body(params));
 
-            // The raw field should be Base64 encoded, so we can't easily verify headers
-            assertNotNull(result.get("raw"));
+            assertTrue(mime.contains("Cc: cc@test.com\r\n"));
+            assertTrue(mime.contains("Bcc: bcc@test.com\r\n"));
+            assertTrue(mime.contains("Reply-To: reply@test.com\r\n"));
         }
 
         @Test
@@ -2002,9 +2041,545 @@ class HttpExecutionServiceTest {
             params.put("body", "<h1>Hello</h1>");
             params.put("isHtml", "true");
 
-            Map<String, String> result = service.buildRfc2822Body(params);
+            String mime = decodeRaw(service.buildRfc2822Body(params));
 
-            assertNotNull(result.get("raw"));
+            assertTrue(mime.contains("Content-Type: text/html; charset=utf-8\r\n"));
+            assertFalse(mime.contains("text/plain"));
+        }
+
+        @Test
+        @DisplayName("should carry threadId so a reply joins the conversation instead of starting one")
+        void shouldCarryThreadId() {
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("subject", "Re: Test");
+            params.put("body", "Content");
+            params.put("threadId", "thread-abc");
+
+            Map<String, Object> result = service.buildRfc2822Body(params);
+
+            assertEquals("thread-abc", result.get("threadId"));
+        }
+
+        @Test
+        @DisplayName("should omit threadId when the caller is not replying")
+        void shouldOmitThreadIdWhenAbsent() {
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+
+            assertFalse(service.buildRfc2822Body(params).containsKey("threadId"));
+        }
+
+        @Test
+        @DisplayName("should stay single-part when there is no attachment")
+        void shouldStaySinglePartWithoutAttachments() {
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertFalse(mime.contains("multipart/mixed"));
+        }
+
+        @Test
+        @DisplayName("should build a multipart/mixed message carrying the attachment")
+        void shouldBuildMultipartWithAttachment() {
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "report.pdf");
+            attachment.put("content", Base64.getEncoder().encodeToString("PDF-BYTES".getBytes()));
+            attachment.put("type", "application/pdf");
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("subject", "Report");
+            params.put("body", "See attached");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertTrue(mime.contains("Content-Type: multipart/mixed; boundary=\""));
+            assertTrue(mime.contains("Content-Disposition: attachment; filename=\"report.pdf\""));
+            assertTrue(mime.contains("Content-Transfer-Encoding: base64"));
+            assertTrue(mime.contains("application/pdf; name=\"report.pdf\""));
+            assertTrue(mime.contains("See attached"));
+            assertTrue(mime.contains(Base64.getEncoder().encodeToString("PDF-BYTES".getBytes())));
+
+            // The boundary must actually close, or the message is truncated for the reader.
+            String boundary = mime.split("boundary=\"")[1].split("\"")[0];
+            assertTrue(mime.endsWith("--" + boundary + "--\r\n"));
+            assertEquals(2, mime.split("--" + boundary + "\r\n", -1).length - 1,
+                    "one body part plus one attachment part");
+        }
+
+        @Test
+        @DisplayName("should accept a single attachment object as well as a list")
+        void shouldAcceptSingleAttachmentObject() {
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "note.txt");
+            attachment.put("content", Base64.getEncoder().encodeToString("hi".getBytes()));
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", attachment);
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertTrue(mime.contains("filename=\"note.txt\""));
+            // No media type on the file object means the generic one, never a missing header.
+            assertTrue(mime.contains("Content-Type: application/octet-stream; name=\"note.txt\""));
+        }
+
+        @Test
+        @DisplayName("should read an attachment an agent spelled with the provider's own field names")
+        void shouldReadAlternateAttachmentFieldNames() {
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("Name", "invoice.pdf");
+            attachment.put("Content", Base64.getEncoder().encodeToString("X".getBytes()));
+            attachment.put("ContentType", "application/pdf");
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertTrue(mime.contains("filename=\"invoice.pdf\""));
+            assertTrue(mime.contains("application/pdf"));
+        }
+
+        @Test
+        @DisplayName("should strip the data URL prefix so only the bytes are attached")
+        void shouldStripDataUrlPrefix() {
+            String bytes = Base64.getEncoder().encodeToString("PNG".getBytes());
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "logo.png");
+            attachment.put("content", "data:image/png;base64," + bytes);
+            attachment.put("type", "image/png");
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertFalse(mime.contains("data:image/png;base64,"));
+            assertTrue(mime.contains(bytes));
+        }
+
+        @Test
+        @DisplayName("should wrap long base64 at 76 characters as RFC 2045 requires")
+        void shouldWrapLongBase64() {
+            byte[] big = new byte[3000];
+            Arrays.fill(big, (byte) 'A');
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "big.bin");
+            attachment.put("content", Base64.getEncoder().encodeToString(big));
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            for (String line : mime.split("\r\n")) {
+                assertTrue(line.length() <= 76, "line longer than 76 chars: " + line.length());
+            }
+        }
+
+        @Test
+        @DisplayName("should normalise base64url so a forwarded attachment is not corrupted")
+        void shouldNormaliseBase64Url() {
+            // Bytes chosen so their standard base64 contains both '+' and '/', which
+            // Gmail's own get_attachment hands back as '-' and '_'.
+            byte[] raw = new byte[] {(byte) 0xFB, (byte) 0xFF, (byte) 0xBF, (byte) 0xFF};
+            String standard = Base64.getEncoder().encodeToString(raw);
+            String urlSafe = Base64.getUrlEncoder().encodeToString(raw);
+            assertNotEquals(standard, urlSafe, "the fixture must actually differ between alphabets");
+
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "forwarded.bin");
+            attachment.put("content", urlSafe);
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertTrue(mime.contains(standard),
+                "a MIME part is standard base64; left as base64url the file arrives corrupt with no error");
+            assertFalse(mime.contains(urlSafe));
+        }
+
+        @Test
+        @DisplayName("should refuse an attachment entry that carries no bytes, not send the mail without it")
+        void shouldRefuseAttachmentWithoutContent() {
+            // Pre-fix this entry was counted (so the multipart branch was taken)
+            // and then dropped, producing a valid multipart/mixed with ZERO
+            // attachment parts: the mail sent, the file was gone, the run green.
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "empty.txt");
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            FileAttachmentException thrown = assertThrows(FileAttachmentException.class,
+                    () -> service.buildRfc2822Body(params));
+
+            assertTrue(thrown.getMessage().contains("empty.txt"),
+                "the refusal must name the attachment the caller has to fix");
+        }
+
+        @Test
+        @DisplayName("should refuse a link where a file was expected instead of sending an empty multipart")
+        void shouldRefuseLinkOnlyAttachment() {
+            // The shape an agent reaches for when it holds a URL rather than a
+            // file. It has no recognised bytes, so pre-fix it was dropped.
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "report.pdf");
+            attachment.put("url", "https://example.com/report.pdf");
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            assertThrows(FileAttachmentException.class, () -> service.buildRfc2822Body(params));
+        }
+
+        @Test
+        @DisplayName("should refuse an attachment entry that is not an object at all")
+        void shouldRefuseNonObjectAttachment() {
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of("/some/path/report.pdf"));
+
+            assertThrows(FileAttachmentException.class, () -> service.buildRfc2822Body(params));
+        }
+
+        @Test
+        @DisplayName("should keep the type off a parameterised media type instead of discarding it")
+        void shouldKeepTypeOffParameterisedMediaType() {
+            // BinaryResponseHandler stores the upstream Content-Type header verbatim
+            // as a FileRef's media type, so "text/html; charset=utf-8" is the
+            // ordinary shape for any downloaded file. Rejecting it outright retyped
+            // every attached HTML, CSV or PDF as an unrecognised binary.
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "page.html");
+            attachment.put("type", "text/html; charset=utf-8");
+            attachment.put("content", Base64.getEncoder().encodeToString("X".getBytes()));
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            // The body part legitimately carries its own charset, so the assertion
+            // is scoped to the attachment part's header.
+            assertTrue(mime.contains("Content-Type: text/html; name=\"page.html\""), mime);
+            assertFalse(mime.contains("text/html; charset"),
+                "the provider's parameter is not carried into the part header");
+        }
+
+        @Test
+        @DisplayName("should keep every header line inside the line length even for an absurd file name")
+        void shouldBoundAnAbsurdFilename() {
+            // 950 characters reaches RFC 5322's 998 hard limit once written twice
+            // into one header, which folding at parameter boundaries cannot rescue.
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "é".repeat(950) + ".pdf");
+            attachment.put("content", Base64.getEncoder().encodeToString("X".getBytes()));
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            for (String line : mime.split("\r\n")) {
+                assertTrue(line.length() < 998, "header line at RFC 5322's hard limit: " + line.length());
+            }
+            assertTrue(mime.contains(".pdf"), "the extension is what opens the file for the recipient");
+        }
+
+        @Test
+        @DisplayName("should keep a three-byte-per-character file name inside the header hard limit too")
+        void shouldBoundAMultiByteFilename() {
+            // The bound was on CHARACTERS while the header costs BYTES, three
+            // characters each once percent-encoded: 120 CJK characters reached
+            // 1080, past RFC 5322's 998 hard limit the bound exists to respect.
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "漢".repeat(950) + ".pdf");
+            attachment.put("content", Base64.getEncoder().encodeToString("X".getBytes()));
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            for (String line : mime.split("\r\n")) {
+                assertTrue(line.length() < 998, "header line at RFC 5322's hard limit: " + line.length());
+            }
+            assertFalse(mime.contains("\uFFFD"), "a cut inside a code point emits a replacement character");
+            assertTrue(mime.contains(".pdf"), "the extension is what opens the file for the recipient");
+
+            // Pins the UNIT, not just the constant, and measures the RFC 2231
+            // parameter rather than the ASCII fallback: the fallback is one
+            // character per source character either way, so it cannot tell a byte
+            // bound from a character one. Percent-encoding is three characters per
+            // byte, so 100 bytes is at most 300 here, while a 100-CHARACTER bound
+            // on a three-byte script would be 864. Without this the test would keep
+            // proving "the number is small enough" while the rule silently went
+            // back to characters, and the next raise of the constant reopens it.
+            String encodedName = mime.split("filename\\*=UTF-8''")[1].split("\r\n")[0];
+            assertTrue(encodedName.length() <= 300,
+                "the bound is on UTF-8 bytes, which is what the header costs: " + encodedName.length());
+        }
+
+        @Test
+        @DisplayName("should keep the type when whitespace precedes the media type's parameter")
+        void shouldKeepTypeAcrossAnyWhitespace() {
+            // In a Java string literal \s is the JLS 15 escape for one SPACE, so
+            // the pattern read as "any whitespace" and compiled as "a space": a tab
+            // dropped the whole type.
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "page.html");
+            attachment.put("type", "text/html	; charset=utf-8");
+            attachment.put("content", Base64.getEncoder().encodeToString("X".getBytes()));
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertTrue(mime.contains("Content-Type: text/html; name=\"page.html\""), mime);
+        }
+
+        @Test
+        @DisplayName("should refuse a data URL that carries no bytes after its prefix")
+        void shouldRefuseEmptyDataUrl() {
+            // The emptiness check used to run BEFORE the prefix was stripped, so
+            // "data:image/png;base64," read as non-blank and wrote a zero-byte
+            // part: a mail that sends with an empty attachment on it, green.
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "logo.png");
+            attachment.put("type", "image/png");
+            attachment.put("content", "data:image/png;base64,");
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            assertThrows(FileAttachmentException.class, () -> service.buildRfc2822Body(params));
+        }
+
+        @Test
+        @DisplayName("should refuse content that is not base64 rather than send a corrupt file")
+        void shouldRefuseNonBase64Content() {
+            // Written out verbatim under Content-Transfer-Encoding: base64, this
+            // reaches the recipient corrupt with nothing reporting it.
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "report.pdf");
+            attachment.put("content", "not base64 at all!!!");
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            FileAttachmentException thrown = assertThrows(FileAttachmentException.class,
+                    () -> service.buildRfc2822Body(params));
+            assertTrue(thrown.getMessage().contains("not base64"), thrown.getMessage());
+        }
+
+        @Test
+        @DisplayName("should skip a blank entry instead of failing the whole mail")
+        void shouldSkipBlankAttachmentEntry() {
+            // An optional field an agent filled with "" arrives as a one-element
+            // list holding it, and so does a template that resolved to nothing.
+            // Neither is a file the caller believes is attached.
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(""));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertFalse(mime.contains("multipart/mixed"), "no attachment means no multipart");
+            assertTrue(mime.endsWith("Content"));
+        }
+
+        @Test
+        @DisplayName("should not let a media type smuggle a parameter of its own into the header")
+        void shouldSanitizeMediaType() {
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "x.pdf");
+            attachment.put("type", "application/pdf\"; evil=\"1");
+            attachment.put("content", Base64.getEncoder().encodeToString("X".getBytes()));
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertFalse(mime.contains("evil="),
+                "the same hole this pass closed for the file name was open on its sibling");
+            assertTrue(mime.contains("Content-Type: application/octet-stream"));
+        }
+
+        @Test
+        @DisplayName("should fold a header whose file name would run past the line length")
+        void shouldFoldLongHeaderLine() {
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "a".repeat(300) + ".pdf");
+            attachment.put("content", Base64.getEncoder().encodeToString("X".getBytes()));
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertTrue(mime.contains("Content-Disposition: attachment;\r\n filename="),
+                "a file name is caller data of any length; unfolded it ran past RFC 5322's line length");
+        }
+
+        @Test
+        @DisplayName("should escape a quote in a file name so it cannot close the header parameter early")
+        void shouldEscapeQuoteInFilename() {
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "re\"port.pdf");
+            attachment.put("content", Base64.getEncoder().encodeToString("X".getBytes()));
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertTrue(mime.contains("filename=\"re\\\"port.pdf\""),
+                "unescaped, the quote closed the parameter and left the rest of the name loose");
+        }
+
+        @Test
+        @DisplayName("should give a non-ASCII file name the RFC 2231 form a MIME parameter takes")
+        void shouldEncodeNonAsciiFilename() {
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("filename", "rapport été.pdf");
+            attachment.put("content", Base64.getEncoder().encodeToString("X".getBytes()));
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+            params.put("attachments", List.of(attachment));
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            // A MIME parameter takes RFC 2231, not the RFC 2047 encoded word a
+            // header VALUE takes; the two are different positions.
+            assertTrue(mime.contains("filename*=UTF-8''rapport%20%C3%A9t%C3%A9.pdf"),
+                "expected the RFC 2231 form, got: " + mime);
+            assertFalse(mime.contains("filename=\"=?UTF-8?B?"),
+                "an encoded word does not belong in a parameter position");
+            // An ASCII fallback stays beside it for a reader that understands neither.
+            assertTrue(mime.contains("filename=\"rapport _t_.pdf\""));
+        }
+
+        @Test
+        @DisplayName("should encode a non-ASCII subject as an RFC 2047 word instead of raw bytes")
+        void shouldEncodeNonAsciiSubject() {
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("subject", "Réunion prévue jeudi");
+            params.put("body", "Content");
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertTrue(mime.contains("Subject: =?UTF-8?B?"));
+            assertFalse(mime.contains("Subject: Réunion"));
+            String word = mime.split("Subject: ")[1].split("\r\n")[0];
+            String payload = word.substring("=?UTF-8?B?".length(), word.length() - 2);
+            assertEquals("Réunion prévue jeudi",
+                    new String(Base64.getDecoder().decode(payload), java.nio.charset.StandardCharsets.UTF_8));
+        }
+
+        @Test
+        @DisplayName("should split a long non-ASCII subject into words within the 75-character limit")
+        void shouldSplitLongNonAsciiSubject() {
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("subject", "Rapport trimestriel très détaillé sur les résultats commerciaux à présenter");
+            params.put("body", "Content");
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            StringBuilder decoded = new StringBuilder();
+            for (String word : mime.split("Subject: ")[1].split("\r\nMIME-Version")[0].split("\r\n ")) {
+                String payload = word.trim().substring("=?UTF-8?B?".length(), word.trim().length() - 2);
+                assertTrue(word.trim().length() <= 75, "encoded word over 75 chars: " + word.trim().length());
+                decoded.append(new String(Base64.getDecoder().decode(payload), java.nio.charset.StandardCharsets.UTF_8));
+            }
+            assertEquals("Rapport trimestriel très détaillé sur les résultats commerciaux à présenter",
+                    decoded.toString());
+        }
+
+        @Test
+        @DisplayName("should leave a pure-ASCII subject readable")
+        void shouldLeaveAsciiSubjectAlone() {
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("subject", "Quarterly report");
+            params.put("body", "Content");
+
+            assertTrue(decodeRaw(service.buildRfc2822Body(params)).contains("Subject: Quarterly report\r\n"));
+        }
+
+        @Test
+        @DisplayName("should strip a newline out of a header so a caller cannot inject one of its own")
+        void shouldStripHeaderInjection() {
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com\r\nBcc: attacker@evil.com");
+            params.put("subject", "Test");
+            params.put("body", "Content");
+
+            String mime = decodeRaw(service.buildRfc2822Body(params));
+
+            assertFalse(mime.contains("\r\nBcc: attacker@evil.com"),
+                "the newline must not have started a header of the caller's own");
+            assertTrue(mime.contains("To: recipient@test.com Bcc: attacker@evil.com\r\n"),
+                "the value stays on the To line, defused");
+        }
+
+        @Test
+        @DisplayName("should declare MIME-Version so clients read the parts")
+        void shouldDeclareMimeVersion() {
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Content");
+
+            assertTrue(decodeRaw(service.buildRfc2822Body(params)).contains("MIME-Version: 1.0\r\n"));
         }
     }
 
@@ -2028,8 +2603,23 @@ class HttpExecutionServiceTest {
 
             assertTrue(result.containsKey("message"));
             @SuppressWarnings("unchecked")
-            Map<String, String> message = (Map<String, String>) result.get("message");
+            Map<String, Object> message = (Map<String, Object>) result.get("message");
             assertTrue(message.containsKey("raw"));
+        }
+
+        @Test
+        @DisplayName("should carry threadId inside the draft message")
+        void shouldCarryThreadIdInsideDraft() {
+            Map<String, Object> params = new HashMap<>();
+            params.put("to", "recipient@test.com");
+            params.put("body", "Draft content");
+            params.put("threadId", "thread-xyz");
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> message =
+                    (Map<String, Object>) service.buildRfc2822DraftBody(params).get("message");
+
+            assertEquals("thread-xyz", message.get("threadId"));
         }
     }
 
@@ -2106,7 +2696,7 @@ class HttpExecutionServiceTest {
 
             assertTrue(result instanceof Map);
             @SuppressWarnings("unchecked")
-            Map<String, String> map = (Map<String, String>) result;
+            Map<String, Object> map = (Map<String, Object>) result;
             assertTrue(map.containsKey("raw"));
         }
 

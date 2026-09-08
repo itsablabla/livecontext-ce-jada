@@ -261,7 +261,7 @@ export function CanvasToolbar({
               side="top"
               align="center"
               data-testid="canvas-toolbar-relations"
-              onOpen={isRunMode ? (ref) => requestOpenRelatedWorkflow(ref.id, ref.name) : undefined}
+              onOpen={isRunMode ? (ref) => requestOpenRelatedWorkflow(ref.id, ref.name, '', workflowId) : undefined}
             />
           )}
         </div>

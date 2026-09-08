@@ -138,16 +138,63 @@ public class WorkflowEntity implements OrgScopedEntity {
     private UUID productionRunId;
 
     /**
-     * Optional cost budget for this workflow / application, in credits
-     * (1 credit = $0.001). {@code null} = no budget. Edited in the "Advanced"
-     * section of the workflow settings modal. Enforced at the epoch boundary:
-     * once a run's accumulated cost across all epochs reaches this budget, no
-     * NEW epoch is allowed to start (the in-flight epoch still finishes) - see
-     * {@code ReusableTriggerService}. The CE edition shows this as dollars, the
-     * cloud edition as credits (frontend display concern).
+     * Optional spending cap for this workflow / application, in credits
+     * (1 credit = $0.001). {@code null} or {@code <= 0} = no cap.
+     *
+     * <p>V474 changed what this is measured against. It used to be compared to
+     * the RUN's lifetime cost, which on a pinned workflow (one production run
+     * accumulating epochs forever) made it a lifetime cap: the workflow fired
+     * until the cap was reached and then stopped for good. It is now the cap on
+     * what the workflow spends inside one {@link #budgetPeriodMode} period,
+     * tracked in {@link #budgetPeriodSpent}.
+     *
+     * <p>It counts AGENT spend only: paid catalog calls and resold generation
+     * are billed inside catalog-service and never reach this counter.
+     *
+     * <p>Which runs it governs is decided in ONE place,
+     * {@code WorkflowBudgetState.appliesToRun()}: every run except a builder
+     * test fire. Read that method before rebuilding the rule from either signal
+     * on its own; it explains why both are needed and what is, and is not, a
+     * reachable hole. The CE edition shows this as dollars, the cloud edition as
+     * credits (frontend display concern).
      */
     @Column(name = "budget_credits", precision = 15, scale = 4)
     private java.math.BigDecimal budgetCredits;
+
+    /**
+     * How {@link #budgetPeriodSpent} resets: {@code monthly} (default),
+     * {@code weekly} or {@code cumulative} (never). Values are constrained in
+     * the DB; the rollover rule itself lives in {@code WorkflowBudgetPeriod}.
+     *
+     * <p>Initialised in Java as well as in the DB default: the column is NOT
+     * NULL, and a null field would make Hibernate insert an explicit NULL and
+     * abort the INSERT.
+     */
+    @Column(name = "budget_period_mode", length = 16)
+    private String budgetPeriodMode = "monthly";
+
+    /**
+     * Agent credits spent by the governed runs in the period that
+     * {@link #budgetPeriodStartedAt} opens.
+     *
+     * <p>DB-managed: written ONLY by {@code WorkflowRepository}'s native
+     * increment, which resets it in place when the period has rolled over. The
+     * JPA column is {@code insertable=false, updatable=false} so a stray
+     * {@code save(workflow)} can never clobber the live value with a stale
+     * in-memory copy - the same fence {@code workflow_runs.cost_credits} and
+     * {@code state_snapshot} use, for the same reason.
+     */
+    @Column(name = "budget_period_spent", precision = 15, scale = 4,
+            insertable = false, updatable = false)
+    private java.math.BigDecimal budgetPeriodSpent = java.math.BigDecimal.ZERO;
+
+    /**
+     * Start of the period {@link #budgetPeriodSpent} belongs to, truncated to
+     * the mode's unit in UTC. {@code null} until the first production cost is
+     * recorded. DB-managed, same fence as {@link #budgetPeriodSpent}.
+     */
+    @Column(name = "budget_period_started_at", insertable = false, updatable = false)
+    private Instant budgetPeriodStartedAt;
 
     public enum WorkflowStatus {
         ACTIVE, INACTIVE, DRAFT, ARCHIVED
@@ -423,6 +470,24 @@ public class WorkflowEntity implements OrgScopedEntity {
 
     public java.math.BigDecimal getBudgetCredits() {
         return budgetCredits;
+    }
+
+    public String getBudgetPeriodMode() {
+        return budgetPeriodMode;
+    }
+
+    public void setBudgetPeriodMode(String budgetPeriodMode) {
+        this.budgetPeriodMode = budgetPeriodMode;
+    }
+
+    /** Read-only: written by the native increment, never by an entity flush. */
+    public java.math.BigDecimal getBudgetPeriodSpent() {
+        return budgetPeriodSpent;
+    }
+
+    /** Read-only: written by the native increment, never by an entity flush. */
+    public Instant getBudgetPeriodStartedAt() {
+        return budgetPeriodStartedAt;
     }
 
     public void setBudgetCredits(java.math.BigDecimal budgetCredits) {

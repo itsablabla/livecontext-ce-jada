@@ -4,8 +4,10 @@
  * Despite the catch-all segment, these handlers do NOT serve general `/api/proxy/*` traffic.
  * `proxy.ts` (the Next middleware) matches `/api/proxy/:path*` and `NextResponse.rewrite()`s
  * every path straight to the gateway; the one exception is `external-proxy`, which it lets
- * through with `NextResponse.next()` so the request lands here and is re-routed to the LOCAL
- * `/api/external-proxy` route. That bypass is deliberate and pinned by
+ * through with `NextResponse.next()` so the request lands here and is handed to the LOCAL
+ * `/api/external-proxy` handler, called IN PROCESS (`callExternalProxyLocally` below - it used
+ * to be re-fetched over the public origin, which the cloud ingress answers with the gateway's
+ * 404). That bypass is deliberate and pinned by
  * `e2e/ce/ce-routing-middleware-ui.spec.ts` ("/api/proxy/external-proxy bypasses proxy
  * rewriting").
  *
@@ -25,6 +27,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { isJwtShapedToken } from '@/lib/utils/jwtShape';
+import { POST as externalProxyPost } from '@/app/api/external-proxy/route';
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_SPRING_BASE_URL || 'http://localhost:8080';
 const REDACTED_QUERY_KEYS = new Set([
@@ -91,24 +94,9 @@ async function handleRequest(
   const loggedPath = buildLoggedPath(path, request.nextUrl.searchParams);
 
   try {
-    // Exception pour external-proxy - rediriger vers la route Next.js locale
+    // external-proxy is served by the LOCAL route handler, invoked IN PROCESS.
     if (path === 'external-proxy') {
-      const localUrl = `${request.nextUrl.origin}/api/external-proxy`;
-      const searchParams = request.nextUrl.searchParams;
-      const queryString = searchParams.toString();
-      const fullUrl = queryString ? `${localUrl}?${queryString}` : localUrl;
-
-      // Faire la requete vers la route locale
-      const response = await fetch(fullUrl, {
-        method,
-        headers: {
-          'Content-Type': request.headers.get('content-type') || 'application/json',
-          'Authorization': request.headers.get('authorization') || '',
-          'X-Request-Id': requestId,
-        },
-        body: method !== 'GET' ? await request.text() : undefined,
-      });
-
+      const response = await callExternalProxyLocally(request, method, requestId);
       const responseBody = await response.text();
       logProxyResult(method, loggedPath, response.status, startedAt, requestId, responseBody.length);
 
@@ -265,6 +253,52 @@ async function handleRequest(
       { status: 500, headers: createResponseHeaders(requestId, 'application/json') }
     );
   }
+}
+
+/**
+ * Runs the local `/api/external-proxy` handler in this process instead of re-fetching it
+ * over `request.nextUrl.origin`.
+ *
+ * The origin round trip worked in CE, where Next serves every path itself, and failed in
+ * cloud, where the ingress sends `/api` to the GATEWAY: the hop left the pod, came back as
+ * the gateway's own 404, and every external call from the MCP Test tab failed there while
+ * passing in CE and in every test. Verified against production on 2026-09-05.
+ *
+ * Calling the handler directly is the fix that does not widen anything: `/api/external-proxy`
+ * stays unreachable from the internet (its only caller is this route, which IS carved out),
+ * so the SSRF-guarded fetcher never becomes a public surface. It also drops a full network
+ * round trip through Cloudflare from every MCP test call.
+ */
+async function callExternalProxyLocally(
+  request: NextRequest,
+  method: string,
+  requestId: string,
+): Promise<Response> {
+  if (method !== 'POST') {
+    // The local route exports POST only. Over the network Next answered 405 for anything
+    // else, so answer the same rather than inventing a new contract for this path.
+    return NextResponse.json(
+      { error: 'Method Not Allowed' },
+      { status: 405, headers: { Allow: 'POST' } },
+    );
+  }
+
+  const url = new URL('/api/external-proxy', request.nextUrl.origin);
+  url.search = request.nextUrl.search;
+
+  // Same three headers the network hop forwarded, and only those: the handler authenticates
+  // the caller from Authorization, and everything else it needs is in the body.
+  const forwarded = new NextRequest(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': request.headers.get('content-type') || 'application/json',
+      Authorization: request.headers.get('authorization') || '',
+      'X-Request-Id': requestId,
+    },
+    body: await request.text(),
+  });
+
+  return externalProxyPost(forwarded);
 }
 
 function createResponseHeaders(requestId: string, contentType?: string): Headers {

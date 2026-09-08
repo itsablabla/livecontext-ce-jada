@@ -25,6 +25,8 @@ import { useOrgScopedQuery } from '@/lib/hooks/useOrgScopedQuery';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
 import { orchestratorApi, type Credential } from '@/lib/api/orchestrator';
 import { useFeatureCapabilities, type FeatureCapabilities } from '@/hooks/useFeatureCapabilities';
+import { usePlanFeatureGate } from '@/hooks/usePlanFeatureGate';
+import type { PlanGateContext } from '../services/validation/core/types';
 
 // Types for per-node validation state
 export interface NodeValidationState {
@@ -183,6 +185,15 @@ export function ValidationProvider({
     const featureCapabilitiesRef = React.useRef<FeatureCapabilities | null>(featureCapabilities);
     featureCapabilitiesRef.current = featureCapabilities;
 
+    // Which nodes and endpoints this account's plan includes. Undefined while
+    // unknown - the rule then emits NO plan issue, so a node the account owns is
+    // never marked, and the backend stays the only thing that actually refuses.
+    const { planCode, isLoading: isPlanGateLoading, requirements: planRequirements } = usePlanFeatureGate({ enabled: hasNodesToValidate });
+    const planGate: PlanGateContext | undefined =
+        !isPlanGateLoading && planRequirements ? { requirements: planRequirements, planCode } : undefined;
+    const planGateRef = React.useRef<PlanGateContext | undefined>(planGate);
+    planGateRef.current = planGate;
+
     // Phase 6 (2026-05-18) - clear the ref when active workspace flips so
     // runValidation cannot fire against stale creds during the refetch
     // window (false-positive "missing credential" warnings).
@@ -222,7 +233,8 @@ export function ValidationProvider({
             currentBackendErrors,
             true,
             userCredentialsRef.current,
-            featureCapabilitiesRef.current ?? undefined
+            featureCapabilitiesRef.current ?? undefined,
+            planGateRef.current
         );
 
         // Build per-node validation map (keyed by node ID for easy lookup)
@@ -374,11 +386,13 @@ export function ValidationProvider({
             ? userCredentials.map((c) => c.id).join(',')
             : '';
         const capsKey = featureCapabilities ? JSON.stringify(featureCapabilities) : '';
-        const key = `${nodeKey}::${edgeKey}::${backendKey}::${credKey}::${capsKey}`;
+        // Same reason as capsKey: the plan verdict changes without any node changing.
+        const planKey = planGate ? `${planGate.planCode ?? ''}|${Object.keys(planGate.requirements).length}` : '';
+        const key = `${nodeKey}::${edgeKey}::${backendKey}::${credKey}::${capsKey}::${planKey}`;
         if (key === lastValidationKeyRef.current) return;
         lastValidationKeyRef.current = key;
         runValidation();
-    }, [nodes, edges, backendErrors, userCredentials, featureCapabilities, runValidation]);
+    }, [nodes, edges, backendErrors, userCredentials, featureCapabilities, planGate, runValidation]);
 
     // Context value (memoized to prevent unnecessary re-renders)
     const contextValue = React.useMemo<ValidationContextValue>(() => ({

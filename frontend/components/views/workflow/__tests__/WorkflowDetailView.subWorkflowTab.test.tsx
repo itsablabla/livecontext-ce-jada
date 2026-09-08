@@ -55,11 +55,11 @@ afterEach(() => {
 });
 
 /** Fire the event the sub-workflow node button dispatches, and let the async handler settle. */
-async function openSubWorkflow() {
+async function openSubWorkflow(detail: Record<string, unknown> = {}) {
   render(<WorkflowDetailView workflowId={WF} />);
   await act(async () => {
     window.dispatchEvent(new CustomEvent('workflowOpenSubWorkflow', {
-      detail: { workflowId: SUB_WF, workflowName: 'Sub', nodeId: 'node-1' },
+      detail: { workflowId: SUB_WF, workflowName: 'Sub', nodeId: 'node-1', ...detail },
     }));
     await Promise.resolve();
     await Promise.resolve();
@@ -94,5 +94,24 @@ describe('WorkflowDetailView - opening a sub-workflow', () => {
 
     expect(openTab).toHaveBeenCalledTimes(1);
     expect(openTab.mock.calls[0][0].id).toBe(`workflow-${SUB_WF}`);
+  });
+
+  it('ignores a request addressed to a canvas other than its own', async () => {
+    // This listener is the twin of the side panel's, on the same `window` and
+    // building the same tab id, so an unaddressed request is answered by both and
+    // the last to resolve wins. This page always opens sub-workflows editable, so
+    // answering for someone else's canvas is how a locked application panel's tab
+    // got replaced by an editable one.
+    getPinnedWorkflowRun.mockResolvedValue(null);
+    await openSubWorkflow({ sourceWorkflowId: 'another-canvas-7f3a' });
+
+    expect(openTab).not.toHaveBeenCalled();
+  });
+
+  it('answers a request that names no source, as every existing caller sends', async () => {
+    getPinnedWorkflowRun.mockResolvedValue(null);
+    await openSubWorkflow();
+
+    expect(openTab).toHaveBeenCalledTimes(1);
   });
 });

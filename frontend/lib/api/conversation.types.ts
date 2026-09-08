@@ -28,6 +28,49 @@ export interface PendingActionEntry {
   tool_call_id?: string;
   args_summary?: string;
   application_id?: string; // publication id for application:acquire (reopen install modal on reload)
+  // Question card (waiting_for === 'user_question'): the questions the ask_user call showed
+  questions?: Array<{
+    header: string;
+    question: string;
+    options: Array<{ label: string; description?: string }>;
+    multiSelect?: boolean;
+  }>;
+}
+
+/**
+ * The kinds of conversation the platform holds. Mirrors the backend {@code ConversationKind}
+ * enum; the wire values are these exact lowercase strings.
+ */
+export type ConversationKind = 'chat' | 'studio';
+
+/**
+ * What a conversation is, with the one fallback rule applied: no kind means chat.
+ *
+ * <p>Stated once, here, rather than at each `conv.kind === 'studio'` call site. The call sites that
+ * matter are negative ones ("is this an ordinary chat"), and each would have to remember to treat
+ * undefined as chat; the one that forgets routes every legacy conversation into the studio.
+ */
+export function conversationKind(conversation: Pick<Conversation, 'kind'> | null | undefined): ConversationKind {
+  return conversation?.kind === 'studio' ? 'studio' : 'chat';
+}
+
+/**
+ * Where a conversation LIVES: the route that can actually serve it.
+ *
+ * <p>Stated once because three surfaces navigate to a conversation - the sidebar, the global
+ * search, and the chat page's own redirect for a studio thread reached by an old link - and the
+ * rule is the same at all three. Duplicated, it is three places to forget, and forgetting is
+ * silent: a studio conversation opened at /app/c renders a blank thread (the chat renderer
+ * suppresses generation envelopes) and its composer sends the next message to a CHAT model with
+ * those envelopes as prior context, which is the one state the immutable kind exists to prevent.
+ *
+ * <p>Takes the conversation rather than the kind so the "no kind means chat" fallback cannot be
+ * skipped on the way in: every conversation stored before the column existed has none.
+ */
+export function conversationRoute(conversation: Pick<Conversation, 'id' | 'kind'>): string {
+  return conversationKind(conversation) === 'studio'
+    ? `/app/studio/${conversation.id}`
+    : `/app/c/${conversation.id}`;
 }
 
 export interface Conversation {
@@ -41,6 +84,18 @@ export interface Conversation {
   messageCount: number;
   workflowId?: string;
   agentId?: string;
+  /**
+   * What the conversation IS: a chat with a model or an agent, or a studio thread of pure
+   * generations.
+   *
+   * <p>Optional on this type because a response from a server that predates the field carries no
+   * kind, and a conversation with no kind is a chat - which is what every conversation was. Read it
+   * through {@link conversationKind} rather than directly, so that fallback is stated once.
+   *
+   * <p>Decided when the conversation is created and immutable afterwards: the server refuses a
+   * change with a 400 rather than ignoring it.
+   */
+  kind?: ConversationKind;
   firstMessagePreview?: string;
   /** Legacy single pending action (kept in sync with pendingActions[0] for back-compat). */
   pendingAction?: PendingActionEntry;

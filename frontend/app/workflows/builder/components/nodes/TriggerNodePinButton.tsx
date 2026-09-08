@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { canvasChromeCompactButtonClass, canvasNodeButtonClass } from '@/components/ui/canvas-chrome';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { orchestratorApi } from '@/lib/api';
+import { track } from '@/lib/analytics/analytics';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { useRun } from '@/contexts/WorkflowRunContext';
 import { computeTriggerPinState, triggerPinTitle, TRIGGER_PIN_REQUEST_EVENT } from '../../hooks/useTriggerPin';
@@ -151,6 +152,13 @@ export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ work
       window.dispatchEvent(new CustomEvent('workflowPinnedVersionChange', {
         detail: { pinnedVersion: result.pinnedVersion, workflowId },
       }));
+      track('workflow_version_pinned', {
+        workflow_id: workflowId,
+        version: result.pinnedVersion ?? null,
+        is_unpin: versionToPin === null,
+        has_production_run: Boolean(result.productionRunIdPublic),
+        flow: 'trigger_button',
+      });
       if (result.productionRunIdPublic) {
         // Binds in place on an embedded canvas rather than routing the app away.
         enterRunMode(result.productionRunIdPublic);
@@ -325,7 +333,7 @@ export const TriggerNodePinButton: React.FC<TriggerNodePinButtonProps> = ({ work
           disabled={pinning}
           title={buttonTitle}
           style={variant === 'toolbar' ? undefined : statusBorderStyle}
-          data-testid={variant === 'toolbar' ? 'canvas-toolbar-pin-button' : undefined}
+          data-testid={variant === 'toolbar' ? 'canvas-toolbar-pin-button' : 'node-pin-button'}
           className={
             variant === 'toolbar'
               // Shared canvas-chrome control: same square Button shape, height,

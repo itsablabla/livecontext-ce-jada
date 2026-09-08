@@ -78,10 +78,29 @@ export interface Workflow {
    * Optional cost budget in CREDITS (1 credit = $0.001), or null/absent when
    * none is set. Edited in the workflow settings "Advanced" section, and sent
    * back on the update PUT under the same key. Always in credits; the UI renders
-   * dollars in CE, credits in cloud. When a run's accumulated cost reaches this,
-   * no new epoch is started.
+   * dollars in CE, credits in cloud. When the workflow's PERIOD spend reaches
+   * this, no new epoch is started.
+   *
+   * <p>V474: the cap is now per PERIOD, counts AGENT spend only (paid
+   * integrations and generation are billed separately), and governs every run
+   * except a builder test fire. Leaving it empty means unlimited, exactly like
+   * an agent's budget.
    */
   budgetCredits?: number | null;
+  /** How the cap resets: monthly (default) | weekly | cumulative. */
+  budgetPeriodMode?: string | null;
+  /**
+   * When the allowance starts again, ISO-8601 UTC, or null for a cap that never
+   * resets. Computed server-side from the same rule the counter resets on, so
+   * the client never has to own a second copy of the calendar.
+   */
+  budgetPeriodResetsAt?: string | null;
+  /**
+   * Spent by the governed runs in the period open right now, in CREDITS,
+   * already rolled over server-side. Present even without a cap, so a card can
+   * show the running cost either way.
+   */
+  budgetPeriodSpent?: number | null;
 }
 
 // ============================================
@@ -112,10 +131,23 @@ export interface WorkflowBoardCard {
    */
   costCredits?: number | null;
   /**
-   * The workflow's cost budget in CREDITS, or null/absent when none is set.
-   * Lets the card mark the over-budget state (costCredits >= budgetCredits).
+   * The workflow's spending cap in CREDITS, or null/absent when none is set.
+   * Compare it against `budgetPeriodSpent`, never against `costCredits`: a
+   * pinned workflow keeps one production run for months, so its lifetime cost
+   * crosses the cap long before the period spend does.
    */
   budgetCredits?: number | null;
+  /**
+   * Spend in the budget period currently open, in CREDITS, already rolled over
+   * server-side. Always sent, cap or no cap, so it means the same thing on
+   * every card surface; use `budgetChipHasContent` to decide whether a chip is
+   * worth drawing.
+   */
+  budgetPeriodSpent?: number | null;
+  /** monthly | weekly | cumulative - names the period above. */
+  budgetPeriodMode?: string | null;
+  /** When the allowance starts again (ISO-8601 UTC), or null when it never does. */
+  budgetPeriodResetsAt?: string | null;
   lastExecutedAt?: string | null;
   updatedAt?: string | null;
   runCount: number;
@@ -196,6 +228,14 @@ export interface ApplicationRunVersionEntry {
   applicationRunId?: string | null;
   lastExecutedAt?: string | null;
   pinnedVersion?: number | null;
+  /** Spending cap in credits, or null when the app is uncapped (the default). */
+  budgetCredits?: number | null;
+  /** How the cap resets: monthly | weekly | cumulative. */
+  budgetPeriodMode?: string | null;
+  /** Spent by the governed runs in the period open right now, already rolled over server-side. */
+  budgetPeriodSpent?: number | null;
+  /** When the allowance starts again (ISO-8601 UTC), or null when it never does. */
+  budgetPeriodResetsAt?: string | null;
 }
 
 export interface WorkflowRun {
@@ -650,15 +690,24 @@ export interface WorkflowPublication {
     iconSlug?: string;
     color?: string;
   };
+  /**
+   * True when the publisher says this belongs in the Studio: it PRODUCES a media asset rather than
+   * finding, publishing or reading one. A SECOND AXIS - `category` keeps saying what it is about.
+   */
+  studio?: boolean;
   planSnapshot?: any;
   agentSnapshot?: AgentPublicationSnapshot;
   planVersion?: number;
   creditsPerUse: number;
-  /** V420 - the snapshot uses a self-hosted-only feature, so managed cloud refuses the install
-   *  (HTTP 403 `code: 'CE_EXCLUSIVE'`). Drives the "self-hosted only" badge. Always sent by the
-   *  backend; optional here for the synthesized publications built client-side. */
+  /** V420 - the snapshot uses something managed cloud cannot run AT ANY PLAN, today a local CLI
+   *  agent, so the install is refused (HTTP 403 `code: 'CE_EXCLUSIVE'`). Drives the "self-hosted
+   *  only" badge. Always sent by the backend; optional here for the synthesized publications built
+   *  client-side. */
   ceExclusive?: boolean;
-  /** Feature codes behind `ceExclusive` (`CLI_AGENT`, `VECTOR_SEARCH`) - used for the badge tooltip. */
+  /** Every special capability the snapshot uses (`CLI_AGENT`, `VECTOR_SEARCH`), whether or not it
+   *  blocks: since V467/V468 a vector app carries `VECTOR_SEARCH` here with `ceExclusive` false,
+   *  because it installs from a plan (403 `code: 'PLAN_UPGRADE_REQUIRED'` below that plan). Used
+   *  for the badge tooltip. */
   ceExclusiveFeatures?: string[];
   publisherId: string;
   publisherName?: string;
@@ -834,6 +883,13 @@ export interface PublishWorkflowRequest {
   /** V274 - true when this publish goes through the screening wizard (which POSTs decisions separately); false / omitted = backend auto-screens and writes SKIPPED audit rows */
   viaScreeningWizard?: boolean;
   imageReplacements?: Array<{ originalUrl: string; storageKey: string }>;
+  /**
+   * The studio axis: does this application belong on the Studio shelf?
+   *
+   * <p>Optional on purpose - absent means "no opinion" and preserves the stored value, so a caller
+   * that predates the axis cannot take an application off the shelf by saving a title change.
+   */
+  studio?: boolean;
 }
 
 export interface UpdatePublicationRequest {
@@ -854,6 +910,13 @@ export interface UpdatePublicationRequest {
   /** V274 - same semantics as on PublishWorkflowRequest */
   viaScreeningWizard?: boolean;
   imageReplacements?: Array<{ originalUrl: string; storageKey: string }>;
+  /**
+   * The studio axis: does this application belong on the Studio shelf?
+   *
+   * <p>Optional on purpose - absent means "no opinion" and preserves the stored value, so a caller
+   * that predates the axis cannot take an application off the shelf by saving a title change.
+   */
+  studio?: boolean;
 }
 
 export interface PublicationsListResponse {
@@ -1330,7 +1393,7 @@ export interface PlatformCredentialPublicInfo {
    * it: the call named a generation model, OR the caller stated that the
    * endpoint carries a generation descriptor (the `generation` request
    * parameter). A quote that only asked the first half agreed with execution on
-   * `core:generate` steps and disagreed on `mcp:` steps bound straight to a
+   * `agent:generate` steps and disagreed on `mcp:` steps bound straight to a
    * generation endpoint, which name no model.
    */
   versionDefaultOnly?: boolean;
@@ -1549,6 +1612,12 @@ export interface InterfaceSnapshot {
   htmlTemplate: string;
   cssTemplate?: string;
   jsTemplate?: string;
+  /**
+   * The format this run froze, which is the one its pages PAINT: the render endpoint
+   * prefers the snapshot over the live interface, so a page reformatted after the run
+   * still renders here at the shape it had. Null = the page declared none.
+   */
+  format?: string | null;
   variableMappings?: Record<string, string>;
   actionMappings?: Record<string, string>;
   createdAt: string;
@@ -1606,6 +1675,14 @@ export interface WorkflowRunState {
   runningStepIds?: string[];
   awaitingSignalStepIds?: string[];
   currentEpoch?: number;
+  /**
+   * Epochs of this run still open, unioned across every trigger's DAG - the same set the WS
+   * snapshot publishes. Carried here so a client that has only done the REST load can tell
+   * "another fire is executing" from "nothing is executing": that is what decides whether a
+   * restart targeting an OLDER epoch can be offered, since the backend refuses to reopen one
+   * while a sibling epoch of the same DAG is still running.
+   */
+  activeEpochs?: number[];
   epochTimestamps?: Array<{
     epoch: number;
     startedAt: string;

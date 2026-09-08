@@ -23,6 +23,11 @@ const h = vi.hoisted(() => ({
   providers: [] as unknown[],
 }));
 
+vi.mock('@/lib/hooks/useModelCostBasis', () => ({
+  // The picker asks once for the credit-estimate basis; these tests are not
+  // about the estimate, and an unanswered basis renders no estimate at all.
+  useModelCostBasis: () => ({ basis: null, isLoading: false }),
+}));
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k, useLocale: () => 'en' }));
 vi.mock('next/link', () => ({
   default: ({ href, children }: { href: string, children: React.ReactNode }) => <a href={href}>{children}</a>,

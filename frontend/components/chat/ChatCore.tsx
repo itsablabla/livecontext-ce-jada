@@ -16,14 +16,16 @@ import { MessageHistory } from '@/components/chat/MessageHistory';
 import { MessageComposer } from '@/components/chat/MessageComposer';
 import { ServiceApprovalCard } from '@/components/chat/ServiceApprovalCard';
 import { ToolAuthorizationCard } from '@/components/chat/ToolAuthorizationCard';
-import { useStreaming, serviceApprovalKey, toolAuthorizationKey, mergePendingServiceApprovals, type ToolActivity } from '@/contexts/StreamingContext';
+import { AskUserQuestionCard, type AskUserAnswer } from '@/components/chat/AskUserQuestionCard';
+import { useStreaming, serviceApprovalKey, toolAuthorizationKey, askUserKey, mergePendingServiceApprovals, type ToolActivity } from '@/contexts/StreamingContext';
 import { orchestratorApi } from '@/lib/api';
 import { conversationApi } from '@/lib/api/conversationApi';
+import { track } from '@/lib/analytics/analytics';
 import { useTranslations } from 'next-intl';
 import { useToast } from '@/components/Toast';
 import ToastContainer from '@/components/ToastContainer';
 import type { Message, Conversation } from '@/lib/api/conversationApi';
-import type { PendingServiceApproval, PendingToolAuthorization } from '@/contexts/StreamingContext';
+import type { PendingServiceApproval, PendingToolAuthorization, PendingAskUserQuestion } from '@/contexts/StreamingContext';
 import { parseUtcAware } from '@/lib/utils/dateFormatters';
 import { useAnchorScrollToBottom } from '@/lib/hooks/useAnchorScrollToBottom';
 import { useMessageQueueStore, type QueuedMessage } from '@/lib/stores/message-queue-store';
@@ -49,6 +51,18 @@ export type { AttachmentRef } from '@/lib/api/attachmentApi';
 import type { AttachmentRef } from '@/lib/api/attachmentApi';
 
 export interface ChatCoreProps {
+  /**
+   * The chat/studio switch, handed straight to the composer.
+   *
+   * <p>Optional and passed in, like on the composer itself: ChatCore renders the chat in a page, a
+   * side panel, a DM and a builder trigger panel, and only some of those are somewhere a reader
+   * would switch surface from. Importing the switch here would put a navigation control in all of
+   * them.
+   */
+  modeSwitch?: React.ReactNode;
+  /** Passed through to the composer: sits after its tools button. */
+  trailingLeadingAction?: React.ReactNode;
+
   // Conversation state
   conversationId: string | null;
   conversation?: Conversation | null;
@@ -111,6 +125,8 @@ export interface ChatCoreProps {
 }
 
 export function ChatCore({
+  modeSwitch,
+  trailingLeadingAction,
   conversationId,
   conversation,
   messages,
@@ -235,6 +251,9 @@ export function ChatCore({
   const streamingToolAuthorizations = conversationId
     ? streaming.getPendingToolAuthorizations(conversationId)
     : [];
+  const streamingAskUserQuestions: PendingAskUserQuestion[] = conversationId
+    ? (streaming.getPendingAskUserQuestions(conversationId) ?? [])
+    : [];
 
   // Service-approval cards: streaming ∪ persisted, deduped by key, dismissed dropped.
   const pendingServiceApprovals = useMemo((): PendingServiceApproval[] => {
@@ -290,6 +309,40 @@ export function ChatCore({
       }));
     return Array.from(byKey.values());
   }, [streamingToolAuthorizations, conversationPendingActions, dismissedKeys]);
+
+  // Question cards (ask_user): streaming ∪ persisted, deduped by tool call, dismissed dropped.
+  const pendingAskUserQuestions = useMemo((): PendingAskUserQuestion[] => {
+    const byKey = new Map<string, PendingAskUserQuestion>();
+    const add = (q: PendingAskUserQuestion) => {
+      const key = askUserKey(q.toolCallId);
+      if (!dismissedKeys.has(key) && !byKey.has(key)) byKey.set(key, q);
+    };
+    streamingAskUserQuestions.forEach(add);
+    conversationPendingActions
+      .filter(pa => pa.waiting_for === 'user_question' && pa.tool_call_id && pa.questions && pa.questions.length > 0)
+      .forEach(pa => add({
+        toolCallId: pa.tool_call_id!,
+        questions: pa.questions!,
+        timestamp: pa.created_at ? parseUtcAware(pa.created_at).getTime() : Date.now(),
+      }));
+    return Array.from(byKey.values());
+  }, [streamingAskUserQuestions, conversationPendingActions, dismissedKeys]);
+
+  // Impression analytics: each authorization card is counted ONCE per key, so a
+  // re-render (or the streaming/persisted copies of the same card) never double-counts.
+  const trackedToolAuthKeysRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const authz of pendingToolAuthorizations) {
+      const key = toolAuthorizationKey(authz.rule, authz.toolCallId);
+      if (trackedToolAuthKeysRef.current.has(key)) continue;
+      trackedToolAuthKeysRef.current.add(key);
+      track('chat_tool_auth_shown', {
+        rule: authz.rule,
+        blocking: Boolean(authz.blocking),
+        has_application: Boolean(authz.applicationId),
+      });
+    }
+  }, [pendingToolAuthorizations]);
 
 
   // Keep streaming tool activities visible - they already have visualizations from streaming
@@ -562,6 +615,12 @@ export function ChatCore({
     const gateKey = pending?.blocking ? pending.gateKey : undefined;
     dismissKey(key);
     streaming.clearToolAuthorization(conversationId, key);
+    track('chat_tool_auth_resolved', {
+      rule,
+      decision: 'approved',
+      blanket,
+      blocking: Boolean(pending?.blocking),
+    });
 
     if (blanket) {
       // "Ne plus demander dans cette conversation" → persist; backend turns this into a
@@ -619,12 +678,67 @@ export function ChatCore({
     const gateKey = pending?.blocking ? pending.gateKey : undefined;
     dismissKey(key);
     streaming.clearToolAuthorization(conversationId, key);
+    track('chat_tool_auth_resolved', { rule, decision: 'denied', blocking: Boolean(pending?.blocking) });
     // Disarm any pending auto-open so a declined turn can't open a later card.
     useAppRunAutoOpenStore.getState().clear();
     // No resume - the agent stops and the user takes over. Passing the gate key releases a
     // held call right away rather than leaving it parked until its deadline.
     conversationApi.denyToolAuthorization(conversationId, rule, gateKey).catch(() => {});
   }, [conversationId, pendingToolAuthorizations, streaming, dismissKey]);
+
+  // Question card submitted. Same shape as handleToolAuthorized: when the agent is HOLDING
+  // the call, the answers become its tool result and the turn continues in place; when the
+  // hold is gone (the gate's 240 s budget on the direct route, 150 s on a bridge run whose
+  // CLI wait the bridge declared, 25 s on one that declared none) the answers are sent as
+  // the user's next message, so the agent still gets them and never re-asks.
+  const askUserInFlightRef = useRef<Set<string>>(new Set());
+  const handleAskUserSubmit = useCallback(async (answers: AskUserAnswer[], toolCallId: string): Promise<boolean> => {
+    if (!conversationId) return false;
+    if (askUserInFlightRef.current.has(toolCallId)) return false;
+    askUserInFlightRef.current.add(toolCallId);
+    const key = askUserKey(toolCallId);
+    const pending = pendingAskUserQuestions.find(q => q.toolCallId === toolCallId);
+    const gateKey = pending?.blocking ? pending.gateKey : undefined;
+    let released = false;
+    try {
+      released = await conversationApi.answerAskUser(conversationId, toolCallId, gateKey, answers);
+    } catch {
+      // The card stays on screen, untouched, so the person can simply submit again. Dismissing
+      // it first would drop it from BOTH the live and the persisted list for the rest of the
+      // session (dismissedKeys is component state), and their answer with it.
+      askUserInFlightRef.current.delete(toolCallId);
+      addToast({ type: 'error', title: t('askUser.submitFailedTitle'), message: t('askUser.submitFailed'), duration: 5000 });
+      return false;
+    }
+    // Only a recorded answer takes the card away.
+    askUserInFlightRef.current.delete(toolCallId);
+    dismissKey(key);
+    streaming.clearAskUserQuestion(conversationId, key);
+    if (gateKey && released) {
+      // The held call resumes inside the turn still running; a message here would queue a
+      // redundant second turn. Both halves required, as for the authorization card.
+      return true;
+    }
+    // Fallback: carry the answers as the user's own message. Plain, readable text: it is what
+    // the transcript shows and what the model reads, on both execution routes.
+    const lines = answers.map(a => {
+      const picks = [...a.selected, ...(a.freeText ? [a.freeText] : [])].join(', ');
+      return `- ${a.header}: ${picks}`;
+    });
+    enqueueApprovalResume([t('askUser.resumeIntro'), ...lines].join('\n'));
+    return true;
+  }, [conversationId, pendingAskUserQuestions, streaming, dismissKey, enqueueApprovalResume, addToast, t]);
+
+  const handleAskUserDismissed = useCallback((toolCallId: string) => {
+    if (!conversationId) return;
+    const key = askUserKey(toolCallId);
+    const pending = pendingAskUserQuestions.find(q => q.toolCallId === toolCallId);
+    const gateKey = pending?.blocking ? pending.gateKey : undefined;
+    dismissKey(key);
+    streaming.clearAskUserQuestion(conversationId, key);
+    // No resume: a held call is released as dismissed so the agent moves on at once.
+    conversationApi.dismissAskUser(conversationId, toolCallId, gateKey).catch(() => {});
+  }, [conversationId, pendingAskUserQuestions, streaming, dismissKey]);
 
   // Install modal completed → grant once (a stray agent re-acquire is a benign 409) and
   // resume the agent telling it the app is installed.
@@ -668,11 +782,25 @@ export function ChatCore({
     // AWAIT the DELETE before sending - otherwise the DELETE can race past the
     // next turn's pendingAction write and wipe a freshly-persisted approval.
     if (!opts?.keepPendingActions
-        && (pendingServiceApprovals.length > 0 || pendingToolAuthorizations.length > 0) && conversationId) {
+        && (pendingServiceApprovals.length > 0 || pendingToolAuthorizations.length > 0
+            || pendingAskUserQuestions.length > 0) && conversationId) {
       pendingServiceApprovals.forEach(a => dismissKey(serviceApprovalKey(a.services, a.needsAttention)));
       pendingToolAuthorizations.forEach(a => dismissKey(toolAuthorizationKey(a.rule, a.toolCallId)));
+      pendingAskUserQuestions.forEach(q => dismissKey(askUserKey(q.toolCallId)));
+      // A question the agent is HOLDING must be released too, not just hidden: otherwise the
+      // park keeps a gate slot for minutes and, when it expires, the agent closes a turn the
+      // person has already moved past with "I am waiting for your choice".
       streaming.clearServiceApproval(conversationId);
       streaming.clearToolAuthorization(conversationId);
+      streaming.clearAskUserQuestion(conversationId);
+      // Awaited for the same reason as the DELETE below: each release also clears the
+      // card's persisted row, and that write must land before the next turn starts.
+      const releases = pendingAskUserQuestions
+        .filter(q => q.blocking && q.gateKey)
+        .map(q => conversationApi.dismissAskUser(conversationId, q.toolCallId, q.gateKey).catch(() => {}));
+      if (releases.length > 0) {
+        await Promise.all(releases);
+      }
       try {
         await conversationApi.clearPendingAction(conversationId);
       } catch {
@@ -682,7 +810,7 @@ export function ChatCore({
 
     setInputValue('');
     await onSendMessage(messageContent || undefined, attachments, defaultSkillIds, opts);
-  }, [inputValue, onSendMessage, pendingServiceApprovals, pendingToolAuthorizations, conversationId, streaming, dismissKey]);
+  }, [inputValue, onSendMessage, pendingServiceApprovals, pendingToolAuthorizations, pendingAskUserQuestions, conversationId, streaming, dismissKey]);
 
   // Key press handler
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
@@ -916,6 +1044,8 @@ export function ChatCore({
   // at the bottom (normal layout). Only one instance is mounted at a time.
   const composer = (
     <MessageComposer
+      modeSwitch={modeSwitch}
+      trailingLeadingAction={trailingLeadingAction}
       inputValue={inputValue}
       onInputChange={setInputValue}
       onSendMessage={handleSendMessage}
@@ -1046,6 +1176,16 @@ export function ChatCore({
                   pendingAuthorization={authz}
                   onApproved={handleToolAuthorized}
                   onDenied={handleToolDenied}
+                />
+              ))}
+              {/* Question cards - one per ask_user call awaiting the user's pick (async, parallel). */}
+              {conversationId && pendingAskUserQuestions.map((question) => (
+                <AskUserQuestionCard
+                  key={askUserKey(question.toolCallId)}
+                  conversationId={conversationId}
+                  pendingQuestion={question}
+                  onSubmit={handleAskUserSubmit}
+                  onDismiss={handleAskUserDismissed}
                 />
               ))}
               {/* Marketplace install modal - opened when the user approves an application:acquire */}

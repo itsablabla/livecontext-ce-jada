@@ -126,11 +126,23 @@ public class ResponseContextBuilder {
                     variables.put(label, schema.getReferenceSyntax());
                 } else {
                     String prefix = isAgent ? "agent" : "mcp";
+                    // `.response` is what an LLM agent answers with. Generate shares
+                    // the agent: prefix and produces no such field, so offering it
+                    // there names an output that never exists; the file it does
+                    // produce is read as .output.file.
+                    // Type OR flag, the same rule the loader applies, and for the
+                    // same reason: a plan written by the builder frontend carries
+                    // the type and no flags at all, so a flag-only test answers
+                    // "ordinary agent" for it and offers .response, which resolves
+                    // to an empty string rather than failing.
+                    boolean isGenerate = "generate".equals(step.get("type"))
+                            || Boolean.TRUE.equals(step.get("isGenerate"));
                     // Use original label as key for LLM readability
-                    variables.put(label, Map.of(
-                        "output", "{{" + prefix + ":" + normalizedLabel + ".output}}",
-                        "response", "{{" + prefix + ":" + normalizedLabel + ".response}}"
-                    ));
+                    variables.put(label, isGenerate
+                        ? Map.of("output", "{{" + prefix + ":" + normalizedLabel + ".output}}",
+                                 "file", "{{" + prefix + ":" + normalizedLabel + ".output.file}}")
+                        : Map.of("output", "{{" + prefix + ":" + normalizedLabel + ".output}}",
+                                 "response", "{{" + prefix + ":" + normalizedLabel + ".response}}"));
                 }
             }
         }

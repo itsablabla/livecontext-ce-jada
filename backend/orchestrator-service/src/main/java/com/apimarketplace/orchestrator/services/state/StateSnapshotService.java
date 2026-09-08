@@ -113,6 +113,13 @@ public class StateSnapshotService
     @Autowired(required = false)
     private MarkNodeFailedPatchBuilder markNodeFailedPatchBuilder;
 
+    /**
+     * Product-analytics emitter (PostHog). Optional so hand-built test instances
+     * and analytics-less deployments are untouched; a null field emits nothing.
+     */
+    @Autowired(required = false)
+    private com.apimarketplace.orchestrator.services.analytics.WorkflowAnalyticsEmitter workflowAnalyticsEmitter;
+
     @Autowired(required = false)
     private MarkNodeSkippedPatchBuilder markNodeSkippedPatchBuilder;
 
@@ -1258,6 +1265,9 @@ public class StateSnapshotService
             // Dual-write: close epoch header in workflow_epochs table with final state + duration
             if (finalState != null) {
                 workflowEpochService.closeEpoch(runId, triggerId, epoch, finalState, epochDurationMs);
+                if (workflowAnalyticsEmitter != null) {
+                    workflowAnalyticsEmitter.epochCompleted(run, epoch, finalState, epochDurationMs, "cycle_end");
+                }
             }
 
             log.info("[StateSnapshot] Closed+pruned epoch: runId={}, triggerId={}, epoch={}, epochDurationMs={}",
@@ -1293,6 +1303,9 @@ public class StateSnapshotService
                 }
                 if (finalState != null) {
                     workflowEpochService.closeEpoch(runId, triggerId, epoch, finalState, epochDurationMs);
+                    if (workflowAnalyticsEmitter != null) {
+                        workflowAnalyticsEmitter.epochCompleted(run, epoch, finalState, epochDurationMs, "deferred");
+                    }
                 }
                 closedEpochs.add(epoch);
             }

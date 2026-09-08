@@ -64,7 +64,7 @@ interface WorkflowRunContextValue {
   hardCancelRun: (runId: string) => Promise<void>;
   reactivateRun: (runId: string) => Promise<void>;
   setExecutionMode: (runId: string, mode: 'automatic' | 'step_by_step') => Promise<void>;
-  rerunStep: (runId: string, stepId: string) => Promise<any>;
+  rerunStep: (runId: string, stepId: string, epoch?: number) => Promise<any>;
   resolveApproval: (runId: string, nodeId: string, resolution: 'APPROVED' | 'REJECTED', epoch?: number, itemId?: string) => Promise<void>;
   updateReadySteps: (runId: string, readyStepsArray: string[]) => void;
   updateStatus: (runId: string, status: WorkflowRunStatusState) => void;
@@ -221,9 +221,9 @@ export function WorkflowRunProvider({ children }: { children: React.ReactNode })
       await manager.setExecutionMode(mode);
     },
 
-    rerunStep: async (runId: string, stepId: string) => {
+    rerunStep: async (runId: string, stepId: string, epoch?: number) => {
       const manager = getManager(runId);
-      return await manager.rerunStep(stepId);
+      return await manager.rerunStep(stepId, epoch);
     },
 
     resolveApproval: async (runId: string, nodeId: string, resolution: 'APPROVED' | 'REJECTED', epoch?: number, itemId?: string) => {

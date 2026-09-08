@@ -55,11 +55,13 @@ class AgentObservabilityPostHogEventTest {
     }
 
     @Test
-    @DisplayName("terminal_category omitted when stop_reason null; null credits → 0.0; absent ids omitted")
+    @DisplayName("terminal_category omitted when stop_reason is null AND the status cannot be inferred; null credits → 0.0; absent ids omitted")
     void nullSafe() {
         AgentObservabilityRequest req = new AgentObservabilityRequest();
         req.setTenantId("tenant-1");
-        req.setStatus("FAILED");
+        // A terminal status (COMPLETED / FAILED) would now be inferred into a
+        // category (see the inference tests below); a non-terminal one must not.
+        req.setStatus("RUNNING");
 
         Map<String, Object> props = AgentObservabilityService.buildAgentRunStoppedProps(req, null, null);
 
@@ -67,5 +69,70 @@ class AgentObservabilityPostHogEventTest {
         assertFalse(props.containsKey("workflow_run_id"));
         assertFalse(props.containsKey("agent_execution_id"));
         assertEquals(0.0, (double) props.get("credits_consumed"), 1e-9);
+    }
+
+    // ── stop_reason inference (regression: classify / CLI rows had none) ──────
+    //
+    // 281 of 375 agent_run_stopped events in one prod month carried no stop_reason
+    // and therefore no terminal_category: the classify and CLI producers never
+    // named one. The producers now do; the sink also infers from the outcome so
+    // a producer that forgets (or an older orchestrator mid-rollout) still lands
+    // in a category, flagged as inferred.
+
+    @Test
+    @DisplayName("a record without stop_reason infers it from a COMPLETED status and says so")
+    void infersCompletedFromStatus() {
+        AgentObservabilityRequest req = new AgentObservabilityRequest();
+        req.setStatus("COMPLETED");
+        req.setAgentType("classify");
+
+        Map<String, Object> p = AgentObservabilityService.buildAgentRunStoppedProps(req, UUID.randomUUID(), BigDecimal.ZERO);
+
+        assertEquals("COMPLETED", p.get("stop_reason"));
+        assertEquals("SUCCESS", p.get("terminal_category"));
+        assertEquals(true, p.get("stop_reason_inferred"));
+    }
+
+    @Test
+    @DisplayName("a FAILED status without stop_reason infers ERROR / FAILURE")
+    void infersErrorFromFailedStatus() {
+        AgentObservabilityRequest req = new AgentObservabilityRequest();
+        req.setStatus("FAILED");
+
+        Map<String, Object> p = AgentObservabilityService.buildAgentRunStoppedProps(req, UUID.randomUUID(), null);
+
+        assertEquals("ERROR", p.get("stop_reason"));
+        assertEquals("FAILURE", p.get("terminal_category"));
+        assertEquals(true, p.get("stop_reason_inferred"));
+    }
+
+    @Test
+    @DisplayName("an explicit stop_reason is never overridden and is not flagged as inferred")
+    void explicitStopReasonWins() {
+        AgentObservabilityRequest req = new AgentObservabilityRequest();
+        req.setStatus("COMPLETED");
+        req.setStopReason("STOPPED_BY_USER");
+
+        Map<String, Object> p = AgentObservabilityService.buildAgentRunStoppedProps(req, UUID.randomUUID(), null);
+
+        assertEquals("STOPPED_BY_USER", p.get("stop_reason"));
+        assertEquals("PARTIAL", p.get("terminal_category"));
+        assertFalse(p.containsKey("stop_reason_inferred"));
+    }
+
+    @Test
+    @DisplayName("an unknown status yields no stop_reason rather than a guessed category")
+    void unknownStatusStaysNull() {
+        assertEquals("COMPLETED", AgentObservabilityService.inferStopReasonFromStatus("partial_success"));
+        assertEquals("ERROR", AgentObservabilityService.inferStopReasonFromStatus(" failed "));
+        assertEquals(null, AgentObservabilityService.inferStopReasonFromStatus("RUNNING"));
+        assertEquals(null, AgentObservabilityService.inferStopReasonFromStatus(null));
+
+        AgentObservabilityRequest req = new AgentObservabilityRequest();
+        req.setStatus("RUNNING");
+        Map<String, Object> p = AgentObservabilityService.buildAgentRunStoppedProps(req, UUID.randomUUID(), null);
+        assertEquals(null, p.get("stop_reason"));
+        assertFalse(p.containsKey("terminal_category"));
+        assertFalse(p.containsKey("stop_reason_inferred"));
     }
 }

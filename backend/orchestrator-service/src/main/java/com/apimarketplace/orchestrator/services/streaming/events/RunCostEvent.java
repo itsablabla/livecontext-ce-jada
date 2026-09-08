@@ -10,7 +10,13 @@ import java.math.BigDecimal;
  * <ul>
  *   <li>{@code totalCostCredits} - total across ALL epochs of the run.</li>
  *   <li>{@code epochCostCredits} - cost of {@code epoch} alone.</li>
- *   <li>{@code budgetCredits} - the workflow budget, or {@code null} when none
+ *   <li>{@code periodSpentCredits} - what this workflow's governed fires have
+ *       spent in the current budget period, or {@code null} for a builder test
+ *       fire (which never counts against the cap). This is the figure the cap is
+ *       compared against, so it is what the run bar shows next to it. The key is
+ *       always PRESENT, null included: an absent key means "no news" to the
+ *       client, which keeps the last figure rather than blanking the gauge.</li>
+ *   <li>{@code budgetCredits} - the workflow's cap, or {@code null} when none
  *       is set; lets the frontend paint the over-budget warning without a
  *       separate fetch.</li>
  * </ul>
@@ -23,6 +29,7 @@ public record RunCostEvent(
     int epoch,
     BigDecimal epochCostCredits,
     BigDecimal totalCostCredits,
+    BigDecimal periodSpentCredits,
     BigDecimal budgetCredits,
     long timestamp
 ) implements WorkflowEvent {

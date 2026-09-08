@@ -16,6 +16,14 @@ public class CreateConversationDto {
 
     private String provider;
 
+    /**
+     * What to create: {@code chat} (the default when omitted) or {@code studio}.
+     *
+     * <p>Unknown values are refused rather than defaulted, so a caller that misspells the kind is
+     * told, instead of receiving an ordinary chat that never appears under the filter it asked for.
+     */
+    private String kind;
+
     private String workflowId;
 
     private String agentId;
@@ -54,6 +62,14 @@ public class CreateConversationDto {
         this.model = model;
     }
     
+    public String getKind() {
+        return kind;
+    }
+
+    public void setKind(String kind) {
+        this.kind = kind;
+    }
+
     public String getProvider() {
         return provider;
     }

@@ -98,10 +98,14 @@ class AgentToolsConfigCredentialsTest {
         Map<String, Object> creds = apply(Map.of(
             "tableAccessMode", "read",
             "workflowAccessMode", "write",
-            "fileAccessMode", "read"));
+            "fileAccessMode", "read",
+            "memoryAccessMode", "read"));
         assertThat(creds).containsEntry("tableAccessMode", "read")
             .containsEntry("workflowAccessMode", "write")
-            .containsEntry("fileAccessMode", "read");
+            .containsEntry("fileAccessMode", "read")
+            // A mode that is never forwarded is a restriction the operator can set and
+            // the runtime never applies, which is worse than not offering it at all.
+            .containsEntry("memoryAccessMode", "read");
     }
 
     @Test

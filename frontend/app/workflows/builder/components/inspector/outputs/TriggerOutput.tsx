@@ -68,6 +68,7 @@ export function TriggerOutput({
           runId={runId}
           stepAlias={stepAlias}
           dataType="output"
+          node={currentNode}
           isDraggable={false}
         />
       ) : isLoading ? (

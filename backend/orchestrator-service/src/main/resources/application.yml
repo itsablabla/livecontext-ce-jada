@@ -378,3 +378,32 @@ services:
       # Default false (warn-only) - flip to true after 7 days of clean prod logs.
       strict: ${PLAN_ALIAS_VALIDATION_STRICT:false}
 
+
+# Execution-log retention.
+#
+# Deletes journal (step data + its in-database JSON payloads) past each
+# workspace's plan window. Windows come from shared/contracts/log-retention.json,
+# resolved per tenant through auth-service, so the pricing page and this job
+# cannot state different numbers.
+#
+# THREE SWITCHES, ALL REQUIRED. Off, dry-run and no enforce-from each
+# independently prevent every deletion. Arming is a decision taken three times,
+# not a deploy that picks up a new bean.
+retention:
+  execution-logs:
+    # Master switch. Leave false until a dry run has been read.
+    enabled: ${RETENTION_EXECUTION_LOGS_ENABLED:false}
+    # Resolve and report, write nothing. The report says what a live run would do.
+    dry-run: ${RETENTION_EXECUTION_LOGS_DRY_RUN:true}
+    # Grandfathering floor, ISO instant (e.g. 2026-09-15T00:00:00Z). Journal
+    # created BEFORE it is never swept automatically: clearing the pre-existing
+    # backlog is a separate, announced action, because it deletes history users
+    # could see the day before. Unset means nothing is swept, ever.
+    enforce-from: ${RETENTION_EXECUTION_LOGS_ENFORCE_FROM:}
+    # SELF-HOSTED ONLY. A single window in days for every workspace, since a CE
+    # install has no plans. Leave blank in cloud, where auth-service answers per
+    # workspace (the window of the workspace owner's plan); a value here would
+    # override those plan windows for everyone.
+    days: ${RETENTION_EXECUTION_LOGS_DAYS:}
+    batch-size: ${RETENTION_EXECUTION_LOGS_BATCH_SIZE:500}
+    tenant-page-size: ${RETENTION_EXECUTION_LOGS_TENANT_PAGE_SIZE:200}

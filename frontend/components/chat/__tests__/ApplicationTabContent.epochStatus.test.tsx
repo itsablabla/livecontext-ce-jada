@@ -30,6 +30,7 @@ const runStateRef = vi.hoisted(() => ({
   current: {} as Record<string, unknown>,
 }));
 
+vi.mock('@/i18n/navigation', () => ({ usePathname: () => '/app/workflow/wf-1' }));
 vi.mock('@/contexts/WorkflowRunContext', () => ({
   useRun: () => [runStateRef.current, { executeStep: vi.fn() }],
 }));

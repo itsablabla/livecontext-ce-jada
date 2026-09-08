@@ -35,7 +35,7 @@ public class ColumnValueCoercer {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     /** FileRef discriminator - the value every platform gate keys on. */
-    private static final String FILE_REF_TYPE = "file";
+    static final String FILE_REF_TYPE = "file";
 
     private static final Set<String> TRUTHY = Set.of("true", "yes", "1", "on");
     private static final Set<String> FALSY_NULL = Set.of("", "null", "none", "nil");

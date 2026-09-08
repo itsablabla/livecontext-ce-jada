@@ -330,7 +330,7 @@ public class WorkflowBuilderHelpModule implements ToolModule {
         stepTypes.put("download_file", "Download a file from URL");
         stepTypes.put("public_link", "Mint a public, expiring signed URL for a stored file");
         stepTypes.put("media", "Process audio/video files: probe metadata, mux audio onto video, mix tracks, extract audio");
-        stepTypes.put("generate", "Generate one asset from a prompt: image, video, audio, voice or music (the model picked decides the format and the price)");
+        stepTypes.put("generate", "AI: generate one asset from a prompt - image, video, audio, voice or music (the model picked decides the format and the price). Keyed agent:<label>, written into the plan's 'agents' array, output read as {{agent:<label>.output.file}}");
         stepTypes.put("wait", "Delay execution for a specified duration");
         stepTypes.put("exit", "Exit branch execution (other parallel branches continue)");
         stepTypes.put("stop_on_error", "Stop ENTIRE workflow with error (all branches cancelled, run → FAILED)");
@@ -354,6 +354,15 @@ public class WorkflowBuilderHelpModule implements ToolModule {
                 "Use the BARE column name (where={column:'message_id', operator:'=', value:'{{trigger:x.id}}'}) - do NOT prefix it with 'data.'. " +
                 "A 'data.' prefix you include is auto-stripped, so 'message_id' and 'data.message_id' resolve identically (no double-prefix, both work). " +
                 "The reserved name 'id' matches the row's primary key, not a stored column. set= keys (update_row) follow the same bare-name rule."),
+            Map.entry("media_columns", "A column of type 'file' or 'image' holds a real file reference, and find_rows/read_rows give it back as the file OBJECT - not as text you have to parse. " +
+                "Map the WHOLE cell into a parameter that takes a file: from find_rows {{table:<label>.output.items[0].<column>}}, or {{item.<column>}} once a Split node is iterating the rows (find_rows returns a collection and spawns nothing itself); from read_rows the key is rows, so {{table:<label>.output.rows[0].<column>}}. " +
+                "Do NOT keep a file reference as JSON text in a 'text' column and re-parse it in a code node: that older pattern still runs (so it is easy to copy from an existing workflow), but it costs a parse step and the cell is not viewable in the table. " +
+                "FOUR THINGS THAT CHANGED, and that an existing workflow may still be relying on. (1) These cells used to arrive as a JSON string: if a code node parses one, delete the parse, because parsing an object fails. " +
+                "(2) Passing the cell as a where value used to match, and no longer does - the filter compares the STORED text - so filter and de-duplicate on a text or id column instead. " +
+                "(3) An extract_from_file node pointed at a cell whose file has no stored path used to COMPLETE, extracting the reference's own text as if it were the document; it now FAILS instead, so a run that was green can turn red - which is the point, because what it produced was never the file. " +
+                "(4) Copying the cell into a text column via set used to store the reference; a cell carrying a url or an id now lands there as a short readable summary instead, from which the file cannot be recovered - keep it in a file or image column. " +
+                "One limit that is not new: a node needs the cell's 'path' to reach the file's bytes (public_link, media, extract_from_file all do), and a cell carries a path only when the file it names has one - a link to somewhere else never does, and neither does a file this workspace knows only by id. Read the cell back and check for 'path' when the workflow depends on the bytes; a node that cannot find one now says so instead of blaming your mapping. " +
+                "The same caution applies to 'url': it is there when the cell names a file by id or carries a link of its own, and absent on a reference that has only a storage path, which is the commonest shape a workflow produces."),
             Map.entry("dedupe_idempotent_write", "To avoid duplicate rows when re-processing the same item, do NOT insert_row unconditionally. " +
                 "Guard the insert: find_rows {column:'<unique_key>', operator:'=', value:'{{...}}'} → decision on {{...find.output.item_count}} == 0 → insert_row on the 'new' branch; " +
                 "route the 'exists' branch to a stop/exit. This makes the write idempotent regardless of upstream re-fires."),

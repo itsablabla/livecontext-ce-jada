@@ -79,8 +79,53 @@ public record ApiConfigurationRequest(
     // create-API flow leaves it null and falls back to gen_random_uuid().
     // Trailing position so existing positional callers stay backwards-compat
     // (see the no-apiId convenience constructor below).
-    String apiId
+    String apiId,
+
+    // errorPolicy (V477): ordered error-classification rules from the seed file, stored on
+    // catalog.apis.error_policy and read at execution time. Carried as a raw JsonNode because
+    // the shape belongs to SCHEMA.md, not to this DTO, and validate_apis.py is what enforces
+    // it. Trailing position + the convenience constructors below keep every positional caller
+    // compiling. WITHOUT this component Jackson drops the key silently and the whole declared
+    // half of the feature is inert - which is exactly what happened before it was added.
+    JsonNode errorPolicy
 ) {
+
+    /**
+     * Backwards-compat convenience constructor for callers that supply an {@code apiId} but no
+     * {@code errorPolicy} (the vast majority of APIs declare none).
+     */
+    public ApiConfigurationRequest(
+            String apiName,
+            String apiDescription,
+            String selectedCategory,
+            String categoryDescription,
+            String selectedSubcategory,
+            String subcategoryDescription,
+            String subcategoryIconUrl,
+            String categoryId,
+            String subcategoryId,
+            Boolean isCustomCategory,
+            Boolean isCustomSubcategory,
+            Boolean isLocal,
+            String iconSlug,
+            String apiSlug,
+            String credentialMode,
+            String platformCredentialName,
+            String source,
+            String iconUrl,
+            String toolCategoryIconUrl,
+            ApiConfigDto apiConfig,
+            MonetizationConfigDto monetization,
+            List<McpToolDto> mcpTools,
+            String apiId
+    ) {
+        this(apiName, apiDescription, selectedCategory, categoryDescription,
+                selectedSubcategory, subcategoryDescription, subcategoryIconUrl,
+                categoryId, subcategoryId, isCustomCategory, isCustomSubcategory,
+                isLocal, iconSlug, apiSlug, credentialMode, platformCredentialName,
+                source, iconUrl, toolCategoryIconUrl, apiConfig, monetization, mcpTools,
+                apiId, null);
+    }
 
     /**
      * Backwards-compat convenience constructor that defaults {@code apiId} to
@@ -115,7 +160,7 @@ public record ApiConfigurationRequest(
                 selectedSubcategory, subcategoryDescription, subcategoryIconUrl,
                 categoryId, subcategoryId, isCustomCategory, isCustomSubcategory,
                 isLocal, iconSlug, apiSlug, credentialMode, platformCredentialName,
-                null, null, toolCategoryIconUrl, apiConfig, monetization, mcpTools, null);
+                null, null, toolCategoryIconUrl, apiConfig, monetization, mcpTools, null, null);
     }
 
     /**

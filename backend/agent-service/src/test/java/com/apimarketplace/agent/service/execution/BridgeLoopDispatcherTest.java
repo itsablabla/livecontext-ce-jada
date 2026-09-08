@@ -140,6 +140,91 @@ class BridgeLoopDispatcherTest {
         }
 
         @Test
+        @DisplayName("a tool-less context sends an EMPTY module list, so the CLI gets zero platform tools")
+        void toolLessContextSendsEmptyModules() {
+            AgentExecutionResponseDto ok = new AgentExecutionResponseDto(
+                true, "ok", "ok", List.of(), 1, Map.of(),
+                null, 10L, "claude-code", "model-x",
+                List.of(), AgentStopReason.COMPLETED.name(),
+                Map.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), null);
+            when(bridgeClient.execute(any())).thenReturn(ok);
+
+            // Exactly the shape classify and guardrail build: one turn, no tools.
+            AgentLoopContext context = AgentLoopContext.builder()
+                .provider("claude-code").model("model-x")
+                .systemPrompt("system").userPrompt("user")
+                .tools(null).autoDiscoverTools(false)
+                .maxIterations(1).temperature(0.0).maxTokens(500)
+                .tenantId("tenant-1").build();
+
+            dispatcher.execute(context);
+
+            ArgumentCaptor<AgentExecutionRequestDto> captor =
+                ArgumentCaptor.forClass(AgentExecutionRequestDto.class);
+            org.mockito.Mockito.verify(bridgeClient).execute(captor.capture());
+            // null here would mean "nobody decided" and expand to the default module set
+            // (table, workflow, files, catalog...), handing a one-shot judge a mutating,
+            // credit-spending toolset it never has on the direct-API path.
+            assertThat(captor.getValue().enabledModules()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a context that brings tools keeps module resolution to the callee (null)")
+        void toolCarryingContextLeavesModulesUnset() {
+            AgentExecutionResponseDto ok = new AgentExecutionResponseDto(
+                true, "ok", "ok", List.of(), 1, Map.of(),
+                null, 10L, "claude-code", "model-x",
+                List.of(), AgentStopReason.COMPLETED.name(),
+                Map.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), null);
+            when(bridgeClient.execute(any())).thenReturn(ok);
+
+            AgentLoopContext context = AgentLoopContext.builder()
+                .provider("claude-code").model("model-x")
+                .systemPrompt("system").userPrompt("user")
+                .tools(List.of(com.apimarketplace.agent.domain.ToolDefinition.builder()
+                    .name("table").description("d").parameters(List.of()).build()))
+                .maxIterations(1).temperature(0.0).maxTokens(500)
+                .tenantId("tenant-1").build();
+
+            dispatcher.execute(context);
+
+            ArgumentCaptor<AgentExecutionRequestDto> captor =
+                ArgumentCaptor.forClass(AgentExecutionRequestDto.class);
+            org.mockito.Mockito.verify(bridgeClient).execute(captor.capture());
+            assertThat(captor.getValue().enabledModules()).isNull();
+        }
+
+        @Test
+        @DisplayName("a context that asks for tool auto-discovery leaves module resolution to the callee")
+        void autoDiscoveringContextLeavesModulesUnset() {
+            AgentExecutionResponseDto ok = new AgentExecutionResponseDto(
+                true, "ok", "ok", List.of(), 1, Map.of(),
+                null, 10L, "claude-code", "model-x",
+                List.of(), AgentStopReason.COMPLETED.name(),
+                Map.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), null);
+            when(bridgeClient.execute(any())).thenReturn(ok);
+
+            // No tools in hand, but the caller wants them discovered: that is not tool-less,
+            // so the callee keeps deciding the module set.
+            AgentLoopContext context = AgentLoopContext.builder()
+                .provider("claude-code").model("model-x")
+                .systemPrompt("system").userPrompt("user")
+                .tools(null).autoDiscoverTools(true)
+                .maxIterations(1).temperature(0.0).maxTokens(500)
+                .tenantId("tenant-1").build();
+
+            dispatcher.execute(context);
+
+            ArgumentCaptor<AgentExecutionRequestDto> captor =
+                ArgumentCaptor.forClass(AgentExecutionRequestDto.class);
+            org.mockito.Mockito.verify(bridgeClient).execute(captor.capture());
+            assertThat(captor.getValue().enabledModules()).isNull();
+        }
+
+        @Test
         @DisplayName("bridge DTO carries provider/model/temperature/maxTokens/prompts/tenantId from context")
         void dtoCarriesContextFields() {
             AgentExecutionResponseDto ok = new AgentExecutionResponseDto(

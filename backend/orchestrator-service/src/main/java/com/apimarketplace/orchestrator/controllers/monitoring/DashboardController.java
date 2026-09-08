@@ -6,6 +6,7 @@ import com.apimarketplace.orchestrator.controllers.dto.HomeStatusDto;
 import com.apimarketplace.orchestrator.domain.NotificationReadStateEntity;
 import com.apimarketplace.orchestrator.repository.NotificationReadStateRepository;
 import com.apimarketplace.orchestrator.services.ActiveAutomationsService;
+import com.apimarketplace.orchestrator.services.badge.BadgeService;
 import com.apimarketplace.orchestrator.services.notification.NotificationService;
 import com.apimarketplace.orchestrator.services.notification.NotificationsResponse;
 import org.slf4j.Logger;
@@ -37,15 +38,18 @@ public class DashboardController {
     private final TenantResolver tenantResolver;
     private final NotificationService notificationService;
     private final NotificationReadStateRepository readStateRepository;
+    private final BadgeService badgeService;
 
     public DashboardController(ActiveAutomationsService activeAutomationsService,
                                TenantResolver tenantResolver,
                                NotificationService notificationService,
-                               NotificationReadStateRepository readStateRepository) {
+                               NotificationReadStateRepository readStateRepository,
+                               BadgeService badgeService) {
         this.activeAutomationsService = activeAutomationsService;
         this.tenantResolver = tenantResolver;
         this.notificationService = notificationService;
         this.readStateRepository = readStateRepository;
+        this.badgeService = badgeService;
     }
 
     /**
@@ -92,6 +96,14 @@ public class DashboardController {
 
         List<ActiveAutomationDto> automations =
                 activeAutomationsService.getActiveAutomations(tenantId, orgId, orgRole);
+
+        // Badge evaluation rides this poll: it is the one endpoint that already
+        // says "this user is active right now", so a trophy earned by a 3am
+        // schedule produces its bell row while the user is around to see it,
+        // with no badge logic wired into workflow / run / publish paths. Runs on
+        // a background thread and is throttled per user, so this response never
+        // waits on it and the poll cadence does not become the query cadence.
+        badgeService.evaluateInBackground(tenantId, orgId);
 
         NotificationsResponse notifs = notificationService.getNotifications(tenantId, orgId);
 

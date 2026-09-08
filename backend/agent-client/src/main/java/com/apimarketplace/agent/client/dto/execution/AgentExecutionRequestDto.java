@@ -169,6 +169,33 @@ public record AgentExecutionRequestDto(
     }
 
     /**
+     * Return a copy with {@link #systemPrompt()} replaced.
+     *
+     * <p>Used by agent-service to append the workspace's long-term memory block
+     * once, at the single point every direct-API execution passes through, before
+     * the run is split between the bridge transport and the direct loop. Doing it
+     * there rather than in each producer is what keeps the block from drifting the
+     * way the skills tree did - that one is built only in conversation-service, so
+     * workflow agents and sub-agents never receive it.
+     *
+     * <p>No-op (returns {@code this}) when the prompt is unchanged, so a workspace
+     * with no memories allocates nothing.
+     */
+    public AgentExecutionRequestDto withSystemPrompt(String newSystemPrompt) {
+        if (java.util.Objects.equals(newSystemPrompt, systemPrompt)) {
+            return this;
+        }
+        return new AgentExecutionRequestDto(
+            prompt, newSystemPrompt, provider, model, temperature, maxTokens, tools,
+            autoDiscoverTools, maxTools, maxIterations, executionTimeout, conversationHistory,
+            tenantId, runId, nodeId, variables, credentials, maxCreditBudget, streamChannelId,
+            itemIndex, loopIteration, conversationId, streamingFormat, parentConversationId,
+            subAgentName, subAgentAvatarUrl, subAgentId, workflowRunId, attachments, agentEntityId,
+            tenantBalance, pricingRates, creditsConsumedSoFar, loopIdenticalStop, loopConsecutiveStop,
+            executionId, source, reasoningEffort, enabledModules);
+    }
+
+    /**
      * Return a copy with {@link #provider()} replaced. Used by agent-service to
      * normalise a stale/blank provider against the model catalog before dispatch
      * - in particular re-routing a Claude bridge (CLI) model that was collapsed
@@ -212,6 +239,15 @@ public record AgentExecutionRequestDto(
     }
 
     /**
+     * Credentials key the bridge server matches EXACTLY to enter restricted "API mode".
+     * Public so the other writer of this marker (the classify / guardrail / sub-agent
+     * paths, via {@code ExecutionLinkRouter}) cannot drift onto a different spelling:
+     * a typo here is not a compile error, it is a linked CLI run that quietly keeps its
+     * native tools and the project cwd.
+     */
+    public static final String RESTRICTED_TOOLSET_KEY = "__restrictedToolset__";
+
+    /**
      * Return a copy flagged for CLOUD model-execution-link "API mode": the bridge locks the
      * CLI to ONLY the platform MCP tools (no native Bash/Read/Write/Web), an empty cwd (no
      * AGENTS.md / CLAUDE.md / project files) and no account/CLI leakage, so a linked model
@@ -228,7 +264,7 @@ public record AgentExecutionRequestDto(
         java.util.Map<String, Object> creds = credentials == null
             ? new java.util.HashMap<>()
             : new java.util.HashMap<>(credentials);
-        creds.put("__restrictedToolset__", true);
+        creds.put(RESTRICTED_TOOLSET_KEY, true);
         return new AgentExecutionRequestDto(
             prompt, systemPrompt, provider, model, temperature, maxTokens, tools,
             autoDiscoverTools, maxTools, maxIterations, executionTimeout, conversationHistory,

@@ -69,10 +69,10 @@ public class HtmlExtractNode extends BaseNode {
 
         // Build resolved_params early so every exit path can include it
         Map<String, Object> earlyResolvedParams = new LinkedHashMap<>();
-        earlyResolvedParams.put("source_html_expression", sourceHtmlExpression);
-        earlyResolvedParams.put("extraction_mode", extractionMode);
-        if (rootSelector != null) earlyResolvedParams.put("root_selector", rootSelector);
-        earlyResolvedParams.put("clean_whitespace", cleanWhitespace);
+        earlyResolvedParams.put("sourceHtml", sourceHtmlExpression);
+        earlyResolvedParams.put("extractionMode", extractionMode);
+        if (rootSelector != null) earlyResolvedParams.put("rootSelector", rootSelector);
+        earlyResolvedParams.put("cleanWhitespace", cleanWhitespace);
         earlyResolvedParams.put("field_count", fields.size());
 
         if (sourceHtmlExpression == null || sourceHtmlExpression.isBlank()) {
@@ -127,9 +127,9 @@ public class HtmlExtractNode extends BaseNode {
                     sourceHtmlExpression);
                 emptyResult.put("errors", List.of(errMsg));
                 Map<String, Object> emptyInput = new LinkedHashMap<>();
-                emptyInput.put("source_html_length", 0);
-                emptyInput.put("extraction_mode", extractionMode);
-                emptyInput.put("root_selector", rootSelector);
+                emptyInput.put("sourceHtmlLength", 0);
+                emptyInput.put("extractionMode", extractionMode);
+                emptyInput.put("rootSelector", rootSelector);
                 emptyInput.put("field_count", fields.size());
                 emptyResult.put("resolved_params", emptyInput);
                 return successWithMetadata(emptyResult, context);
@@ -185,11 +185,11 @@ public class HtmlExtractNode extends BaseNode {
             // "Resolved parameters" panel (mirror SortNode/FilterNode pattern).
             Map<String, Object> resolvedParams = new LinkedHashMap<>();
             String htmlPreview = html.length() > 500 ? html.substring(0, 500) + "..." : html;
-            resolvedParams.put("source_html", htmlPreview);
-            resolvedParams.put("source_html_length", html.length());
-            resolvedParams.put("extraction_mode", extractionMode);
-            if (rootSelector != null) resolvedParams.put("root_selector", rootSelector);
-            resolvedParams.put("clean_whitespace", cleanWhitespace);
+            resolvedParams.put("sourceHtml", htmlPreview);
+            resolvedParams.put("sourceHtmlLength", html.length());
+            resolvedParams.put("extractionMode", extractionMode);
+            if (rootSelector != null) resolvedParams.put("rootSelector", rootSelector);
+            resolvedParams.put("cleanWhitespace", cleanWhitespace);
             resolvedParams.put("fields", fields.stream()
                 .map(f -> {
                     Map<String, Object> m = new LinkedHashMap<>();

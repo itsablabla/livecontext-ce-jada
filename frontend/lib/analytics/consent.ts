@@ -13,7 +13,7 @@
 
 /** Must match {@link CookieConsentBanner} STORAGE_KEY / VERSION. */
 const CONSENT_STORAGE_KEY = 'lc.cookieConsent';
-const CONSENT_VERSION = 1;
+export const CONSENT_VERSION = 1;
 
 /**
  * Window event the banner dispatches when the user makes (or changes) a choice,

@@ -71,7 +71,7 @@ class ScheduleControllerOrgStampTest {
         controller = new ScheduleController(scheduleRepository, cronParser, tenantResolver,
                 planLimitHelper, triggerLifecycleManager);
         when(tenantResolver.resolve(request)).thenReturn(TENANT_ID);
-        when(cronParser.isValid("0 9 * * *")).thenReturn(true);
+        when(cronParser.isAcceptableInput("0 9 * * *")).thenReturn(true);
         when(cronParser.getNextExecution("0 9 * * *", "UTC"))
                 .thenReturn(Instant.parse("2026-05-18T09:00:00Z"));
         when(cronParser.getDescription("0 9 * * *")).thenReturn("At 09:00 every day");

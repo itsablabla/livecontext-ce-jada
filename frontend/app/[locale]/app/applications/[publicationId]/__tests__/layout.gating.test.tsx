@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
 
 /**
  * Pins the editable-application GATING + THREADING in the application layout: how it
@@ -17,9 +17,17 @@ import { cleanup, render, waitFor } from '@testing-library/react';
  *    still bound to the clone (editing lives in the separate WORKFLOW twin in /app/workflows).
  *  - publisher (pub.ownedByMe) -> canEdit AND canPublish, bound to the SOURCE (pub.workflowId).
  *  - non-owner / non-acquirer -> neither, bound to the preview clone.
+ *
+ * It also threads `isInstalledClone`, which answers a DIFFERENT question from
+ * canEdit: whether the bound workflow is the caller's own installed clone - the one
+ * the reset-data endpoint resolves. An install is frozen, so the two are true at
+ * opposite times, and reading ownership for it is what used to offer the reset to
+ * anyone who is not the publisher, install or no install.
  */
 
-const detailProps = vi.hoisted(() => [] as Array<{ workflowId: string; canEdit?: boolean; canPublish?: boolean; remote?: boolean }>);
+const detailProps = vi.hoisted(() => [] as Array<{ workflowId: string; canEdit?: boolean; canPublish?: boolean; isInstalledClone?: boolean; remote?: boolean }>);
+const setupGateSkip = vi.hoisted(() => ({ current: undefined as (() => void) | undefined }));
+const setupGateUpdated = vi.hoisted(() => ({ current: undefined as (() => void) | undefined }));
 const getAcquiredApplications = vi.hoisted(() => vi.fn());
 const getApplicationWorkflow = vi.hoisted(() => vi.fn());
 const getApplicationRun = vi.hoisted(() => vi.fn());
@@ -37,8 +45,8 @@ vi.mock('next-intl', () => {
   return { useTranslations: () => t };
 });
 vi.mock('@/components/views/application/ApplicationDetailView', () => ({
-  ApplicationDetailView: (p: { workflowId: string; canEdit?: boolean; canPublish?: boolean; remote?: boolean }) => {
-    detailProps.push({ workflowId: p.workflowId, canEdit: p.canEdit, canPublish: p.canPublish, remote: p.remote });
+  ApplicationDetailView: (p: { workflowId: string; canEdit?: boolean; canPublish?: boolean; isInstalledClone?: boolean; remote?: boolean }) => {
+    detailProps.push({ workflowId: p.workflowId, canEdit: p.canEdit, canPublish: p.canPublish, isInstalledClone: p.isInstalledClone, remote: p.remote });
     return null;
   },
 }));
@@ -52,7 +60,13 @@ vi.mock('@/hooks/useCeCloudLinkStatus', () => ({
     isInstallCloudLinked: cfg.installLinked,
   }),
 }));
-vi.mock('@/components/views/application/SetupRequiredState', () => ({ SetupRequiredState: () => null }));
+vi.mock('@/components/views/application/SetupRequiredState', () => ({
+  SetupRequiredState: (p: { onSkip?: () => void; onConnectionsUpdated?: () => void }) => {
+    setupGateSkip.current = p.onSkip;
+    setupGateUpdated.current = p.onConnectionsUpdated;
+    return null;
+  },
+}));
 vi.mock('@/contexts/WorkflowModeContext', () => ({
   WorkflowModeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
@@ -87,6 +101,8 @@ async function lastDetailProps() {
 describe('ApplicationLayout - editable gating + threading', () => {
   beforeEach(() => {
     detailProps.length = 0;
+    setupGateSkip.current = undefined;
+    setupGateUpdated.current = undefined;
     getAcquiredApplications.mockReset();
     getApplicationWorkflow.mockReset();
     getApplicationRun.mockReset();
@@ -108,7 +124,7 @@ describe('ApplicationLayout - editable gating + threading', () => {
 
     renderLayout();
 
-    expect(await lastDetailProps()).toEqual({ workflowId: 'src-wf', canEdit: true, canPublish: true, remote: false });
+    expect(await lastDetailProps()).toEqual({ workflowId: 'src-wf', canEdit: true, canPublish: true, isInstalledClone: false, remote: false });
     // Bound to the editable source, NOT the frozen preview clone.
     expect(getApplicationWorkflow).not.toHaveBeenCalled();
   });
@@ -121,7 +137,7 @@ describe('ApplicationLayout - editable gating + threading', () => {
     renderLayout();
 
     // The acquired APPLICATION clone is run-only; editing lives in the decoupled WORKFLOW twin.
-    expect(await lastDetailProps()).toEqual({ workflowId: 'clone-wf', canEdit: false, canPublish: false, remote: false });
+    expect(await lastDetailProps()).toEqual({ workflowId: 'clone-wf', canEdit: false, canPublish: false, isInstalledClone: true, remote: false });
   });
 
   it('non-owner / non-acquirer -> neither, bound to the preview clone', async () => {
@@ -132,7 +148,67 @@ describe('ApplicationLayout - editable gating + threading', () => {
 
     renderLayout();
 
-    expect(await lastDetailProps()).toEqual({ workflowId: 'preview-wf', canEdit: false, canPublish: false, remote: false });
+    expect(await lastDetailProps()).toEqual({ workflowId: 'preview-wf', canEdit: false, canPublish: false, isInstalledClone: false, remote: false });
+  });
+
+  it('marks the install on the FRESH-run path too, which is how an acquirer opens it the first time', async () => {
+    // The publisher fixture used below cannot see this: its expected answer is
+    // false, which a lost flag also produces. An acquirer with no run yet is the
+    // flow that actually takes this path, and the one whose reset depends on it.
+    resolveApplicationPublication.mockResolvedValue({ id: PUB_ID, title: 'T', workflowId: 'src-wf', ownedByMe: false });
+    getAcquiredApplications.mockResolvedValue({ applications: [{ sourcePublicationId: PUB_ID, workflowId: 'clone-wf' }] });
+    getApplicationRun.mockResolvedValue(null);
+    getWorkflow.mockResolvedValue({ plan: { triggers: [] } });
+    executeWorkflow.mockResolvedValue({ runId: 'run-5' });
+
+    renderLayout();
+
+    expect(await lastDetailProps()).toEqual({ workflowId: 'clone-wf', canEdit: false, canPublish: false, isInstalledClone: true, remote: false });
+  });
+
+  it('marks the install through the credential SETUP gate, which only an install can reach', async () => {
+    // The pre-flight gate fires for acquisitions only, and it re-enters
+    // createRunAndReady from its own stored state - a second place the flag has to
+    // survive, on the exact flow (a fresh install missing its connections) where
+    // the user then wants the reset.
+    resolveApplicationPublication.mockResolvedValue({ id: PUB_ID, title: 'T', workflowId: 'src-wf', ownedByMe: false });
+    getAcquiredApplications.mockResolvedValue({ applications: [{ sourcePublicationId: PUB_ID, workflowId: 'clone-wf' }] });
+    getApplicationRun.mockResolvedValue(null);
+    getWorkflow.mockResolvedValue({ plan: { triggers: [] } });
+    checkMissingCredentialsAsync.mockResolvedValue({ wizardable: [{ integrationName: 'slack' }], manual: [] });
+    executeWorkflow.mockResolvedValue({ runId: 'run-6' });
+
+    renderLayout();
+
+    // The gate holds the render until the wizard is answered: nothing reaches the view yet.
+    await waitFor(() => expect(checkMissingCredentialsAsync).toHaveBeenCalled());
+    expect(detailProps).toHaveLength(0);
+
+    // Skipping the wizard is what resumes it.
+    await waitFor(() => expect(setupGateSkip.current).toBeTypeOf('function'));
+    await act(async () => { setupGateSkip.current!(); });
+
+    expect(await lastDetailProps()).toEqual({ workflowId: 'clone-wf', canEdit: false, canPublish: false, isInstalledClone: true, remote: false });
+  });
+
+  it('marks the install when the credentials are CONNECTED, the other and more ordinary exit of the gate', async () => {
+    // Skipping and connecting resume through the same call but from different
+    // handlers, and connecting is the path the wizard is there for. It re-checks
+    // the credentials first, so the second answer has to come back clean.
+    resolveApplicationPublication.mockResolvedValue({ id: PUB_ID, title: 'T', workflowId: 'src-wf', ownedByMe: false });
+    getAcquiredApplications.mockResolvedValue({ applications: [{ sourcePublicationId: PUB_ID, workflowId: 'clone-wf' }] });
+    getApplicationRun.mockResolvedValue(null);
+    getWorkflow.mockResolvedValue({ plan: { triggers: [] } });
+    checkMissingCredentialsAsync.mockResolvedValueOnce({ wizardable: [{ integrationName: 'slack' }], manual: [] });
+    checkMissingCredentialsAsync.mockResolvedValue({ wizardable: [], manual: [] });
+    executeWorkflow.mockResolvedValue({ runId: 'run-7' });
+
+    renderLayout();
+
+    await waitFor(() => expect(setupGateUpdated.current).toBeTypeOf('function'));
+    await act(async () => { await setupGateUpdated.current!(); });
+
+    expect(await lastDetailProps()).toEqual({ workflowId: 'clone-wf', canEdit: false, canPublish: false, isInstalledClone: true, remote: false });
   });
 
   it('threads the flags through the fresh-run path (createRunAndReady), not only the existing-run reuse', async () => {
@@ -146,7 +222,7 @@ describe('ApplicationLayout - editable gating + threading', () => {
 
     renderLayout();
 
-    expect(await lastDetailProps()).toEqual({ workflowId: 'src-wf', canEdit: true, canPublish: true, remote: false });
+    expect(await lastDetailProps()).toEqual({ workflowId: 'src-wf', canEdit: true, canPublish: true, isInstalledClone: false, remote: false });
     expect(executeWorkflow).toHaveBeenCalledTimes(1);
   });
 
@@ -164,7 +240,7 @@ describe('ApplicationLayout - editable gating + threading', () => {
 
     renderLayout();
 
-    expect(await lastDetailProps()).toEqual({ workflowId: 'src-wf', canEdit: true, canPublish: true, remote: true });
+    expect(await lastDetailProps()).toEqual({ workflowId: 'src-wf', canEdit: true, canPublish: true, isInstalledClone: false, remote: true });
   });
 
   it('CE that is NOT cloud-linked -> remote stays false (local profiles work, unchanged)', async () => {

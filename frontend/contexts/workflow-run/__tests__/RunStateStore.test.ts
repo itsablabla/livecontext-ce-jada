@@ -762,6 +762,54 @@ describe('RunStateStore', () => {
   });
 
   // =========================================================================
+  // activeEpochs from the REST payload
+  // =========================================================================
+
+  describe('currentEpoch on the REST path', () => {
+    it('leaves the known epoch alone when the payload does not carry one', () => {
+      // "This payload does not say" is not "epoch 0". Coalescing a missing field to 0 is what
+      // let a client parked on epoch 0 of a later-epoch run read that epoch as the live one -
+      // the focused-epoch controls compare exactly this field for identity.
+      store.setEpoch(4);
+
+      store.applyMetadata(createMinimalApiData() as never);
+
+      expect(store.getState().currentEpoch).toBe(4);
+    });
+
+    it('still takes epoch 0 when the payload DOES carry it', () => {
+      // 0 is a real first fire, so the guard has to be on presence, not on truthiness.
+      store.setEpoch(4);
+
+      store.applyMetadata(createMinimalApiData({ currentEpoch: 0 }) as never);
+
+      expect(store.getState().currentEpoch).toBe(0);
+    });
+  });
+
+  describe('activeEpochs on the REST path', () => {
+    it('seeds them from the state payload, not only from a WS snapshot', () => {
+      // They gate the client-side mirror of the backend refusal "another epoch of this DAG is
+      // still executing". Read from the WS snapshot ALONE, the list is empty until the first
+      // batch lands, so a canvas opened on a live run reads "nothing is executing" and offers
+      // a restart the backend answers with a 409.
+      store.initializeFromApi(createMinimalApiData({ activeEpochs: [3] }));
+
+      expect(store.getState().activeEpochs).toEqual([3]);
+    });
+
+    it('leaves a set already filled in alone when the payload omits the field', () => {
+      // Defaulting to [] on an older backend, or on a payload shape that does not carry it,
+      // would erase what the snapshot knows and re-open the same hole from the other side.
+      store.setEpochReadySteps({}, [2]);
+
+      store.initializeFromApi(createMinimalApiData());
+
+      expect(store.getState().activeEpochs).toEqual([2]);
+    });
+  });
+
+  // =========================================================================
   // resetForRerun
   // =========================================================================
 
@@ -784,6 +832,19 @@ describe('RunStateStore', () => {
       expect(state.failedSteps.has('s3')).toBe(false);
       expect(state.skippedSteps.has('s4')).toBe(false);
       expect(state.evaluatedCores.has('core:d1')).toBe(false);
+    });
+
+    it('follows the replayed epoch BACKWARDS, because the backend pointer moves too', () => {
+      // Deliberate, and easy to mistake for a bug: replaying an older fire makes that fire the
+      // one executing, and DagState.reopenEpoch says so in as many words ("can move
+      // currentEpoch BACKWARD"). Both wire paths publish that field, so a floor here would
+      // disagree with the very next snapshot - and would leave the epoch the user just
+      // restarted reading as history while it runs.
+      store.setEpoch(3);
+
+      store.resetForRerun(['s1'], ['s1'], 1);
+
+      expect(store.getState().currentEpoch).toBe(1);
     });
 
     it('should clear runningSteps and awaitingSignalSteps for reset steps', () => {

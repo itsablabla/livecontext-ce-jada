@@ -31,6 +31,7 @@ import { WorkflowLayoutDirectionProvider } from '@/contexts/WorkflowLayoutDirect
 import { StepByStepProvider } from '@/app/workflows/builder/contexts/StepByStepContext';
 import { ValidationProvider } from '@/app/workflows/builder/contexts/ValidationContext';
 import { EdgeActionsProvider } from '@/app/workflows/builder/components/EdgeActionsContext';
+import { ARROW_MARKERS } from '@/app/workflows/builder/components/edgeStatusVisuals';
 import { useInspectorDrag } from '@/app/workflows/builder/hooks/useInspectorDrag';
 import { useAgentFleetState, applyFleetLayout, filterCollapsedNodes } from './useAgentFleetState';
 import { applyFleetLayoutCached } from './fleetLayout';
@@ -109,18 +110,6 @@ function readEdgeCategories(key: string, categories: readonly EdgeCategory[]): S
   } catch { /* ignore */ }
   return new Set(categories);
 }
-
-// ─── Arrow markers (same as BuilderCanvas) ───
-const ARROW_MARKERS = [
-  { id: 'arrow-default', color: 'var(--border-color)' },
-  { id: 'arrow-running', color: '#3b82f6' },
-  { id: 'arrow-completed', color: '#10b981' },
-  { id: 'arrow-failed', color: '#ef4444' },
-  { id: 'arrow-skipped', color: '#94a3b8' },
-  { id: 'arrow-selected', color: 'var(--accent-primary)' },
-  { id: 'arrow-partial_success', color: '#f59e0b' },
-  { id: 'arrow-while-body', color: '#f97316' },
-];
 
 // ─── CSS (same as BuilderCanvas) ───
 const CANVAS_STYLES = `

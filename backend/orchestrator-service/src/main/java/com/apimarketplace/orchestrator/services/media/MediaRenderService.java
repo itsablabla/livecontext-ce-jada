@@ -159,7 +159,7 @@ public class MediaRenderService {
      * @param spawn      spawn to stamp on the stored file
      * @param itemIndex  split item index (null outside a split body)
      * @param operation  {@code probe} | {@code mux_audio} | {@code mix} | {@code extract_audio}
-     *                   | {@code concat} | {@code frame} | {@code overlay}
+     *                   | {@code concat} | {@code frame} | {@code overlay} | {@code subtitles}
      * @param options    operation options (contract params minus the file expressions;
      *                   mix tracks and concat clips reference their binary part via
      *                   {@code source_part})
@@ -303,8 +303,8 @@ public class MediaRenderService {
         String key = pathValue instanceof String s ? s : null;
         if (key == null || key.isBlank()) {
             throw new MediaRenderException(
-                "Media input '" + describe(input) + "' has no storage path - map the WHOLE FileRef "
-                    + "output of an upstream node (e.g. {{core:download.output.file}}).");
+                "Media input '" + describe(input) + "' "
+                    + com.apimarketplace.orchestrator.domain.file.FileRefMessages.NO_STORAGE_PATH);
         }
         // Defense-in-depth mirror of the public_link node: the map is plan-shapeable
         // (a code node can emit any {path}), so refuse traversal segments outright.

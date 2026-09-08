@@ -161,7 +161,7 @@ class RemoteMarketplaceControllerTest {
                     .thenReturn(upstream);
 
             ResponseEntity<?> response = controller.listRemoteMarketplacePublications(
-                    2, 25, "operations", null, null, null, null, null);
+                    2, 25, "operations", null, null, null, null, null, null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(response.getBody()).isSameAs(upstream);
@@ -176,7 +176,7 @@ class RemoteMarketplaceControllerTest {
             when(remoteMarketplaceService.fetchMarketplacePublications(eq(0), eq(50), any())).thenReturn(upstream);
 
             ResponseEntity<?> response = controller.listRemoteMarketplacePublications(
-                    0, 50, null, null, null, null, null, null);
+                    0, 50, null, null, null, null, null, null, null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             verify(remoteMarketplaceService).fetchMarketplacePublications(eq(0), eq(50), filterCaptor.capture());
@@ -191,7 +191,7 @@ class RemoteMarketplaceControllerTest {
                     .thenReturn(upstream);
 
             ResponseEntity<?> response = controller.searchRemoteMarketplacePublications(
-                    "crm sync", "ai", null, null, null, null, null);
+                    "crm sync", "ai", null, null, null, null, null, null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(response.getBody()).isSameAs(upstream);
@@ -204,7 +204,7 @@ class RemoteMarketplaceControllerTest {
                     .thenReturn(Map.of("publications", List.of(), "count", 0));
 
             controller.listRemoteMarketplacePublications(
-                    0, 24, "ai", "agent", "recent", "min_4", 7, "free");
+                    0, 24, "ai", "agent", "recent", "min_4", 7, "free", true);
 
             verify(remoteMarketplaceService).fetchMarketplacePublications(eq(0), eq(24), filterCaptor.capture());
             MarketplaceQueryFilter forwarded = filterCaptor.getValue();
@@ -221,7 +221,28 @@ class RemoteMarketplaceControllerTest {
                     .containsEntry("sort", "RECENT")
                     .containsEntry("rating", "MIN_4")
                     .containsEntry("days", "7")
-                    .containsEntry("price", "FREE");
+                    .containsEntry("price", "FREE")
+                    // The studio axis is a refinement like the others, and the one whose loss is
+                    // silent: dropped here, a self-hosted install asks the cloud for the WHOLE
+                    // catalogue and renders it under the Studio heading, with the chip still
+                    // reading as active and no error anywhere.
+                    .containsEntry("studio", "true");
+            assertThat(forwarded.studio()).isTrue();
+        }
+
+        @Test
+        @DisplayName("GET /marketplace asks for the ordinary shelf when the visitor chose no axis")
+        void marketplaceShouldNotInventTheStudioAxis() {
+            // The other direction, so a proxy hardcoded to `true` cannot pass: it would hide every
+            // ordinary application from a self-hosted install's main marketplace.
+            when(remoteMarketplaceService.fetchMarketplacePublications(anyInt(), anyInt(), any()))
+                    .thenReturn(Map.of("publications", List.of(), "count", 0));
+
+            controller.listRemoteMarketplacePublications(0, 24, null, null, null, null, null, null, null);
+
+            verify(remoteMarketplaceService).fetchMarketplacePublications(eq(0), eq(24), filterCaptor.capture());
+            assertThat(filterCaptor.getValue().studio()).isNull();
+            assertThat(filterCaptor.getValue().toQueryParams()).doesNotContainKey("studio");
         }
 
         @Test
@@ -230,11 +251,13 @@ class RemoteMarketplaceControllerTest {
             when(remoteMarketplaceService.searchMarketplacePublications(anyString(), any()))
                     .thenReturn(Map.of("publications", List.of(), "count", 0));
 
-            controller.searchRemoteMarketplacePublications("crm", null, "APPLICATION", null, null, null, "paid");
+            controller.searchRemoteMarketplacePublications("crm", null, "APPLICATION", null, null, null, "paid", true);
 
             verify(remoteMarketplaceService).searchMarketplacePublications(eq("crm"), searchFilterCaptor.capture());
             assertThat(searchFilterCaptor.getValue().displayMode()).isEqualTo("APPLICATION");
             assertThat(searchFilterCaptor.getValue().price()).isEqualTo(MarketplaceQueryFilter.Price.PAID);
+            // Typing into the search box on the Studio shelf must not answer with the whole cloud.
+            assertThat(searchFilterCaptor.getValue().studio()).isTrue();
         }
 
         @Test

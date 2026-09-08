@@ -91,7 +91,7 @@ test('agent-cli-server.mjs: ENABLED_MODULES env is JSON-parsed with an array gua
 
 test('agent-cli-server.mjs: startSession includes enabledModules in the body only when present', () => {
   // Conditional inclusion is load-bearing: omitting the field (null) makes CliAgentService
-  // treat the session as unrestricted; sending an empty array would mean "table only".
+  // fall back to its no-config module set, while an EMPTY ARRAY means zero modules.
   const startIdx = cliSource.indexOf('async function startSession()');
   assert.notStrictEqual(startIdx, -1, 'startSession not found');
   const body = cliSource.slice(startIdx, startIdx + 2500);
@@ -100,5 +100,46 @@ test('agent-cli-server.mjs: startSession includes enabledModules in the body onl
     /if \(ENABLED_MODULES\)\s*\{\s*body\.enabledModules = ENABLED_MODULES;/,
     'startSession MUST set body.enabledModules only when ENABLED_MODULES is non-null. ' +
     'CliAgentService reads request.enabledModules() to scope the core tool set.'
+  );
+});
+
+/**
+ * An EMPTY module list is a real answer, not an absence.
+ *
+ * A tool-less caller (the workflow classify and guardrail nodes, which run one turn with
+ * no tools at all on the direct-API path) sends `[]`. It has to survive three hops
+ * unchanged: `[]` here means "no modules, zero tools", while a missing value means "nobody
+ * scoped this" and expands to the backend's no-config module set (table, workflow, files,
+ * catalog...). Handing a single-shot JSON judge that set is exactly the bug these
+ * assertions exist to prevent, and JS makes the mistake easy: `[]` is truthy but
+ * `[].length` is not, so a "tidy-up" to `?.length` would silently restore it.
+ */
+test('an empty module list survives the whole chain instead of degrading to the default set', () => {
+  // The JS fact the chain relies on, asserted rather than assumed.
+  assert.ok([], 'an empty array must be truthy for the `if (ENABLED_MODULES)` guard to keep it');
+  assert.ok(![].length, '... while its length is falsy, which is the trap this test guards');
+
+  // Hop 1: server.mjs must serialise [] as '[]', never as '' (an Array.isArray check does
+  // this; a `.length` or a plain truthiness check on the array's contents would not).
+  assert.match(
+    serverSource,
+    /ENABLED_MODULES: Array\.isArray\(enabledModules\) \? JSON\.stringify\(enabledModules\) : ''/,
+    "server.mjs must serialise the module list with an Array.isArray test, so an empty " +
+    "array reaches the subprocess as '[]' rather than as an empty env var."
+  );
+
+  // Hop 2 + 3: the subprocess keeps [] through the parse and through the body guard.
+  const guards = [
+    [/if \(Array\.isArray\(parsed\)\) ENABLED_MODULES = parsed/, 'the parse must accept an empty array'],
+    [/if \(ENABLED_MODULES\)\s*\{\s*body\.enabledModules = ENABLED_MODULES;/, 'the body guard must test the value, not its length'],
+  ];
+  for (const [pattern, why] of guards) {
+    assert.match(cliSource, pattern, why);
+  }
+  assert.doesNotMatch(
+    cliSource,
+    /ENABLED_MODULES(\?)?\.length/,
+    'agent-cli-server.mjs must never gate the module list on its length: that drops an ' +
+    'empty list and hands a tool-less session the full no-config module set.'
   );
 });

@@ -87,6 +87,9 @@ class InternalTriggerControllerScheduleOrgStampTest {
     @DisplayName("schedulesCreate_bodyOrganizationId_winsOverHeader - explicit body field overrides X-Organization-ID header on new row")
     void schedulesCreate_bodyOrganizationId_winsOverHeader() {
         // Arrange - no existing row, valid cron, both body field and header carry an org id.
+        // isValid, not isAcceptableInput: /schedules/create is INTERNAL, replaying a cron
+        // already stored in a pinned plan, so it asks "can this fire" rather than "should we
+        // accept this from a caller". The strict predicate belongs on the user-facing doors.
         when(cronParser.isValid("0 9 * * *")).thenReturn(true);
         when(cronParser.getNextExecution("0 9 * * *", "UTC"))
                 .thenReturn(Instant.parse("2026-05-18T09:00:00Z"));
@@ -114,6 +117,46 @@ class InternalTriggerControllerScheduleOrgStampTest {
         assertThat(captor.getValue().getOrganizationId())
                 .as("body-supplied organizationId must take precedence over X-Organization-ID header")
                 .isEqualTo("BODY-ORG");
+    }
+
+    @Test
+    @DisplayName("schedulesCreate_existingRow_PRESERVES a moved occurrence when the cron is unchanged")
+    void schedulesCreate_existingRow_preservesTheMoveWhenCronIsUnchanged() {
+        // The other half of the case below, and the one that was missing. This endpoint is
+        // what ScheduleSyncService calls on every workflow save, every pin and every RUN
+        // START, always with the SAME cron from the pinned plan - so before PendingFirePolicy
+        // a dragged occurrence survived only until the workflow next ran, then vanished with
+        // no error. The policy's own Javadoc calls this "the shortest-lived way to lose a
+        // moved occurrence"; nothing proved the policy was applied HERE.
+        Instant movedTo = Instant.now().plusSeconds(7200);
+        ScheduledExecutionEntity existing = new ScheduledExecutionEntity(
+                workflowId, "trigger:morning", "tenant-alice", "0 9 * * *", "UTC", movedTo);
+        existing.setId(UUID.randomUUID());
+        existing.setOrganizationId("ORG-1");
+        when(cronParser.isValid("0 9 * * *")).thenReturn(true);
+        when(cronParser.getNextExecution("0 9 * * *", "UTC"))
+                .thenReturn(Instant.now().plusSeconds(86_400));
+        when(scheduleRepository.findAllByWorkflowIdAndTriggerId(workflowId, "trigger:morning"))
+                .thenReturn(new ArrayList<>(List.of(existing)));
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("workflowId", workflowId.toString());
+        body.put("triggerId", "trigger:morning");
+        body.put("tenantId", "tenant-alice");
+        body.put("organizationId", "ORG-1");
+        body.put("cron", "0 9 * * *");
+        body.put("timezone", "UTC");
+        body.put("enabled", true);
+
+        ResponseEntity<?> response = controller.createOrUpdateScheduleInternal(body, "ORG-1");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        ArgumentCaptor<ScheduledExecutionEntity> captor =
+                ArgumentCaptor.forClass(ScheduledExecutionEntity.class);
+        verify(scheduleRepository).save(captor.capture());
+        assertThat(captor.getValue().getNextExecutionAt())
+                .as("sync re-upserted the same cron; the user's moved occurrence must survive it")
+                .isEqualTo(movedTo);
     }
 
     @Test
@@ -171,6 +214,8 @@ class InternalTriggerControllerScheduleOrgStampTest {
         schedule.setExecutionCount(5);
         Instant next = Instant.parse("2026-05-23T09:00:00Z");
         when(scheduleRepository.findById(scheduleId)).thenReturn(Optional.of(schedule));
+        // isValid, NOT isAcceptableInput: this path archives the row PERMANENTLY when the
+        // predicate is false, so it deliberately asks the permissive question.
         when(cronParser.isValid("0 9 * * *")).thenReturn(true);
         when(cronParser.getNextExecution("0 9 * * *", "UTC")).thenReturn(next);
 

@@ -10,6 +10,14 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import * as React from 'react';
 
+// The Generate control leads to the studio through the LOCALE-AWARE router, and next-intl's
+// navigation module cannot resolve 'next/navigation' under vitest. Stood in for here because this
+// suite is not about where that control goes (that is pinned in the generate-entry-point suites).
+vi.mock('@/i18n/navigation', () => ({
+  useRouter: () => ({ push: () => undefined, replace: () => undefined, prefetch: () => undefined }),
+  usePathname: () => '/app',
+  Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+}));
 vi.mock('next-intl', () => ({
   useTranslations: () => (key: string) => key,
 }));
@@ -106,6 +114,46 @@ describe('MessageComposer stop button', () => {
 
     expect(sendButton.className).toContain('rounded-full');
     expect(sendButton.className).not.toContain('rounded-xl');
+  });
+
+  it('tells Send from Stop by COLOUR, not only by the glyph', () => {
+    // The two states used to be the `default` and `contrast` variants: two solid
+    // dark buttons a shade apart, so an arrow and a square were the whole
+    // difference. Removing `contrast` would have collapsed them into one fill,
+    // which is why Stop is now destructive - the same pairing the builder's
+    // empty-canvas composer uses.
+    render(
+      <MessageComposer
+        inputValue=""
+        onInputChange={() => undefined}
+        onSendMessage={() => undefined}
+        isStreamStarting
+        onStopStream={() => undefined}
+        showAttachmentMenu={false}
+        onShowAttachmentMenu={() => undefined}
+      />,
+    );
+
+    expect(screen.getByTitle('chat.stop').getAttribute('data-variant')).toBe('destructive');
+
+    cleanup();
+
+    render(
+      <MessageComposer
+        inputValue="hello"
+        onInputChange={() => undefined}
+        onSendMessage={() => undefined}
+        showAttachmentMenu={false}
+        onShowAttachmentMenu={() => undefined}
+      />,
+    );
+
+    const send = screen.getByTitle('chat.send');
+
+    expect(send.getAttribute('data-variant')).toBe('default');
+    // The app's one solid fill, in tokens - not a second hardcoded dark button.
+    expect(send.className).toContain('bg-[var(--accent-primary)]');
+    expect(send.className).not.toContain('bg-black');
   });
 
   it('stays round while greyed out, which is the state it spends most time in', () => {

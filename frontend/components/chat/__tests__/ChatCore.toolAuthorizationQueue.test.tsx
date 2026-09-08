@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
     clearServiceApproval: vi.fn(),
     getPendingToolAuthorizations: vi.fn(),
     clearToolAuthorization: vi.fn(),
+    getPendingAskUserQuestions: vi.fn(),
+    clearAskUserQuestion: vi.fn(),
     stopStream: vi.fn(),
     checkAndReconnect: vi.fn(),
   },
@@ -39,6 +41,7 @@ vi.mock('@/contexts/StreamingContext', () => ({
     needsAttention ? 'svc:attention' : 'svc:connect',
   toolAuthorizationKey: (rule: string, toolCallId?: string) =>
     toolCallId ? 'auth:' + rule + '#' + toolCallId : 'auth:' + rule,
+  askUserKey: (toolCallId: string) => 'ask:' + toolCallId,
   mergePendingServiceApprovals: (existing: any, incoming: any) => ({
     ...existing,
     services: [...existing.services, ...incoming.services],

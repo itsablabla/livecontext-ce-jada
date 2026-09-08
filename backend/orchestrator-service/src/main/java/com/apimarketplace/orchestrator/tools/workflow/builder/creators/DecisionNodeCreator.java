@@ -542,7 +542,13 @@ public class DecisionNodeCreator extends CreatorBase {
         var connectAfterError = validateConnectAfter(connectAfter, session);
         if (connectAfterError != null) return connectAfterError;
 
-        // 5. Parse approval config
+        // 5. Parse approval config.
+        //
+        // Every param below except `delegation` is read in BOTH conventions, and PARAM_ALIASES
+        // carries the same set so add_node accepts what this method honours (the two must move
+        // together - an accepted spelling nobody reads is silently dropped, a read spelling
+        // nobody accepts makes the help a liar). WorkflowBuilderModifier.NESTED_CONFIG_ALIASES
+        // is the third copy, for the edit path.
         List<String> approverRoles = new ArrayList<>();
         Object rolesObj = parameters.get("approver_roles");
         if (rolesObj == null) rolesObj = parameters.get("approverRoles");

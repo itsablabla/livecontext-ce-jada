@@ -9,9 +9,11 @@ import {
   isAiReasoningNode,
   getAgentType,
 } from './planHelpers';
+import { buildGeneratePlanParams } from './generateParams';
 
 /**
- * Processes all AI reasoning nodes (agent, classify, guardrail) and adds them to the plan.
+ * Processes all AI nodes (agent, browser_agent, classify, guardrail, generate)
+ * and adds them to the plan.
  */
 export function processAgents(ctx: PlanGeneratorContext): void {
   const agentNodes = ctx.nodes.filter((node) => isAiReasoningNode(node));
@@ -26,7 +28,6 @@ export function processAgents(ctx: PlanGeneratorContext): void {
   // Second pass: create agent plan objects
   agentNodes.forEach((node) => {
     const label = node.data.label || node.id;
-    const normalizedLabel = ctx.stepLabelMap.get(node.id)!;
 
     const agent: any = {
       id: node.id,
@@ -34,6 +35,21 @@ export function processAgents(ctx: PlanGeneratorContext): void {
       label: label,
       graphNodeId: node.id,
     };
+
+    // Generate. It shares the AI family's key (`agent:<label>`) and nothing
+    // else: no LLM, no tools, no entity. Its whole configuration is the params
+    // map, rebuilt from generateModel + generateParams rather than from
+    // paramExpressions, which stringify numbers - a duration that reaches the
+    // plan as "5" changes the size the run is billed on.
+    if (getAgentType(node) === 'generate') {
+      const d = node.data as any;
+      agent.params = buildGeneratePlanParams(
+        d.generateModel, d.generateCredentialSource, d.generateParams, d.selectedCredentialId);
+      agent.position = getNodePosition(node) || { x: 0, y: 0 };
+      ctx.plan.agents!.push(agent);
+      ctx.agentPlanByNodeId.set(node.id, agent);
+      return;
+    }
 
     // Agent entity reference mode (type='agent' with agentConfigId)
     if (node.data.agentConfigId && getAgentType(node) === 'agent') {

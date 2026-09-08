@@ -12,6 +12,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 //  - with models present, neither the label nor the emptyState leak in,
 //  - both props stay OPTIONAL so the component remains translation-free and
 //    provider-less renders (the panels' tests) keep working unchanged.
+vi.mock('@/lib/hooks/useModelCostBasis', () => ({
+  // The picker asks once for the credit-estimate basis; these tests are not
+  // about the estimate, and an unanswered basis renders no estimate at all.
+  useModelCostBasis: () => ({ basis: null, isLoading: false }),
+}));
 vi.mock('next/image', () => ({
   // eslint-disable-next-line @next/next/no-img-element
   default: ({ src, alt }: { src: string; alt: string }) => <img src={src} alt={alt} />,

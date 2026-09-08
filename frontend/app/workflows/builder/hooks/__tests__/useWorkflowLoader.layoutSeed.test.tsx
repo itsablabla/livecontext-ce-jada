@@ -53,8 +53,19 @@ vi.mock('../../services/edgeStatusService', () => ({
   updateLoopInternalEdges: (e: unknown) => e,
 }));
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useWorkflowLoader } from '../useWorkflowLoader';
 import { WorkflowPlanImporter } from '../../services/workflowPlanImporter/WorkflowPlanImporter';
+
+/**
+ * The loader reads the canvas's query client to hand it to the importer (the interface
+ * format lookup shares the node's own cache entry), so it needs a provider - as the rest
+ * of the builder already did through `useWorkflowEventListeners`.
+ */
+function withQueryClient({ children }: { children: React.ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return React.createElement(QueryClientProvider, { client }, children);
+}
 
 function renderLoader(setNodes: (...a: unknown[]) => void = vi.fn()) {
   return renderHook(() => {
@@ -69,7 +80,7 @@ function renderLoader(setNodes: (...a: unknown[]) => void = vi.fn()) {
       nodesRef,
       edgesRef,
     } as any);
-  });
+  }, { wrapper: withQueryClient });
 }
 
 beforeEach(() => {

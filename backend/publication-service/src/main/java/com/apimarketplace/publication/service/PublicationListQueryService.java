@@ -67,7 +67,8 @@ public class PublicationListQueryService {
             p.agent_snapshot->'agent'->>'modelName',
             p.resource_id,
             p.public_slug, p.publisher_handle,
-            p.ce_exclusive, CAST(p.ce_exclusive_features AS TEXT)
+            p.ce_exclusive, CAST(p.ce_exclusive_features AS TEXT),
+            p.studio
             """;
 
     private static final String FROM_CLAUSE = """
@@ -228,6 +229,12 @@ public class PublicationListQueryService {
         if (f.displayMode() != null) {
             where.append(" AND p.display_mode = :displayMode");
             params.put("displayMode", f.displayMode());
+        }
+        if (f.studio() != null) {
+            // A second AXIS, so it composes with the category rather than replacing it: a studio app
+            // keeps saying what it is about, and both questions can be asked at once.
+            where.append(" AND p.studio = :studio");
+            params.put("studio", f.studio());
         }
         if (f.rating().requiresReviews()) {
             // Unrated means "no average to compare", not "average 0": it fails the
@@ -792,7 +799,8 @@ public class PublicationListQueryService {
                 toStr(row[i++]),           // publicSlug
                 toStr(row[i++]),           // publisherHandle
                 toBool(row[i++]),          // ceExclusive
-                toStr(row[i++])            // ceExclusiveFeatures (CAST to TEXT)
+                toStr(row[i++]),           // ceExclusiveFeatures (CAST to TEXT)
+                toBool(row[i++])           // studio
         );
     }
 

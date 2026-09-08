@@ -369,4 +369,121 @@ class GenerationInputResolverTest {
             assertThat(prepared.ok()).isTrue();
         }
     }
+
+    /**
+     * Fields that belong BESIDE a file, in providers that take an OBJECT per array element.
+     *
+     * <p>Seedance is the shipped case: {@code content[n]} wants a {@code type} and a {@code role}
+     * next to the url, and neither can come from the file. They also cannot be the endpoint's
+     * ordinary constants - those are written once, at a fixed path, whether or not a file was
+     * given, so a turn with no image would send an element carrying a type and NO url, which the
+     * provider refuses after the reservation is taken.
+     */
+    @Nested
+    @DisplayName("itemConstants - what travels beside each file")
+    class ItemConstants {
+
+        private static final GenerationSpec OBJECT_ELEMENTS = spec("""
+                {
+                  "kind": "video", "assetPath": "output[0]",
+                  "constants": { "content[0].type": "text" },
+                  "paramMap": {
+                    "prompt": "content[0].text",
+                    "input_image": {
+                      "path": "content[1].image_url.url",
+                      "encoding": "data_url",
+                      "role": "reference",
+                      "maxItems": 4,
+                      "itemConstants": {
+                        "content[1].type": "image_url",
+                        "content[1].role": "reference_image"
+                      }
+                    }
+                  },
+                  "models": [{ "id": "v-1", "capabilities": ["prompt", "input_image"] }]
+                }
+                """);
+
+        @Test
+        @DisplayName("one file gets its own type and role, beside its url")
+        void oneFileCarriesItsElementFields() {
+            when(storage.download(anyString(), anyString())).thenReturn(PNG);
+            Map<String, Object> req = request("content[1].image_url.url", fileRef());
+
+            GenerationInputResolver.Prepared prepared = resolver.prepare(OBJECT_ELEMENTS, req, "tenant-1");
+
+            assertThat(prepared.ok()).isTrue();
+            assertThat(GenerationRequestBuilder.getByPath(req, "content[1].type")).isEqualTo("image_url");
+            assertThat(GenerationRequestBuilder.getByPath(req, "content[1].role")).isEqualTo("reference_image");
+            assertThat(String.valueOf(GenerationRequestBuilder.getByPath(req, "content[1].image_url.url")))
+                    .startsWith("data:image/png;base64,");
+        }
+
+        @Test
+        @DisplayName("each file of several gets ITS OWN fields, at its own index")
+        void everyElementCarriesItsOwnFields() {
+            // The defect this exists for: constants written at a fixed path would put element 3's
+            // type on element 1, and the provider would read one image where three were sent.
+            when(storage.download(anyString(), anyString())).thenReturn(PNG);
+            Map<String, Object> req = request("content[1].image_url.url",
+                    java.util.List.of(fileRef(), fileRef(), fileRef()));
+
+            GenerationInputResolver.Prepared prepared = resolver.prepare(OBJECT_ELEMENTS, req, "tenant-1");
+
+            assertThat(prepared.ok()).isTrue();
+            for (int i = 1; i <= 3; i++) {
+                assertThat(GenerationRequestBuilder.getByPath(req, "content[" + i + "].type"))
+                        .as("element %d must carry its own type", i).isEqualTo("image_url");
+                assertThat(GenerationRequestBuilder.getByPath(req, "content[" + i + "].role"))
+                        .as("element %d must carry its own role", i).isEqualTo("reference_image");
+                assertThat(GenerationRequestBuilder.getByPath(req, "content[" + i + "].image_url.url"))
+                        .as("element %d must carry its own url", i).isNotNull();
+            }
+        }
+
+        @Test
+        @DisplayName("no file means NO element at all, not an element with a type and nothing in it")
+        void noFileWritesNothing() {
+            // The whole reason these are not the endpoint's constants. An element carrying a type
+            // and no url is a malformed request, and it would be sent on every promptless-image
+            // turn - refused by the provider, after the charge was reserved.
+            Map<String, Object> req = request("content[0].text", "a lighthouse");
+
+            GenerationInputResolver.Prepared prepared = resolver.prepare(OBJECT_ELEMENTS, req, "tenant-1");
+
+            assertThat(prepared.ok()).isTrue();
+            assertThat(GenerationRequestBuilder.getByPath(req, "content[1].type")).isNull();
+            assertThat(GenerationRequestBuilder.getByPath(req, "content[1].role")).isNull();
+        }
+
+        @Test
+        @DisplayName("the text element the endpoint pins is left alone")
+        void doesNotDisturbTheTextElement() {
+            // The images start at index 1 precisely because content[0] is the prompt. An expansion
+            // that began at zero would overwrite it, and the turn would run with no prompt at all.
+            when(storage.download(anyString(), anyString())).thenReturn(PNG);
+            Map<String, Object> req = request("content[1].image_url.url",
+                    java.util.List.of(fileRef(), fileRef()));
+            GenerationRequestBuilder.setByPath(req, "content[0].text", "a lighthouse",
+                    new java.util.ArrayList<>());
+
+            resolver.prepare(OBJECT_ELEMENTS, req, "tenant-1");
+
+            assertThat(GenerationRequestBuilder.getByPath(req, "content[0].text")).isEqualTo("a lighthouse");
+            assertThat(GenerationRequestBuilder.getByPath(req, "content[0].type")).isNull();
+        }
+
+        @Test
+        @DisplayName("more files than the model takes is refused as a unit, before anything is sent")
+        void refusesMoreThanTheCap() {
+            when(storage.download(anyString(), anyString())).thenReturn(PNG);
+            Map<String, Object> req = request("content[1].image_url.url",
+                    java.util.List.of(fileRef(), fileRef(), fileRef(), fileRef(), fileRef()));
+
+            GenerationInputResolver.Prepared prepared = resolver.prepare(OBJECT_ELEMENTS, req, "tenant-1");
+
+            assertThat(prepared.ok()).isFalse();
+            assertThat(String.join(" ", prepared.errors())).contains("at most 4");
+        }
+    }
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useTranslations } from 'next-intl';
 import type { Node, Edge } from 'reactflow';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import type { BuilderNodeData } from '../../types';
@@ -70,6 +71,19 @@ export interface InspectorMobileContentProps {
 }
 
 /**
+ * Segmented-control chrome shared with the header's ViewModeTabs, so the two
+ * switchers in the same panel do not look like two different products. The
+ * default shadcn tab pill (`bg-muted`, `h-10`) is deliberately overridden.
+ */
+const TAB_LIST_CLASS =
+  'grid w-full h-auto mb-4 gap-0.5 rounded-lg bg-theme-tertiary p-1';
+
+const TAB_TRIGGER_CLASS =
+  'rounded-md px-2.5 py-1 text-sm font-medium text-theme-secondary transition-colors duration-150 ' +
+  'hover:text-theme-primary data-[state=active]:bg-[var(--bg-primary)] ' +
+  'data-[state=active]:text-theme-primary data-[state=active]:shadow-sm';
+
+/**
  * InspectorMobileContent - Mobile view with tabs for Input/Parameter/Output
  */
 export function InspectorMobileContent({
@@ -102,6 +116,7 @@ export function InspectorMobileContent({
   canShowExecutionDataToggle,
   parameterColumnProps,
 }: InspectorMobileContentProps) {
+  const ti = useTranslations('workflowBuilder.inspector');
   const formRunMode = isRunModeForForms ?? isRunMode;
 
   return (
@@ -123,21 +138,34 @@ export function InspectorMobileContent({
 
       {(!runId || viewMode === 'configuration' || isInterfaceNode) ? (
         <>
-          {/* Tab list - 3 tabs in advanced mode, 1 tab otherwise */}
+          {/* Tab list - 3 tabs in advanced mode, 1 tab otherwise. Same segmented
+              control as the header's view switcher: one visual language for
+              "pick a view", instead of the default shadcn pill. */}
           {isAdvanced ? (
-            <TabsList className="grid w-full grid-cols-3 mb-4">
-              <TabsTrigger value="input">Input</TabsTrigger>
-              <TabsTrigger value={isInterfaceNode ? "mappings" : "parameter"}>
-                {isInterfaceNode ? "Mappings" : "Parameter"}
+            <TabsList className={TAB_LIST_CLASS + ' grid-cols-3'}>
+              <TabsTrigger value="input" className={TAB_TRIGGER_CLASS}>
+                {ti('inputTitle')}
               </TabsTrigger>
-              <TabsTrigger value={isInterfaceNode ? "preview" : "output"}>
-                {isInterfaceNode ? "Preview" : "Output"}
+              <TabsTrigger
+                value={isInterfaceNode ? 'mappings' : 'parameter'}
+                className={TAB_TRIGGER_CLASS}
+              >
+                {isInterfaceNode ? ti('mappings') : ti('parameters')}
+              </TabsTrigger>
+              <TabsTrigger
+                value={isInterfaceNode ? 'preview' : 'output'}
+                className={TAB_TRIGGER_CLASS}
+              >
+                {isInterfaceNode ? ti('preview') : ti('outputTitle')}
               </TabsTrigger>
             </TabsList>
           ) : (
-            <TabsList className="grid w-full grid-cols-1 mb-4">
-              <TabsTrigger value={isInterfaceNode ? "mappings" : "parameter"}>
-                {isInterfaceNode ? "Mappings" : "Parameter"}
+            <TabsList className={TAB_LIST_CLASS + ' grid-cols-1'}>
+              <TabsTrigger
+                value={isInterfaceNode ? 'mappings' : 'parameter'}
+                className={TAB_TRIGGER_CLASS}
+              >
+                {isInterfaceNode ? ti('mappings') : ti('parameters')}
               </TabsTrigger>
             </TabsList>
           )}

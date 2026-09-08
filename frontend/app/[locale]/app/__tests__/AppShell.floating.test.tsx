@@ -31,6 +31,13 @@ vi.mock('@/components/app/SidePanel', () => ({
 vi.mock('@/contexts/ConversationActivityContext', () => ({
   ConversationActivityProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+// The shell binds the app-wide quick-open shortcut. Stubbed to nothing because
+// these are layout tests: the hook's behaviour is covered in
+// lib/sidebar/__tests__/useQuickOpenShortcut.test.tsx, and that every
+// arrangement binds it is asserted in AppShell.test.tsx.
+vi.mock('@/lib/sidebar/useQuickOpenShortcut', () => ({
+  useQuickOpenShortcut: () => {},
+}));
 
 import { AppShell } from '../AppShell';
 import { SidePanelLayoutProvider, useSidePanelLayout, type SidePanelPosition } from '@/contexts/SidePanelLayoutContext';

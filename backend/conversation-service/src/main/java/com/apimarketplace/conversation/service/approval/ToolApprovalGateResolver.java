@@ -43,17 +43,38 @@ public class ToolApprovalGateResolver {
      *         an unconditional write would report success against a key nobody polls.
      */
     public boolean resolve(String conversationId, String gateKey, boolean approved) {
+        return write(conversationId, gateKey, approved ? VERDICT_APPROVED : VERDICT_DENIED,
+                approved ? "approved" : "denied");
+    }
+
+    /**
+     * Record an answer that carries a payload: a question card, whose verdict is a JSON
+     * envelope rather than one of the two words. Same key, same conditional write, same
+     * "was anybody listening" return.
+     *
+     * @param envelopeJson the serialised {@code UserQuestionAnswerEnvelope}
+     */
+    public boolean resolveAnswer(String conversationId, String gateKey, String envelopeJson) {
+        if (envelopeJson == null || envelopeJson.isBlank()) {
+            return false;
+        }
+        String label = com.apimarketplace.agent.tools.ask.UserQuestionAnswerEnvelope.parse(envelopeJson)
+                .map(com.apimarketplace.agent.tools.ask.UserQuestionAnswerEnvelope.Parsed::decision)
+                .orElse("answered");
+        return write(conversationId, gateKey, envelopeJson, label);
+    }
+
+    private boolean write(String conversationId, String gateKey, String value, String label) {
         if (conversationId == null || conversationId.isBlank() || gateKey == null || gateKey.isBlank()) {
             return false;
         }
         String key = StreamRedisKeys.approvalDecisionKey(conversationId, gateKey);
         try {
             boolean released = Boolean.TRUE.equals(redisTemplate.opsForValue().setIfPresent(
-                    key, approved ? VERDICT_APPROVED : VERDICT_DENIED,
-                    StreamRedisKeys.APPROVAL_DECISION_TTL));
+                    key, value, StreamRedisKeys.APPROVAL_DECISION_TTL));
             if (released) {
                 log.info("[APPROVAL_GATE] Released parked call {} in conversation {} as {}",
-                        gateKey, conversationId, approved ? "approved" : "denied");
+                        gateKey, conversationId, label);
             } else {
                 log.info("[APPROVAL_GATE] No call was parked on {} in conversation {} - "
                         + "the answer resumes the agent instead", gateKey, conversationId);

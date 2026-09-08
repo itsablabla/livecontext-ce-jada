@@ -6,6 +6,7 @@ import com.apimarketplace.publication.domain.WorkflowPublicationEntity;
 import com.apimarketplace.publication.repository.WorkflowPublicationRepository;
 import com.apimarketplace.publication.service.AgentPublicationService;
 import com.apimarketplace.publication.service.CeExclusivePublicationException;
+import com.apimarketplace.publication.service.PublicationPlanUpgradeRequiredException;
 import com.apimarketplace.publication.service.PublicationPendingReviewException;
 import com.apimarketplace.publication.service.PublicationValidationException;
 import com.apimarketplace.publication.service.RemoteMarketplaceService;
@@ -323,6 +324,8 @@ public class InternalPublicationController {
         try {
             Map<String, Object> result = agentPublicationService.acquireAgentPublication(publicationId, tenantId, organizationId);
             return ResponseEntity.ok(result);
+        } catch (PublicationPlanUpgradeRequiredException e) {
+            return planUpgradeResponse(e);
         } catch (CeExclusivePublicationException e) {
             return ceExclusiveResponse(e);
         } catch (IllegalArgumentException e) {
@@ -344,6 +347,27 @@ public class InternalPublicationController {
                 "code", "CE_EXCLUSIVE",
                 "features", e.getFeatures()
         ));
+    }
+
+    /**
+     * Refusal body for an app whose capability this workspace's PLAN does not include, today
+     * vector search. Same 403, deliberately a DIFFERENT code from CE_EXCLUSIVE, which the agent
+     * help tells an agent never to retry: this one is lifted by an upgrade, so it must not read
+     * as terminal. Shape matches catalog-service's own plan refusal.
+     */
+    private static ResponseEntity<?> planUpgradeResponse(PublicationPlanUpgradeRequiredException e) {
+        log.info("Internal acquire refused - plan upgrade required ({}) for features={}",
+                e.getRequiredPlan(), e.getFeatures());
+        // requiredPlan is absent when the requirement could not be read at all. Map.of rejects a
+        // null value, so build the body rather than turning a 403 into a 500.
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("error", e.getMessage());
+        body.put("code", PublicationPlanUpgradeRequiredException.ERROR_CODE);
+        if (e.getRequiredPlan() != null) {
+            body.put("requiredPlan", e.getRequiredPlan());
+        }
+        body.put("features", e.getFeatures());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
     }
 
     @GetMapping("/is-agent-published/{agentConfigId}")
@@ -413,6 +437,8 @@ public class InternalPublicationController {
         try {
             Map<String, Object> result = resourcePublicationService.acquireResource(publicationId, tenantId, organizationId);
             return ResponseEntity.ok(result);
+        } catch (PublicationPlanUpgradeRequiredException e) {
+            return planUpgradeResponse(e);
         } catch (CeExclusivePublicationException e) {
             return ceExclusiveResponse(e);
         } catch (IllegalArgumentException e) {
@@ -762,6 +788,8 @@ public class InternalPublicationController {
         try {
             Map<String, Object> result = publicationService.acquirePublication(publicationId, tenantId, organizationId);
             return ResponseEntity.ok(result);
+        } catch (PublicationPlanUpgradeRequiredException e) {
+            return planUpgradeResponse(e);
         } catch (CeExclusivePublicationException e) {
             return ceExclusiveResponse(e);
         } catch (IllegalArgumentException e) {
@@ -783,6 +811,22 @@ public class InternalPublicationController {
     static Integer parseShowcaseEpoch(Map<String, Object> request) {
         return request != null && request.get("showcaseEpoch") instanceof Number n
                 ? n.intValue() : null;
+    }
+
+    /**
+     * Extract the optional studio axis from an internal publish request Map.
+     *
+     * <p>Three-valued on purpose, and the null is the important one: absent means the caller has no
+     * opinion, and the service leaves the stored value alone. Reading it as a plain {@code boolean}
+     * would turn every publish that says nothing - which is every caller written before the axis
+     * existed - into an explicit "not a studio app", and a re-share would then quietly take an
+     * application off the studio shelf.
+     *
+     * <p>Only a real Boolean counts. A string "true" is not accepted, because guessing at a caller's
+     * intent about where their application appears is worse than ignoring a malformed field.
+     */
+    static Boolean parseStudio(Map<String, Object> request) {
+        return request != null && request.get("studio") instanceof Boolean b ? b : null;
     }
 
     @SuppressWarnings("unchecked")
@@ -832,7 +876,11 @@ public class InternalPublicationController {
                     workflowId, tenantId, organizationId, title, description,
                     showcaseInterfaceId, showcaseRunId,
                     categoryId, creditsPerUse,
-                    visibility, planVersion, displayMode, showcaseEpoch, false, Map.of());
+                    visibility, planVersion, displayMode, showcaseEpoch, false, Map.of(),
+                    // The studio axis, when the caller expressed one. Absent stays absent all the
+                    // way down: an agent that says nothing leaves the stored value alone rather
+                    // than declaring the application ordinary.
+                    parseStudio(request));
 
             Map<String, Object> result = toDetailMap(pub);
             return ResponseEntity.ok(result);
@@ -857,6 +905,10 @@ public class InternalPublicationController {
         map.put("title", pub.getTitle());
         map.put("description", pub.getDescription());
         map.put("displayMode", pub.getDisplayMode() != null ? pub.getDisplayMode().name() : null);
+        // Carried through the CE enrichment path. A self-hosted install re-fetches its remote
+        // favourites through here to fill them in; dropping the axis made every cloud-acquired
+        // studio application vanish from the studio's own favourites row.
+        map.put("studio", pub.isStudio());
         // publisherId is the human user who clicked publish - the avatar endpoint
         // (/api/proxy/users/{userId}/avatar) is keyed by it. Without it the frontend
         // PublisherAvatar falls back to name-initials (e.g. "LI"), so it MUST ride along.
@@ -865,13 +917,18 @@ public class InternalPublicationController {
         map.put("publisherAvatarUrl", pub.getPublisherAvatarUrl());
         map.put("planVersion", pub.getPlanVersion());
         map.put("useCount", pub.getUseCount());
-        // CE-exclusive label, emitted ONLY when set (absent = installable), so the
-        // agent-facing application tool can warn before an acquire that would be
-        // refused. Without it here the tool's `ce_exclusive` branch is dead code
-        // and its help ("ABSENT means installable here") becomes a lie on cloud.
+        // Two fields, two questions, and they must be emitted independently since 2026-09-03.
+        // `ceExclusive` says this deployment cannot run the app at any price, and is absent when
+        // it can. `ceExclusiveFeatures` lists the special capabilities the app uses at all, and a
+        // vector app now carries the list WITHOUT the boolean: it is installable here, from a
+        // plan. Emitting the list only alongside the boolean would hide the one fact the agent
+        // needs to pre-empt a plan refusal, while its help promises the field is there.
         if (pub.isCeExclusive()) {
             map.put("ceExclusive", true);
-            map.put("ceExclusiveFeatures", pub.getCeExclusiveFeatures());
+        }
+        List<String> features = pub.getCeExclusiveFeatures();
+        if (features != null && !features.isEmpty()) {
+            map.put("ceExclusiveFeatures", features);
         }
         if (pub.getCategoryId() != null) {
             Map<String, Object> categoryData = orchestratorClient.getCategoryById(pub.getCategoryId());

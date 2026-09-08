@@ -25,6 +25,7 @@ import type {
   LegacyWorkflowValidationResult,
   ValidationIssue,
   BackendValidationError,
+  PlanGateContext,
 } from './core/types';
 import { buildValidationCache, calculateComplexityScore } from './core/ValidationCache';
 import { getValidationRules } from './rules-v2';
@@ -57,7 +58,8 @@ export class WorkflowValidator {
     edges: Edge[],
     backendErrors?: BackendValidationError[],
     userCredentials?: Credential[],
-    featureCapabilities?: FeatureCapabilities
+    featureCapabilities?: FeatureCapabilities,
+    planGate?: PlanGateContext
   ): string {
     // Include all data that affects validation in the cache key
     const nodeSignatures = nodes
@@ -120,8 +122,15 @@ export class WorkflowValidator {
     // (dis)appear when the capabilities query resolves or the deployment changes.
     const capabilitySignature = featureCapabilities ? JSON.stringify(featureCapabilities) : '';
 
+    // Include the plan gate so the plan issues (dis)appear when the query
+    // resolves, when an admin changes a requirement, or when the account
+    // upgrades - all of which change the verdict without touching a node.
+    const planSignature = planGate
+      ? `${planGate.planCode ?? ''}|${Object.keys(planGate.requirements).sort().join(',')}`
+      : '';
+
     // Create a hash of the combined signatures
-    const combined = `${nodeSignatures}###${edgeSignatures}###${errorSignature}###${credentialSignature}###${capabilitySignature}`;
+    const combined = `${nodeSignatures}###${edgeSignatures}###${errorSignature}###${credentialSignature}###${capabilitySignature}###${planSignature}`;
     let hash = 0;
     for (let i = 0; i < combined.length; i++) {
       const char = combined.charCodeAt(i);
@@ -147,12 +156,13 @@ export class WorkflowValidator {
     backendErrors?: BackendValidationError[],
     forceRevalidate = false,
     userCredentials?: Credential[],
-    featureCapabilities?: FeatureCapabilities
+    featureCapabilities?: FeatureCapabilities,
+    planGate?: PlanGateContext
   ): WorkflowValidationResult {
     const startTime = performance.now();
 
     // Check cache (unless forced)
-    const cacheKey = this.generateCacheKey(nodes, edges, backendErrors, userCredentials, featureCapabilities);
+    const cacheKey = this.generateCacheKey(nodes, edges, backendErrors, userCredentials, featureCapabilities, planGate);
     if (!forceRevalidate && this.lastValidationKey === cacheKey && this.lastValidationResult) {
       return this.lastValidationResult;
     }
@@ -168,6 +178,7 @@ export class WorkflowValidator {
       cache,
       userCredentials,
       featureCapabilities,
+      planGate,
     };
 
     // Execute all validation rules

@@ -1,6 +1,7 @@
 package com.apimarketplace.catalog.bundle;
 
 import com.apimarketplace.catalog.domain.ApiCatalogBundleSyncStatusEntity;
+import com.apimarketplace.catalog.repository.ApiCatalogBundleRepository;
 import com.apimarketplace.catalog.repository.ApiCatalogBundleSyncStatusRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -42,6 +43,7 @@ import static org.mockito.Mockito.when;
 class ApiCatalogBundleSyncSchedulerTest {
 
     @Mock private ApiCatalogBundleFetcher fetcher;
+    @Mock private ApiCatalogBundleService bundleService;
     @Mock private ApiCatalogBundleVerifier verifier;
     @Mock private ApiCatalogBundleApplier applier;
     @Mock private ApiCatalogBundleSyncStatusRepository syncStatusRepo;
@@ -59,6 +61,7 @@ class ApiCatalogBundleSyncSchedulerTest {
                 10, 50, 100_000, "cGF5bG9hZA==");
         when(syncStatusRepo.findById(ApiCatalogBundleSyncStatusEntity.SINGLETON_ID))
                 .thenReturn(Optional.of(new ApiCatalogBundleSyncStatusEntity()));
+        when(bundleService.getActiveBundleMetadata()).thenReturn(Optional.empty());
     }
 
     @Test
@@ -84,13 +87,13 @@ class ApiCatalogBundleSyncSchedulerTest {
         when(trustedKeys.hasKeys()).thenReturn(false);
         when(trustBootstrap.bootstrapTrust())
                 .thenReturn(ApiCatalogBundleTrustBootstrap.Result.pinned("livecontext-prod-v1"));
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.noActive());
 
         scheduler.tick();
 
         verify(trustBootstrap).bootstrapTrust();
-        verify(fetcher).fetchLatest();
+        verify(fetcher).fetchLatest(any());
         ApiCatalogBundleSyncStatusEntity saved = captureSaved();
         // NO_ACTIVE recorded by the downstream path - crucially NOT TRUST_UNCONFIGURED.
         assertThat(saved.getLastFetchStatus()).isEqualTo("NO_ACTIVE");
@@ -100,7 +103,7 @@ class ApiCatalogBundleSyncSchedulerTest {
     @DisplayName("Key already pinned → TOFU bootstrap NOT attempted, fetch proceeds")
     void alreadyPinnedSkipsBootstrap() {
         when(trustedKeys.hasKeys()).thenReturn(true);
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.noActive());
 
         scheduler.tick();
@@ -108,14 +111,14 @@ class ApiCatalogBundleSyncSchedulerTest {
         // A pinned key (operator env or earlier TOFU) must never trigger a re-fetch of the
         // signing key - requirement 1: bootstrap only when the registry is empty.
         verifyNoInteractions(trustBootstrap);
-        verify(fetcher).fetchLatest();
+        verify(fetcher).fetchLatest(any());
     }
 
     @Test
     @DisplayName("FETCHED + verify OK + apply APPLIED → scheduler writes no extra status row")
     void happyPathNoDoubleWrite() {
         when(trustedKeys.hasKeys()).thenReturn(true);
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.fetched(bundle));
         when(verifier.verify(bundle))
                 .thenReturn(ApiCatalogBundleVerifier.Result.success(new byte[]{1, 2, 3}));
@@ -133,7 +136,7 @@ class ApiCatalogBundleSyncSchedulerTest {
     @DisplayName("FETCHED + apply ALREADY_APPLIED → scheduler writes no extra status row")
     void idempotentPathNoDoubleWrite() {
         when(trustedKeys.hasKeys()).thenReturn(true);
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.fetched(bundle));
         when(verifier.verify(bundle))
                 .thenReturn(ApiCatalogBundleVerifier.Result.success(new byte[]{1, 2, 3}));
@@ -149,7 +152,7 @@ class ApiCatalogBundleSyncSchedulerTest {
     @DisplayName("FETCHED + verifier SIGNATURE_INVALID → failure row, applier never called")
     void signatureInvalid() {
         when(trustedKeys.hasKeys()).thenReturn(true);
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.fetched(bundle));
         when(verifier.verify(bundle))
                 .thenReturn(ApiCatalogBundleVerifier.Result.fail(
@@ -168,7 +171,7 @@ class ApiCatalogBundleSyncSchedulerTest {
     @DisplayName("FETCHED + applier returns APPLY_FAILED → failure row persisted")
     void applyFailedResult() {
         when(trustedKeys.hasKeys()).thenReturn(true);
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.fetched(bundle));
         when(verifier.verify(bundle))
                 .thenReturn(ApiCatalogBundleVerifier.Result.success(new byte[]{1, 2, 3}));
@@ -187,7 +190,7 @@ class ApiCatalogBundleSyncSchedulerTest {
     @DisplayName("FETCHED + applier returns APPLY_PARTIAL → scheduler does NOT double-write (applier owns the row)")
     void applyPartialNoDoubleWrite() {
         when(trustedKeys.hasKeys()).thenReturn(true);
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.fetched(bundle));
         when(verifier.verify(bundle))
                 .thenReturn(ApiCatalogBundleVerifier.Result.success(new byte[]{1, 2, 3}));
@@ -207,7 +210,7 @@ class ApiCatalogBundleSyncSchedulerTest {
     @DisplayName("Applier throws unexpectedly → caught, APPLY_FAILED persisted")
     void applierThrows() {
         when(trustedKeys.hasKeys()).thenReturn(true);
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.fetched(bundle));
         when(verifier.verify(bundle))
                 .thenReturn(ApiCatalogBundleVerifier.Result.success(new byte[]{1, 2, 3}));
@@ -230,7 +233,7 @@ class ApiCatalogBundleSyncSchedulerTest {
         existing.setConsecutiveFailures(3);
         when(syncStatusRepo.findById(ApiCatalogBundleSyncStatusEntity.SINGLETON_ID))
                 .thenReturn(Optional.of(existing));
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.noActive());
 
         scheduler.tick();
@@ -249,7 +252,7 @@ class ApiCatalogBundleSyncSchedulerTest {
         existing.setConsecutiveFailures(2);
         when(syncStatusRepo.findById(ApiCatalogBundleSyncStatusEntity.SINGLETON_ID))
                 .thenReturn(Optional.of(existing));
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.httpError("HTTP 500"));
 
         scheduler.tick();
@@ -264,7 +267,7 @@ class ApiCatalogBundleSyncSchedulerTest {
     @DisplayName("NETWORK_ERROR → failure row persisted")
     void networkError() {
         when(trustedKeys.hasKeys()).thenReturn(true);
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.networkError("Connection refused"));
 
         scheduler.tick();
@@ -279,7 +282,7 @@ class ApiCatalogBundleSyncSchedulerTest {
     @DisplayName("NOT_CONFIGURED → failure row persisted")
     void notConfigured() {
         when(trustedKeys.hasKeys()).thenReturn(true);
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.notConfigured());
 
         scheduler.tick();
@@ -295,7 +298,7 @@ class ApiCatalogBundleSyncSchedulerTest {
         when(trustedKeys.hasKeys()).thenReturn(true);
         when(syncStatusRepo.findById(ApiCatalogBundleSyncStatusEntity.SINGLETON_ID))
                 .thenReturn(Optional.empty());
-        when(fetcher.fetchLatest())
+        when(fetcher.fetchLatest(any()))
                 .thenReturn(ApiCatalogBundleFetcher.FetchResult.networkError("timeout"));
 
         scheduler.tick();
@@ -358,5 +361,97 @@ class ApiCatalogBundleSyncSchedulerTest {
                 ArgumentCaptor.forClass(ApiCatalogBundleSyncStatusEntity.class);
         verify(syncStatusRepo).save(cap.capture());
         return cap.getValue();
+    }
+
+    @Test
+    @DisplayName("The checksum this install already holds is sent as the fetch validator")
+    void sendsLocalChecksumAsValidator() {
+        when(trustedKeys.hasKeys()).thenReturn(true);
+        when(bundleService.getActiveBundleMetadata()).thenReturn(Optional.of(meta("c".repeat(64))));
+        when(fetcher.fetchLatest(any())).thenReturn(ApiCatalogBundleFetcher.FetchResult.notModified());
+
+        scheduler.tick();
+
+        verify(fetcher).fetchLatest("c".repeat(64));
+    }
+
+    @Test
+    @DisplayName("304 still re-offers the stored prices: making the poll cheap must not delete that behaviour")
+    void notModifiedStillReoffersPrices() {
+        // The whole point of storing prices on the bundle row. Before, the only
+        // source was the freshly downloaded payload, so answering 304 would have
+        // silently stopped pricing an integration whose provider key the operator
+        // pasted after the bundle landed.
+        when(trustedKeys.hasKeys()).thenReturn(true);
+        when(fetcher.fetchLatest(any())).thenReturn(ApiCatalogBundleFetcher.FetchResult.notModified());
+
+        scheduler.tick();
+
+        verify(applier).reofferStoredPrices();
+    }
+
+    @Test
+    @DisplayName("304 does no catalog work: nothing to verify and nothing to merge")
+    void notModifiedSkipsVerifyAndApply() {
+        when(trustedKeys.hasKeys()).thenReturn(true);
+        when(fetcher.fetchLatest(any())).thenReturn(ApiCatalogBundleFetcher.FetchResult.notModified());
+
+        scheduler.tick();
+
+        verifyNoInteractions(verifier);
+        verify(applier, never()).apply(any(), any(), any());
+    }
+
+    private static ApiCatalogBundleRepository.ActiveBundleMeta meta(String checksum) {
+        return meta(checksum, 1);
+    }
+
+    private static ApiCatalogBundleRepository.ActiveBundleMeta meta(String checksum, Integer pricesStored) {
+        return new ApiCatalogBundleRepository.ActiveBundleMeta() {
+            @Override public String getChecksum() { return checksum; }
+            @Override public Integer getServable() { return 1; }
+            @Override public Integer getPricesStored() { return pricesStored; }
+        };
+    }
+
+    @Test
+    @DisplayName("An install upgraded before its prices were stored fetches in FULL, so the re-offer cannot silently stop")
+    void doesNotGoConditionalUntilPricesAreStoredLocally() {
+        // The upgrade path: a row applied before the prices column existed has
+        // nothing local to re-offer. Sending a validator would earn a 304, and
+        // the bundle never changes again, so pricing would stop forever.
+        when(trustedKeys.hasKeys()).thenReturn(true);
+        when(bundleService.getActiveBundleMetadata()).thenReturn(Optional.of(meta("c".repeat(64), 0)));
+        when(fetcher.fetchLatest(any())).thenReturn(ApiCatalogBundleFetcher.FetchResult.noActive());
+
+        scheduler.tick();
+
+        verify(fetcher).fetchLatest(null);
+    }
+
+    @Test
+    @DisplayName("A null prices-stored flag is treated as \"not stored\" rather than assumed ready")
+    void nullPricesStoredFetchesInFull() {
+        when(trustedKeys.hasKeys()).thenReturn(true);
+        when(bundleService.getActiveBundleMetadata()).thenReturn(Optional.of(meta("c".repeat(64), null)));
+        when(fetcher.fetchLatest(any())).thenReturn(ApiCatalogBundleFetcher.FetchResult.noActive());
+
+        scheduler.tick();
+
+        verify(fetcher).fetchLatest(null);
+    }
+
+    @Test
+    @DisplayName("The 304 path writes no second status row: the applier owns that write, being the one that knows the version")
+    void notModifiedLeavesTheStatusWriteToTheApplier() {
+        when(trustedKeys.hasKeys()).thenReturn(true);
+        when(fetcher.fetchLatest(any())).thenReturn(ApiCatalogBundleFetcher.FetchResult.notModified());
+
+        scheduler.tick();
+
+        // reofferStoredPrices owns the write (it is the applier that knows the
+        // version); the scheduler must not invent a second, different status.
+        verify(applier).reofferStoredPrices();
+        verify(syncStatusRepo, never()).save(any());
     }
 }

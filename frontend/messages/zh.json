@@ -93,7 +93,9 @@
     "noResults": "没有与\"{query}\"相关的结果",
     "searching": "搜索中...",
     "untitled": "无标题",
-    "clear": "清除搜索"
+    "clear": "清除搜索",
+    "shortcutKeys": "Ctrl K",
+    "shortcutKeysMac": "⌘K"
   },
   "reward": {
     "page": {
@@ -382,6 +384,16 @@
     "deleteRows": "删除行",
     "deleteColumnsButton": "删除列",
     "deleteRowsConfirm": "Are you sure you want to delete {count} selected row(s)? This action cannot be undone.",
+    "duplicateRows": "复制",
+    "duplicateRowsSuccessTitle": "已复制行",
+    "duplicateRowsSuccessMessage": "已复制 {count} 行",
+    "duplicateRowsSuccessMessageVector": "已复制 {count} 行。在重新生成向量之前，它们不会出现在相似度搜索中。",
+    "duplicateRowsPartialTitle": "部分行未被复制",
+    "duplicateRowsPartialMessage": "已复制 {total} 行中的 {done} 行：{reason}",
+    "duplicateRowsReasonNotLoaded": "在其他页面选中的行尚未加载",
+    "duplicateRowsReasonUnknown": "未提供原因",
+    "duplicateRowsErrorTitle": "复制行时出错",
+    "duplicateRowsErrorMessage": "无法复制所选的行：{reason}",
     "cancel": "Cancel",
     "saveRow": "Save Row",
     "addRow": "Add Row",
@@ -436,6 +448,7 @@
     "assetUrl": "使用链接",
     "assetUrlPlaceholder": "粘贴图片或文件的网址",
     "assetUrlConfirm": "使用",
+    "assetUrlBack": "返回文件来源",
     "assetUrlInvalid": "该网址似乎不可用",
     "assetExternal": "外部链接",
     "assetUnresolvableHint": "该文件已不可用，可能已从文件库中删除。",
@@ -494,6 +507,8 @@
     "openBottom": "在底部打开面板",
     "detach": "分离面板",
     "attach": "重新停靠面板",
+    "maximize": "全屏",
+    "restoreSize": "退出全屏",
     "moveWindow": "移动面板",
     "moveWindowHint": "移动面板：拖动，或使用方向键（Shift 从右下角调整大小，Ctrl+Shift 从左上角，Alt 以 1 像素为步长）",
     "collapseWindow": "折叠面板",
@@ -508,6 +523,7 @@
     "errorLoading": "加载项目失败",
     "aiChat": "AI 聊天",
     "runTab": "运行",
+    "inspectorTab": "检查器",
     "welcomeTitle": "我能帮您做什么？",
     "agent": "代理",
     "workflowPanel": "工作流面板",
@@ -528,21 +544,35 @@
     "deleteWorkflowConfirm": "您确定要删除 \"{name}\" 吗？此操作无法撤销。",
     "deleteWorkflowTitle": "删除工作流"
   },
+  "platformStatus": {
+    "headline": {
+      "operational": "所有系统运行正常",
+      "maintenance": "维护进行中",
+      "degraded": "性能下降",
+      "major_outage": "严重故障",
+      "unknown": "无法获取状态"
+    },
+    "strip": {
+      "incident": "正在处理的故障",
+      "maintenance": "维护进行中",
+      "view": "查看状态",
+      "dismiss": "关闭"
+    },
+    "card": {
+      "title": "平台状态",
+      "subtitle": "LiveContext 云服务的当前状态",
+      "state": "状态",
+      "incidents": "进行中的故障",
+      "lastChecked": "最近检查",
+      "loadError": "无法加载状态。"
+    }
+  },
   "sidebar": {
-    "board": "看板",
     "expandSidebar": "展开侧边栏",
     "collapseSidebar": "收起侧边栏",
     "closeSidebar": "关闭侧边栏",
-    "newChat": "新建聊天",
     "searchChats": "搜索聊天",
-    "home": "首页",
-    "applications": "应用",
-    "marketplace": "市场",
-    "workflows": "工作流",
-    "tables": "数据表",
-    "interfaces": "界面",
     "projects": "项目",
-    "agents": "代理",
     "chats": "聊天",
     "noConversations": "没有对话",
     "generatingTitle": "正在生成标题...",
@@ -556,24 +586,22 @@
     "allChats": "全部",
     "filterChats": "筛选对话",
     "shareConversation": "分享对话",
-    "credits": "积分",
     "viewQuota": "查看用量和配额",
     "noProjects": "暂无项目",
     "newProject": "新建项目",
     "nav": {
       "board": "看板",
-      "home": "首页",
-      "marketplace": "Marketplace",
-      "agents": "Agents",
-      "applications": "Applications",
-      "workflows": "Workflows",
-      "interfaces": "Interfaces",
-      "tables": "Tables",
+      "marketplace": "市场",
+      "agents": "代理",
+      "applications": "应用",
+      "workflows": "工作流",
+      "interfaces": "界面",
+      "tables": "数据表",
       "files": "文件",
-      "newChat": "New Chat"
+      "newChat": "新建聊天",
+      "agenda": "日程"
     },
     "settings": "Settings",
-    "pricing": "Pricing",
     "about": "About",
     "information": "Information",
     "workspace": "Workspace",
@@ -599,7 +627,7 @@
     "darkMode": "深色模式",
     "autoMode": "自动",
     "signOut": "Sign out",
-    "upgrade": "Upgrade",
+    "upgrade": "升级",
     "signIn": "Sign In",
     "clearMessages": "清空消息",
     "cost": "成本",
@@ -611,7 +639,25 @@
       "typeWorkflow": "工作流"
     },
     "scheduledAgent": "定时代理",
-    "webhookAgent": "Webhook 代理"
+    "webhookAgent": "Webhook 代理",
+    "more": {
+      "title": "更多",
+      "back": "返回"
+    },
+    "customize": {
+      "title": "自定义",
+      "pagesTitle": "侧边栏页面",
+      "pagesHint": "勾选你想放进侧边栏的页面。至少保留 {count} 个。",
+      "minimumReached": "侧边栏至少保留 {count} 个页面。先添加另一个，才能移除这个。",
+      "quickOpenTitle": "快速打开",
+      "quickOpenHint": "主页快捷按钮和下方按键的跳转目标。",
+      "reset": "恢复默认设置",
+      "shortcutKeys": "Ctrl Shift O",
+      "shortcutKeysMac": "⇧⌘O",
+      "shortcutAria": "键盘快捷键",
+      "shortcutTitle": "{label}（{keys}）"
+    },
+    "studioChats": "创作"
   },
   "dashboard": {
     "title": "设置",
@@ -693,6 +739,17 @@
           "datasource": "数据表",
           "workflow": "工作流",
           "error": "错误"
+        },
+        "triggerActions": {
+          "label": "定时操作",
+          "runNow": "立即运行",
+          "runNowHint": "原定的运行仍会照常进行。",
+          "runInstead": "代替原定运行",
+          "runInsteadHint": "会消耗掉即将到来的那次运行。",
+          "openAgenda": "在日程中打开",
+          "ranKeeping": "已启动。原定的运行仍会进行。",
+          "ranReplacing": "已启动，代替原定的运行。",
+          "runFailed": "无法启动。"
         }
       },
       "recent": {
@@ -731,7 +788,9 @@
           "AGENT_TASK_ASSIGNED": "{count, plural, one {# 项任务已分配} other {# 项任务已分配}}",
           "AGENT_TASK_AWAITING_REVIEW": "{count, plural, one {# 项任务待你审核} other {# 项任务待你审核}}",
           "BRIDGE_LOW_CREDIT": "{count, plural, one {# 个低额度桥接} other {# 个低额度桥接}}",
-          "ORG_INVITATION_PENDING": "{count, plural, one {# 个组织邀请} other {# 个组织邀请}}"
+          "ORG_INVITATION_PENDING": "{count, plural, one {# 个组织邀请} other {# 个组织邀请}}",
+          "BADGE_UNLOCKED": "{count, plural, other {# 项新成就}}",
+          "BUDGET_REACHED": "{count, plural, other {# 个工作流因支出上限而停止}}"
         },
         "approvalOpen": "打开",
         "approvalReview": "审核",
@@ -1077,6 +1136,9 @@
     "reactivateRun": {
       "title": "重新激活此次运行"
     },
+    "runAction": {
+      "failed": "操作未成功，请重试。"
+    },
     "applicationMode": "应用模式",
     "application": "应用",
     "templates": {
@@ -1147,14 +1209,15 @@
       "budgetReached": "已达预算，不会启动新的运行",
       "epochCost": "轮次 {epoch}",
       "budgetBlockedTitle": "已达预算",
-      "budgetBlockedMessage": "已花费 {spent}/{budget}。未启动新的运行。",
+      "budgetBlockedMessage": "{period}已花费 {spent}，共 {budget}。未启动新的运行；下个周期会自动恢复。",
       "openInPanel": "在侧边面板中打开运行详情",
       "backToWorkflow": "返回工作流",
       "scrollLeft": "显示上一批详情",
       "scrollRight": "显示更多详情",
       "cost": "成本",
       "scopeAll": "所有轮次",
-      "scopeEpoch": "轮次 {epoch}"
+      "scopeEpoch": "轮次 {epoch}",
+      "budgetBlockedMessageCumulative": "已花费 {spent}，共 {budget}，且此上限从不重置。未启动新的运行；请提高上限或更改其重置方式以继续。"
     }
   },
   "workflowRelations": {
@@ -1444,7 +1507,11 @@
     "publishing": "正在发布……",
     "publishingMessage": "正在打包您的工作流及其资源，请稍候",
     "retry": "重试",
-    "updateResubmittedForReview": "更新已提交审核 - 经管理员批准后将再次可用。"
+    "updateResubmittedForReview": "更新已提交审核 - 经管理员批准后将再次可用。",
+    "studioLabel": "工作室展架",
+    "studioHint": "工作室展架汇集生成媒体的应用。应用同时保留其分类：这是一个独立维度，而非替代。",
+    "studioToggle": "在工作室展架中显示",
+    "studioToggleHint": "适用于生成图像、视频或声音的应用。"
   },
   "showcase": {
     "preview": "展示预览",
@@ -1603,6 +1670,9 @@
     "ceExclusiveTooltip": "仅可在自托管安装（社区版）上运行",
     "ceExclusiveTitle": "需要自托管安装",
     "ceExclusiveDescription": "此应用使用的功能仅能在自托管安装上运行，因此无法在此安装。请从自托管部署中安装以使用它。",
+    "planUpgradeTitle": "需要更高的套餐",
+    "planUpgradeDescription": "此应用使用了您的工作区套餐尚未包含的功能。升级后即可安装。",
+    "planUpgradeCta": "查看套餐",
     "ceExclusiveFeatureCliAgent": "本地 CLI 代理（Claude Code、Codex、Gemini CLI、Mistral Vibe）",
     "ceExclusiveFeatureVectorSearch": "向量搜索（嵌入）",
     "acquiring": "正在安装……",
@@ -1708,7 +1778,10 @@
     "viewRejectionReason": "查看拒绝原因",
     "settingsMenu": {
       "label": "应用设置"
-    }
+    },
+    "studioFilterChip": "仅工作室",
+    "studioFilterClear": "显示整个应用市场",
+    "studioSubtitle": "生成图像、视频或声音的应用。"
   },
   "reviews": {
     "title": "评论",
@@ -2009,13 +2082,6 @@
       "pricing": "定价",
       "safeToClose": "您可以安全地关闭此页面。"
     },
-    "welcomeGift": {
-      "title": "欢迎礼物！",
-      "subtitle": "帮助您快速上手",
-      "credits": "积分",
-      "description": "我们已向您的账户添加了{amount}个免费积分，让您可以立即探索所有功能。",
-      "cta": "开始探索"
-    },
     "insufficientCredits": {
       "title": "您的积分已用完",
       "description": "您的积分余额不足以执行此操作。请升级您的计划以继续。",
@@ -2122,10 +2188,11 @@
       "cancel": "取消",
       "create": "创建工作流",
       "creating": "创建中...",
-      "success": "成功",
-      "successMessage": "工作流 \"{name}\" 创建成功",
       "error": "错误",
-      "errorMessage": "创建工作流失败"
+      "errorMessage": "创建工作流失败",
+      "budgetErrorTitle": "预算上限未保存",
+      "budgetErrorMessage": "工作流已创建。请在构建器中重新设置上限。",
+      "openAnyway": "打开工作流"
     },
     "createInterface": {
       "title": "创建新界面",
@@ -2291,8 +2358,7 @@
       },
       "configVectorDimension": "嵌入维度",
       "configVectorMetric": "距离度量",
-      "ceOnlyBadge": "仅限 CE",
-      "ceOnlyTooltip": "仅在自托管社区版中可用",
+      "planOnlyTooltip": "{plan} 套餐起可用。升级后即可使用向量列。",
       "mediaRender": {
         "label": "显示为",
         "thumbnail": "缩略图",
@@ -2492,7 +2558,11 @@
       "scheduleWithMemoryHelp": "启用后，代理可以访问之前的对话历史。",
       "backlogEnabled": "共享待办池参与",
       "backlogEnabledHelp": "启用后，该代理在唤醒时会获得共享待办池中的未分配任务，并可领取它们。对专职代理请保持关闭，使其只处理直接分配给它的任务。",
-      "duplicateName": "已存在名为“{name}”的智能体。请选择其他名称。"
+      "duplicateName": "已存在名为“{name}”的智能体。请选择其他名称。",
+      "memoryAccessLabel": "长期记忆",
+      "memoryAccessInfo": "该智能体保存的内容会加入工作区中所有智能体的上下文。若希望智能体只使用而不修改这些事实，请选择仅调用。",
+      "memoryAccessWrite": "可保存和删除",
+      "memoryAccessRead": "仅调用"
     },
     "createSkill": {
       "title": "创建技能",
@@ -2824,12 +2894,7 @@
       "saving": "正在保存……",
       "successMessage": "\"{name}\" 更新成功",
       "successTitle": "已更新",
-      "title": "编辑详情",
-      "advancedSection": "高级",
-      "budgetLabel": "成本预算",
-      "budgetPlaceholder": "无限制",
-      "budgetHelpCredits": "此工作流可花费的最大额度。达到后不会启动新的运行。",
-      "budgetHelpDollars": "此工作流的最大支出。达到后不会启动新的运行。"
+      "title": "编辑详情"
     },
     "suggestedApps": {
       "cta": "浏览市场",
@@ -2841,7 +2906,7 @@
   },
   "nodeTypeSettings": {
     "title": "节点类型",
-    "subtitle": "启用或禁用AI代理可用的工作流节点类型",
+    "subtitle": "启用或停用工作流节点类型，并为每个节点和集成设置所需的最低套餐",
     "searchPlaceholder": "搜索节点类型...",
     "enabled": "已启用",
     "disabled": "已禁用",
@@ -2864,9 +2929,35 @@
     },
     "errors": {
       "fetchFailed": "加载节点类型失败",
-      "toggleFailed": "切换节点类型失败"
+      "toggleFailed": "切换节点类型失败",
+      "planChangeFailed": "无法更改最低套餐"
     },
-    "adminOnlyBadge": "仅限管理员"
+    "adminOnlyBadge": "仅限管理员",
+    "plan": {
+      "label": "最低套餐",
+      "everyone": "所有人"
+    },
+    "tabs": {
+      "nodes": "节点",
+      "integrations": "集成",
+      "capabilities": "功能"
+    },
+    "integrations": {
+      "searchPlaceholder": "搜索集成...",
+      "hint": "打开某个集成，为它的每个接口设置套餐。通常受限的是发布类接口，而非读取类接口。",
+      "previous": "上一页",
+      "next": "下一页",
+      "back": "所有集成",
+      "apiLevelHint": "整个集成，包含读取",
+      "wholeApiGated": "整个集成需 {plan} 起",
+      "gatedEndpoints": "{count} 个接口需付费套餐"
+    },
+    "capabilities": {
+      "vectorSearch": {
+        "label": "向量列与相似度搜索",
+        "description": "嵌入列、相似度查询（RAG），以及安装使用它们的市场应用。嵌入共享托管数据库，因此门槛是付费套餐而非完全开放。"
+      }
+    }
   },
   "myOAuthApps": {
     "title": "你的自定义 OAuth 连接",
@@ -3400,7 +3491,7 @@
       "appliesTo": "适用于",
       "scopeAll": "所有场景",
       "scopeChat": "通用聊天",
-      "scopeWorkflow": "工作流智能体",
+      "scopeWorkflow": "工作流节点",
       "scopeWebhook": "Webhook",
       "scopeWidget": "小组件",
       "scopeSchedule": "定时任务",
@@ -4833,12 +4924,16 @@
         "storage1tb": "1 TB 存储空间",
         "logs7": "执行日志保留 7 天",
         "logs30": "执行日志保留 30 天",
-        "logs60": "执行日志保留 60 天",
+        "logs90": "执行日志保留 90 天",
         "logsCustom": "定制日志保留期",
         "versioning": "工作流版本控制",
         "apiAccess": "API 访问",
         "cePlatformCreds": "托管集成凭据",
         "cePlatformCredsTooltip": "与云关联的自托管实例可使用 LiveContext 平台凭据运行第三方集成，无需自备 API 密钥。每次调用收取少量积分加价。",
+        "vectorSearch": "云端向量搜索与 RAG",
+        "vectorSearchTooltip": "在您的表格上使用嵌入列与相似度搜索，用于检索增强生成。嵌入共享托管数据库，因此在云端从 Pro 套餐起提供。自托管安装在所有套餐中均可使用，因为它拥有自己的数据库。",
+        "browserAgent": "浏览器智能体节点",
+        "browserAgentTooltip": "由大模型驱动真实浏览器：浏览网页、填写表单、从没有 API 的站点提取结构化数据。它在整个任务期间占用一个浏览器会话，这在共享基础设施上是稀缺资源，因此从 Pro 套餐起提供。",
         "priorityExecution": "优先执行",
         "executionSearch": "执行记录搜索",
         "analyticsBasic": "基础分析",
@@ -4859,7 +4954,85 @@
         "supportPriority": "7×24 优先支持",
         "supportSla": "带 SLA 的优先支持",
         "accountManager": "专属客户经理",
-        "onboarding": "定制入门与培训"
+        "onboarding": "定制入门与培训",
+        "nodesCore": "核心节点库（不含发布类集成）",
+        "nodesPublishing": "包含发布类集成",
+        "nodesAll": "全部节点与集成，无任何限制",
+        "nodesPublishingTooltip": "可直接从工作流发布到目录中的社交与视频平台，包括 YouTube、Instagram、TikTok、X 和 LinkedIn，并会持续增加。"
+      }
+    },
+    "compare": {
+      "open": "比较套餐",
+      "title": "比较套餐",
+      "subtitle": "并排查看每个套餐包含的内容。价格基于 {credits} 积分包。",
+      "cycleLabel": "计费周期",
+      "featureColumn": "功能",
+      "unlocksBadge": "可解锁",
+      "included": "包含",
+      "notIncluded": "不包含",
+      "footnote": "所有付费套餐都可调整积分包，请在套餐页面选择。价格不含税。",
+      "sections": {
+        "usage": "用量与限制",
+        "building": "构建工作流",
+        "collaboration": "团队与工作区",
+        "security": "安全与治理",
+        "support": "分析与支持"
+      },
+      "dimensions": {
+        "credits": "每月积分",
+        "nodes": "节点与集成",
+        "nodesTooltip": "受限的只有发布：向 YouTube、Instagram、TikTok、X、LinkedIn 及另外 13 个平台发布内容需要付费套餐。从这些平台读取内容，以及其他所有节点，在每个套餐中都可用。",
+        "concurrent": "并发执行",
+        "storage": "存储空间",
+        "logs": "执行日志保留",
+        "variables": "工作流变量",
+        "users": "用户",
+        "workspaces": "工作区",
+        "analytics": "分析",
+        "support": "支持",
+        "creditsTooltip": "积分按模型和工具实际处理的内容计费，因此一个月能做多少取决于具体工作。按 Claude Sonnet 5 这类顶级模型计价：不调用任何工具的一问一答约 {simpleCredits} 积分，由智能体为你搭建工作流的一场对话约 {agentCredits} 积分（约 5 轮交互、45 次工具调用，搭建更久则费用更高），运行中的工作流里的单次分类步骤约 {classifyCredits} 积分。轻量模型还要便宜数倍。"
+      },
+      "values": {
+        "creditsFree": "1,000 / 月",
+        "creditsDynamic": "{credits} 起 / 月",
+        "creditsCustom": "定制",
+        "nodesCore": "除发布外全部",
+        "nodesPublishing": "全部",
+        "nodesAll": "全部",
+        "concurrent1": "1",
+        "concurrent5": "5",
+        "concurrent20": "20",
+        "concurrent50": "50",
+        "concurrentUnlimited": "无限制",
+        "storage100mb": "100 MB",
+        "storage1gb": "1 GB",
+        "storage10gb": "10 GB",
+        "storage100gb": "100 GB 共享",
+        "storage1tb": "1 TB",
+        "logs7": "7 天",
+        "logs30": "30 天",
+        "logs90": "90 天",
+        "logsCustom": "定制",
+        "variables3": "3",
+        "variables25": "25",
+        "variables100": "100",
+        "variables500": "500",
+        "variablesUnlimited": "无限制",
+        "users1": "1",
+        "users25": "最多 25",
+        "usersUnlimited": "无限制",
+        "workspaces1": "1",
+        "workspaces3": "3",
+        "workspaces10": "10",
+        "workspacesUnlimited": "无限制",
+        "analyticsBasic": "基础",
+        "analyticsDetailed": "详细",
+        "analyticsTeam": "团队 + 报表",
+        "analyticsAdvanced": "高级 + 报表",
+        "supportCommunity": "社区",
+        "supportEmail": "邮件",
+        "supportPriority": "7x24 优先",
+        "supportSla": "优先 + SLA"
       }
     },
     "businessPlans": {
@@ -4876,7 +5049,7 @@
       "title": "积分如何运作？",
       "toolUsage": {
         "title": "工具使用",
-        "description": "每次使用MCP工具消耗1积分。复杂工具可能根据其强度消耗更多积分。"
+        "description": "每次调用 MCP 工具消耗 1 积分，更重的工具消耗更多。模型读取和生成的内容另行按 token 计费。"
       },
       "dataStorage": {
         "title": "数据存储",
@@ -4890,20 +5063,43 @@
     "faq": {
       "title": "常见问题",
       "exceedCredits": {
-        "question": "如果我超出积分会怎样？",
-        "answer": "您可以升级订阅、通过滑块向现有套餐添加积分包，或购买一次性按量付费充值（$10 / $50 / $100）。按量付费积分跨续费周期保留，在订阅积分耗尽后才会消耗。"
+        "question": "积分用完会怎样？",
+        "answer": "新的运行和对话会暂停，直到你充值为止，因此失控的任务绝不会在你不知情的情况下产生费用。你可以用滑块提高当前方案的积分包、升级方案，或购买一次性的 Pay As You Go 充值（$10 / $50 / $100）。PAYG 积分跨账期保留，在方案积分用完后才开始消耗。"
       },
       "changePlans": {
-        "question": "我可以随时更改计划吗？",
-        "answer": "是的，您可以随时升级。要降级，您需要等到当前计费周期结束。"
+        "question": "可以随时更换方案吗？",
+        "answer": "升级立即生效，并由支付服务商按比例计费。降级或改用更小的积分包会安排在你已付费周期结束时生效，在此之前你仍保有已购买的额度。已安排的变更通常可以在生效前取消。"
       },
       "payAsYouGo": {
-        "question": "按量付费如何运作？",
-        "answer": "按量付费是一次性充值 - 选择 $10 / $50 / $100 套餐，您的钱包将获得 8,000 / 40,000 / 80,000 积分（约每 1,000 积分 $1.25）。无需订阅，积分跨续费周期保留，仅在订阅积分耗尽后消耗。"
+        "question": "Pay As You Go 如何运作？",
+        "answer": "Pay As You Go 是一次性充值：选择 $10、$50 或 $100，钱包即获得 8,000、40,000 或 80,000 积分。无需订阅。这些积分跨续费周期保留，只有在方案积分用尽后才会消耗。"
       },
       "sharedStorage": {
-        "question": "存储是否在用户之间共享？",
-        "answer": "不是，每个账户都有自己的存储空间。对于团队，存储可以根据您的计划和需求在成员之间共享。"
+        "question": "存储空间会在用户之间共享吗？",
+        "answer": "每个账户都有自己的存储空间。Team 方案额外提供一个共享空间：工作区中的文件计入团队额度，而不是每位成员各自的配额。"
+      },
+      "conversationCost": {
+        "question": "我的积分能支持多少场对话？",
+        "answer": "这取决于你要求的工作量，两端的情况如下。不调用任何工具的一问一答约需 {simpleCredits} 积分。与智能体一起搭建工作流则是重活：它要检索工具目录、读取你的数据表、创建并连接节点、运行工作流再读回结果，而每一次工具调用都会把全部对话记录重新发送给模型。以所有真实的、智能体调用过工具的对话测算，约 5 轮交互、45 次工具调用，一场约需 {agentCredits} 积分；轮次更多的搭建费用按比例增加。运行中的工作流里的单次分类步骤约需 {classifyCredits} 积分。以上数字按 Claude Sonnet 5 这类顶级模型计价；轻量模型还要便宜数倍。计费依据是模型读取和生成的 token，而非消息条数。",
+        "examplesCaption": "每个付费方案自带的 {credits} 积分可以买到：",
+        "examples": {
+          "simpleChat": {
+            "count": "{count} 场对话",
+            "detail": "一问一答，不涉及任何工具。每场约 {credits} 积分。"
+          },
+          "agentChat": {
+            "count": "{count} 场搭建工作流的对话",
+            "detail": "智能体与你一起检索工具、创建并连接节点、测试运行。按一次典型的带工具调用对话计价，约 5 轮交互、45 次工具调用；搭建更久则费用更高。每场约 {credits} 积分。"
+          },
+          "classifyStep": {
+            "count": "{count} 次分类步骤",
+            "detail": "运行中的工作流里的一次路由或归类判断。每次约 {credits} 积分。"
+          }
+        }
+      },
+      "rollover": {
+        "question": "未用完的积分可以结转吗？",
+        "answer": "方案积分在每次续费时重置，当月的积分包就是供当月使用的。Pay As You Go 充值则不同：它会跨续费周期留在你的钱包里，只有在当月方案积分用尽后才会动用。"
       }
     },
     "creditSlider": {
@@ -5325,6 +5521,10 @@
     "unauthorized": "未授权访问",
     "mustBeLoggedIn": "您必须登录才能访问设置。",
     "signIn": "登录",
+    "agentDefaults": {
+      "title": "智能体与聊天默认设置",
+      "subtitle": "应用于此工作区中每个智能体对话和每个新建通用聊天的默认选项。"
+    },
     "bundles": {
       "title": "目录包",
       "subtitle": "向社区版分发已签名的模型目录包和 API 目录包。",
@@ -5497,7 +5697,8 @@
       "security": "安全",
       "preferences": "偏好设置",
       "notifications": "通知",
-      "advanced": "高级"
+      "advanced": "高级",
+      "trophies": "成就"
     },
     "common": {
       "loading": "加载中...",
@@ -5580,11 +5781,20 @@
       "creditLimitDescription": "无需确认即可使用的积分数量",
       "chatDefaultsTitle": "聊天默认设置",
       "chatDefaultsDescription": "应用于此工作区中新对话的默认选项。",
+      "chatDefaultsLink": "打开智能体与聊天设置",
       "savePreferences": "保存偏好设置",
       "workflowLayoutDirection": "工作流布局",
       "workflowLayoutDirectionDescription": "工作流编辑器的阅读方向：从左到右，或从上到下。决定节点连接和按钮的位置，以及自动布局排列图形的方式。",
       "workflowLayoutDirectionHorizontal": "从左到右",
-      "workflowLayoutDirectionVertical": "从上到下"
+      "workflowLayoutDirectionVertical": "从上到下",
+      "inspectorDock": "节点检查器",
+      "inspectorDockDescription": "节点配置的打开位置：悬浮在画布上，或作为侧边栏的一个标签页，这样就不会遮挡流程图。",
+      "inspectorDockCanvas": "悬浮在画布上",
+      "inspectorDockPanel": "在侧边栏中",
+      "inspectorOpenMode": "点击节点时打开",
+      "inspectorOpenModeDescription": "在搭建时点击节点会打开多少内容：仅其设置，或包含节点输入与输出的完整视图。打开运行记录时始终显示完整视图。",
+      "inspectorOpenModeSimple": "仅设置",
+      "inspectorOpenModeAdvanced": "设置、输入与输出"
     },
     "notifications": {
       "title": "通知偏好设置",
@@ -5928,7 +6138,9 @@
       "workflowFailedTitle": "工作流失败",
       "workflowFailedMessage": "工作流执行失败。请检查失败的步骤以了解详情。",
       "workflowTimeoutTitle": "工作流超时",
-      "workflowTimeoutMessage": "工作流执行已超过最大允许时间。"
+      "workflowTimeoutMessage": "工作流执行已超过最大允许时间。",
+      "rerunRefusedTitle": "重新开始被拒绝",
+      "rerunRefusedMessage": "该运行无法从此处重新开始。它可能仍在执行，或者该步骤没有可以重做的结果。如果它仍在运行，请等待其稳定后再试。"
     },
     "inspector": {
       "manualTriggerTitle": "手动触发器",
@@ -6190,6 +6402,46 @@
       "item": "Item",
       "noData": "No data",
       "noExecutionData": "无执行数据",
+      "runData": {
+        "viewFile": "查看文件",
+        "downloadFile": "下载文件",
+        "copyValue": "复制值",
+        "copyAll": "全部复制",
+        "copied": "已复制",
+        "viewSwitcherLabel": "数据视图",
+        "viewTree": "树形",
+        "viewJson": "原始 JSON",
+        "viewTable": "表格",
+        "tableUnavailable": "这些数据不是行列表，无法以表格显示。",
+        "tableColumnsTruncated": "已显示前 {shown} 列，另有 {hidden} 列被隐藏。",
+        "jsonBadge": "JSON",
+        "expandJson": "展开该 JSON 值",
+        "collapseJson": "折叠该 JSON 值",
+        "showMore": "显示更多",
+        "showLess": "收起",
+        "unresolvedBadge": "未解析",
+        "unresolvedInvalidTemplate": "引擎无法解析该表达式，值保持原样。",
+        "unresolvedVariable": "变量模板未被替换就到达了该值。",
+        "unresolvedStringifiedObject": "对象在到达该值之前被转换成了文本。",
+        "stateRunning": "运行中",
+        "stateAwaiting": "等待中",
+        "stateRunningParams": "节点正在执行。以下是启动时使用的值，尚未解析。",
+        "stateRunningOutput": "节点正在执行。完成后其输出会显示在这里。",
+        "stateAwaitingParams": "节点因信号而暂停。以下是启动时使用的值。",
+        "stateAwaitingOutput": "节点因信号而暂停。信号解除后其输出会显示在这里。",
+        "signalWaitTimer": "等待计时器",
+        "signalUserApproval": "用户审批",
+        "signalWebhookWait": "Webhook 回调",
+        "signalInterface": "界面操作",
+        "signalAgentExecution": "智能体执行",
+        "signalBrowserTakeover": "浏览器接管",
+        "signalExpiresAt": "{date} 过期",
+        "noResolvedParams": "没有已解析的参数",
+        "configuredParamsTitle": "启动参数",
+        "mismatchTitle": "{count, plural, other {本次运行未报告 # 个参数}}",
+        "mismatchRenamed": "以其他名称报告：{runtimeKey}",
+        "mismatchNotReported": "已在节点上配置，但本次运行未报告。"
+      },
       "moreActions": "更多操作",
       "nodeOutputs": "节点输出",
       "report": {
@@ -6836,7 +7088,9 @@
     "rerunConfirm": {
       "title": "从此步骤重新开始？",
       "message": "本次运行为自动模式。从这里重新开始会重跑该步骤，随后工作流的其余部分会自动继续运行，可能调用付费工具并发送真实消息。",
-      "confirm": "重新开始"
+      "confirm": "重新开始",
+      "scopeEpoch": "第 {epoch} 轮",
+      "scopeLatestEpoch": "该步骤的最新一轮"
     },
     "canvas": {
       "portSingleTargetHint": "此输出已连接。一个端口只能连到一个节点--添加 Fork 节点即可并行运行多个节点。",
@@ -6875,6 +7129,9 @@
       "backToHome": "返回首页",
       "searchPlaceholder": "搜索 {context}...",
       "frequentlyUsed": "常用",
+      "paletteCategories": "分类",
+      "paletteNodes": "节点",
+      "paletteIntegrations": "集成",
       "mcp": "MCP",
       "noApiFound": "未找到 API",
       "noToolFound": "未找到工具",
@@ -7007,7 +7264,24 @@
       "close": "关闭",
       "layoutDirection": "布局",
       "layoutHorizontal": "从左到右",
-      "layoutVertical": "从上到下"
+      "layoutVertical": "从上到下",
+      "inspectorDock": "检查器",
+      "inspectorDockCanvas": "悬浮",
+      "inspectorDockPanel": "侧边栏",
+      "inspectorOpenMode": "点击节点时打开",
+      "inspectorOpenModeSimple": "仅设置",
+      "inspectorOpenModeAdvanced": "设置、输入与输出",
+      "paletteTooltip": {
+        "badgeTrigger": "触发器",
+        "badgeIntegration": "集成",
+        "badgeCategory": "分类",
+        "badgeNode": "节点",
+        "details": "详情",
+        "requiresPlan": "需要 {plan}",
+        "hintClickAdd": "点击添加",
+        "hintClickBrowse": "点击浏览",
+        "hintDrag": "或拖到画布上"
+      }
     },
     "nodes": {
       "filePreview": {
@@ -7159,11 +7433,17 @@
       "generate": {
         "title": "生成",
         "description": "根据提示生成一个资源：图片、视频、音频、语音或音乐。所选模型决定生成的格式、可接受的参数以及每次运行的费用。",
+        "assetType": "素材类型",
+        "provider": "服务商",
+        "credential": "密钥与计费",
         "model": "模型",
         "modelPlaceholder": "选择模型",
         "modelsLoading": "正在加载模型...",
         "modelHint": "更换模型会清除新模型不接受的参数。",
         "noModels": "此安装中没有可用的生成模型。",
+        "modelsUnavailable": "暂时无法读取模型目录。这并不说明此处是否支持生成：请稍后重试。",
+        "unknownModel": "此节点使用的模型“{model}”未在本安装中提供。请另选一个模型，否则运行会被拒绝。",
+        "parameters": "参数",
         "selectValue": "选择一个值",
         "filePlaceholder": "例如 {{core:download.output.file}}",
         "limitRange": "允许范围：{min} 到 {max}",
@@ -7305,7 +7585,37 @@
         "opacityHint": "介于 {min} 和 {max} 之间。默认：1。",
         "startSeconds": "开始（秒）",
         "endSeconds": "结束（秒）",
-        "overlayTimingHint": "开始和结束留空则整段视频都显示叠加。"
+        "overlayTimingHint": "开始和结束留空则整段视频都显示叠加。",
+        "opSubtitles": "烧录字幕",
+        "opSubtitlesDesc": "将定时字幕烧录进视频画面",
+        "subtitlesVideoHint": "最后再加字幕：字幕会成为画面的一部分，之后无法移除。",
+        "cues": "字幕",
+        "cue": "字幕 {index}",
+        "cueText": "文本",
+        "cueTextPlaceholder": "屏幕上显示的一行文字",
+        "cueStartSeconds": "出现时间（秒）",
+        "cueEndSeconds": "消失时间（秒）",
+        "addCue": "添加字幕",
+        "removeCue": "删除字幕",
+        "moveCueUp": "上移字幕",
+        "moveCueDown": "下移字幕",
+        "cuesHint": "最多 {max} 条字幕，需按顺序排列且不得重叠。请按视频中实际的音频来对时。",
+        "cuesExpressionHint": "该字幕轨由上游节点生成，因此无法在此编辑。",
+        "subtitleStyle": "样式",
+        "subtitleStyleTiktok": "短视频",
+        "subtitleStyleTiktokDesc": "大号粗体大写，位于画面中部偏上",
+        "subtitleStyleClassic": "经典",
+        "subtitleStyleClassicDesc": "字号较小，大小写混排，靠近底部",
+        "fontFamily": "字体",
+        "fontFamilyPlaceholder": "默认字体",
+        "fontFamilyHint": "除非确有需要，否则留空：找不到的字体会让运行失败，而不会被替换。",
+        "fontSizePercent": "字号（占高度的百分比）",
+        "fontSizePercentHint": "介于 {min} 和 {max} 之间。留空则沿用该样式的字号。",
+        "positionPercent": "位置（距顶部的百分比）",
+        "positionPercentHint": "介于 {min} 和 {max} 之间。留空则沿用该样式的位置。",
+        "textColor": "文字颜色",
+        "outlineColor": "描边颜色",
+        "outlineColorHint": "描边可以让字幕在明亮画面上依然清晰可读。"
       },
       "fork": {
         "outputBranches": "输出分支",
@@ -7672,7 +7982,8 @@
       "paste": "粘贴",
       "selectAll": "全选",
       "autoLayout": "自动布局",
-      "fitView": "适应视图"
+      "fitView": "适应视图",
+      "ctrlKeyName": "Ctrl"
     },
     "credentialSelector": {
       "accountLabel": "此步骤使用的账户",
@@ -7867,7 +8178,9 @@
       "tabFleet": "代理群",
       "tabMetrics": "指标",
       "shared": "已分享",
-      "tabBoard": "看板"
+      "tabBoard": "看板",
+      "tabMemory": "记忆",
+      "tabSettings": "设置"
     },
     "skill": {
       "title": "技能",
@@ -8215,8 +8528,13 @@
     "role": "您的角色是什么？",
     "customRolePlaceholder": "输入您的角色...",
     "companySize": "公司规模",
-    "useCasesLabel": "您将使用LiveContext做什么？",
-    "experienceLevel": "经验级别",
+    "primaryGoalLabel": "您的主要目标",
+    "primaryGoalRequired": "请选择一个主要目标以继续",
+    "toolsUsedLabel": "您已经在使用哪些工具？",
+    "toolsUsedHint": "可选，可多选",
+    "previousToolLabel": "您目前用什么进行自动化？",
+    "referralSourceLabel": "您是如何了解到 LiveContext 的？",
+    "step3Required": "请回答这两个问题以完成",
     "loginRequired": "需要登录",
     "loginRequiredDescription": "请登录以完成您的个人资料设置",
     "signIn": "登录",
@@ -8228,12 +8546,12 @@
       "description": "告诉我们一些关于您的信息以个性化您的体验"
     },
     "step2": {
-      "title": "您对什么感兴趣？",
-      "description": "选择您最感兴趣的主题"
+      "title": "您想先自动化什么？",
+      "description": "选择最重要的一项，我们据此提供首批建议"
     },
     "step3": {
-      "title": "您的目标",
-      "description": "帮助我们了解如何最好地帮助您"
+      "title": "即将完成",
+      "description": "最后两个问题，即可开始使用"
     },
     "roles": {
       "sales": "销售",
@@ -8251,62 +8569,51 @@
       "freelancer": "自由职业者",
       "other": "其他"
     },
-    "interests": {
-      "automation": "自动化",
-      "aiMl": "AI与机器学习",
-      "dataAnalytics": "数据与分析",
-      "integrations": "集成",
-      "productivity": "生产力工具",
-      "businessIntelligence": "商业智能",
-      "customerExperience": "客户体验",
-      "salesCrm": "销售与CRM",
-      "marketingAutomation": "营销自动化",
-      "ecommerceTools": "电子商务工具",
-      "other": "其他"
-    },
-    "customInterestPlaceholder": "输入您的兴趣...",
-    "useCases": {
-      "workflowAutomation": "工作流自动化",
-      "chatbotsAssistants": "聊天机器人与助手",
-      "dataIntegration": "数据集成",
-      "contentGeneration": "内容生成",
-      "leadGeneration": "潜在客户生成",
+    "primaryGoals": {
+      "emailFollowUps": "邮件跟进与回复",
+      "contentPublishing": "内容创作与发布",
+      "leadGeneration": "潜在客户获取与 CRM",
       "customerSupport": "客户支持",
-      "reportingDashboards": "报告与仪表板",
-      "ecommerceAutomation": "电子商务自动化",
-      "teamCollaboration": "团队协作",
-      "monitoringAlerts": "监控与警报",
+      "reporting": "报表与仪表盘",
+      "dataSync": "在工具之间同步数据",
+      "monitoringAlerts": "监控与告警",
+      "aiAssistant": "为我的团队提供 AI 助手",
       "other": "其他"
     },
-    "customUseCasePlaceholder": "输入您的用例...",
-    "experience": {
-      "beginner": "初学者",
-      "beginnerDesc": "刚刚开始",
-      "intermediate": "中级",
-      "intermediateDesc": "有一些经验",
-      "advanced": "专家",
-      "advancedDesc": "高级用户"
+    "tools": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "googleSheets": "Google Sheets",
+      "slack": "Slack",
+      "notion": "Notion",
+      "hubspot": "HubSpot",
+      "salesforce": "Salesforce",
+      "shopify": "Shopify",
+      "stripe": "Stripe",
+      "github": "GitHub",
+      "discord": "Discord",
+      "telegram": "Telegram",
+      "linkedin": "LinkedIn",
+      "airtable": "Airtable",
+      "other": "其他"
+    },
+    "previousTools": {
+      "none": "还没有",
+      "zapierMake": "Zapier 或 Make",
+      "n8n": "n8n",
+      "customCode": "自定义代码或脚本",
+      "otherPlatform": "其他平台"
+    },
+    "referralSources": {
+      "search": "搜索引擎",
+      "social": "社交媒体",
+      "wordOfMouth": "同事或朋友推荐",
+      "github": "GitHub",
+      "article": "文章或新闻通讯",
+      "aiAssistant": "AI 助手推荐",
+      "other": "其他"
     },
     "ce": {
-      "experience": {
-        "firstInstall": "首次安装",
-        "firstInstallDesc": "正在设置",
-        "operator": "运维人员",
-        "operatorDesc": "运行服务",
-        "powerUser": "高级用户",
-        "powerUserDesc": "扩展 CE"
-      },
-      "experienceLevel": "自托管经验",
-      "interests": {
-        "governance": "治理",
-        "integrations": "集成",
-        "localAutomation": "本地自动化",
-        "localMarketplace": "本地市场",
-        "other": "其他",
-        "privateData": "私有数据",
-        "selfHostedAgents": "自托管代理",
-        "teamWorkflows": "团队工作流"
-      },
       "role": "您的 CE 角色",
       "roles": {
         "community": "社区负责人",
@@ -8322,14 +8629,15 @@
         "title": "设置您的 CE 工作区"
       },
       "step2": {
-        "description": "选择您的社区将维护的本地工作流和集成",
-        "title": "此实例应专注于什么？"
+        "description": "选择此自托管工作区应优先承担的工作",
+        "title": "此实例应先自动化什么？"
       },
       "step3": {
-        "description": "选择此自托管工作区应首先优化的工作",
-        "title": "CE 运营目标"
+        "description": "最后两个问题，您的工作区即可就绪",
+        "title": "即将完成"
       },
       "teamSize": "本地团队规模",
+      "primaryGoalLabel": "此实例的主要目标",
       "teamSizes": {
         "community": "社区",
         "department": "部门",
@@ -8346,8 +8654,28 @@
         "privateAssistants": "私有助手",
         "teamWorkspaces": "团队工作区",
         "toolOrchestration": "工具编排"
+      }
+    },
+    "firstBuild": {
+      "goalPrompts": {
+        "emailFollowUps": "帮我搭建一个工作流：每个工作日早上浏览我的收件箱，找出仍在等我回复的邮件，然后按紧急程度给我一份简短的汇总。",
+        "contentPublishing": "帮我搭建一个工作流：把一个想法变成一周的内容，先起草这些帖子，让我审核，然后按计划发布。",
+        "leadGeneration": "帮我搭建一个工作流：收集每一条新线索，补全对方的公司信息，写入我的 CRM，并在一分钟内发出一封个性化的首次回复。",
+        "customerSupport": "帮我搭建一个智能体：阅读收到的支持请求，用我们自己的文档回答其中常见的问题，其余的连同一份建议回复转给我。",
+        "reporting": "帮我搭建一个工作流：每周一早上汇总我的关键数据，做成一个我可以打开的看板，并把与上周相比的变化发到我的邮箱。",
+        "dataSync": "帮我搭建一个工作流，让我的各个工具保持同步：一边的记录发生变化就更新另一边，并记录所有变动。",
+        "monitoringAlerts": "帮我搭建一个工作流：定时检查我关心的内容，只有真正需要我处理时才提醒我。",
+        "aiAssistant": "帮我搭建一个智能体，让团队可以直接与它对话，它了解我们的文档，并且能在我们的工具里执行操作，而不只是回答问题。",
+        "internalAutomation": "帮我搭建一个工作流，端到端接管我们一项重复的内部事务，并让我看到每一次运行，这样我才能放心。",
+        "privateAssistants": "帮我搭建一个助手，运行在这个实例上，只根据我们自己的文档作答，绝不把文档发到别处。",
+        "dataPipelines": "帮我搭建一条数据管道：定时采集数据、清洗数据、存入表格，并在运行失败时通知我。",
+        "toolOrchestration": "帮我搭建一个工作流，把我们的多个工具串成一次操作，并在最后一步之前留一个需要我审批的环节。",
+        "teamWorkspaces": "帮我搭建一个团队共享工作区：一张大家都能写入的表、一个用于查看的页面，以及一个让它保持更新的工作流。",
+        "marketplacePublishing": "帮我搭建一个可以发布的小应用，配一个使用页面和背后的工作流。",
+        "evaluationSandbox": "帮我搭建一个端到端的小示例，展示这个平台能做什么：一个触发器、几个步骤，以及一个展示结果的页面。"
       },
-      "useCasesLabel": "此 CE 实例将运行什么？"
+      "toolsClause": "我主要使用 {tools}。",
+      "promptSeparator": ""
     }
   },
   "webhookSettings": {
@@ -8625,6 +8953,19 @@
     "manageSharedLinks": "管理共享链接"
   },
   "billing": {
+    "balance": {
+      "title": "余额",
+      "upgrade": "升级",
+      "total": "每月额度",
+      "remaining": "剩余",
+      "remainingAmount": "剩余 {amount} 积分",
+      "triggerLabel": "{amount}，{detail}",
+      "creditsAmount": "{amount} 积分",
+      "overAllowance": "超出套餐 +{percent}%",
+      "overAllowanceTiny": "略微超出套餐",
+      "usedPercent": "已用套餐的 {percent}%",
+      "viewUsage": "查看用量"
+    },
     "cancel": {
       "title": "支付已取消",
       "subtitle": "您的付款未被处理",
@@ -8695,6 +9036,9 @@
       "title": "您的积分无法支付此模型",
       "explanation": "您的每月积分覆盖工作流节点的运行，但不包括模型本身的工作（聊天、智能体、生成）。这部分需用按量付费积分支付，而您已没有余额。",
       "cta": "查看套餐或充值"
+    },
+    "planLocked": {
+      "nodeNotice": "该节点从 {plan} 套餐起可用。在升级前，工作流运行到此节点会失败。"
     }
   },
   "localMcp": {
@@ -9423,7 +9767,15 @@
       "top": "能力最强、较慢、最贵"
     },
     "tokens": "{count} token",
-    "tpmLabel": "Token / 分钟"
+    "tpmLabel": "Token / 分钟",
+    "creditEstimateShort": "约 {credits} 积分",
+    "creditEstimateTooltip": {
+      "agentConversation": "该模型在一次典型的带工具对话中约需 {credits} 积分，约 5 轮交互、45 次工具调用。这是基于真实用量的估算，不是上限。",
+      "chatConversation": "一次不调用工具的典型交流约需 {credits} 积分。这是基于真实用量的估算，不是上限。",
+      "guardrailCheck": "对一条典型消息进行一次校验约需 {credits} 积分。这是基于真实用量的估算，不是上限。",
+      "classifyStep": "对一条典型输入进行一次分类约需 {credits} 积分。这是基于真实用量的估算，不是上限。"
+    },
+    "creditEstimateLabel": "预计消耗"
   },
   "publicationReview": {
     "adminOnlyBadge": "仅限管理员",
@@ -9761,6 +10113,26 @@
     "runTitle": "运行此操作？",
     "toolLabel": "工具"
   },
+  "askUser": {
+    "title": "助手有一个问题",
+    "subtitle": "请选择一个答案，以便助手继续",
+    "stepOf": "第 {current} 题，共 {total} 题",
+    "next": "下一题",
+    "back": "上一题",
+    "waitingForYou": "助手正在等待您的回答以继续。",
+    "answerResumes": "本轮已结束。您的回答会让助手继续。",
+    "selectOne": "请选择一项",
+    "selectMultiple": "可选择一项或多项",
+    "otherOption": "其他",
+    "otherPlaceholder": "输入您自己的答案",
+    "submit": "发送答案",
+    "submitting": "发送中",
+    "skip": "跳过",
+    "submitFailed": "无法发送您的答案，请重试。",
+    "submitFailedTitle": "答案未发送",
+    "resumeIntro": "我的答案：",
+    "noAnswer": "尚未回答"
+  },
   "board": {
     "toggle": {
       "task": "任务",
@@ -9934,6 +10306,16 @@
     "copy": "复制",
     "copied": "已复制",
     "anonymousCheckNotice": "每日更新检查会发送当前版本和一个随机的安装标识符，用于统计正在运行的自托管安装数量。所保存的记录不含任何 IP 地址、主机名或账号信息。设置 CE_VERSIONCHECK_SENDINSTALLID=false 可停止发送该标识符，设置 CE_VERSIONCHECK_ENABLED=false 可关闭该检查。"
+  },
+  "changelog": {
+    "whatsNew": "新功能",
+    "dismiss": "知道了",
+    "learnMore": "查看全部更新",
+    "latest": {
+      "title": "你的智能体不再从零开始",
+      "body": "智能体现在会记住学到的东西：一次纠正、一个偏好、一条团队规则。每条记忆都会带入这个工作区中所有工作流的每一次执行，所以周五告诉它的事，定时智能体周一就会照做。打开「记忆」标签页即可查看它们记住了什么，随时更正、置顶重要内容或删除多余内容。",
+      "mediaAlt": "「记忆」标签页，列出工作区中智能体记住的内容，每条都标有类型、范围和置顶状态"
+    }
   },
   "optionalComponents": {
     "title": "可选组件",
@@ -10435,5 +10817,567 @@
     "renameFailed": "无法重命名文件夹。",
     "deleteFailed": "无法删除文件夹。",
     "moveFailed": "无法完成移动。"
+  },
+  "agenda": {
+    "nav": {
+      "previous": "上一时段",
+      "next": "下一时段",
+      "today": "今天"
+    },
+    "view": {
+      "month": "月",
+      "week": "周",
+      "day": "日",
+      "list": "列表"
+    },
+    "weekRange": "{from} 至 {to}",
+    "searchPlaceholder": "搜索",
+    "clock": {
+      "tooltip": "{zone} 的当前时间"
+    },
+    "datePicker": {
+      "open": "跳转到日期",
+      "month": "月份",
+      "year": "年份",
+      "previousMonth": "上个月",
+      "nextMonth": "下个月",
+      "openWith": "{period}。跳转到日期"
+    },
+    "create": {
+      "title": "新建定时工作流",
+      "description": "根据所选时段提出：{slot}。",
+      "slotWithTime": "{date} {time}",
+      "nameLabel": "名称",
+      "namePlaceholder": "每周营收报告",
+      "confirm": "创建并打开",
+      "createdTitle": "工作流已创建",
+      "createdMessage": "“{name}”已可开始搭建。",
+      "notLiveYet": "该计划已随工作流保存。搭建完成并设为生产版本后才会开始触发。",
+      "slotActionAt": "在 {date} {time} 安排任务",
+      "slotActionOn": "在 {date} 安排任务",
+      "monthlyDayGap": "设在每月 {day} 日的计划，在天数较少的月份不会运行。"
+    },
+    "moreCount": "还有 {n} 项",
+    "showLess": "收起",
+    "movedBadge": "已移出原计划",
+    "resource": {
+      "workflow": "工作流",
+      "application": "应用",
+      "agent": "智能体"
+    },
+    "kind": {
+      "schedule": "定时",
+      "webhook": "Webhook",
+      "manual": "手动",
+      "chat": "对话",
+      "form": "表单",
+      "datasource": "数据表",
+      "workflow": "工作流",
+      "error": "错误"
+    },
+    "status": {
+      "planned": "已计划",
+      "running": "运行中",
+      "completed": "已完成",
+      "failed": "失败",
+      "fired": "已触发",
+      "budgetBlocked": "不会运行：已达支出上限"
+    },
+    "filters": {
+      "resourceTypes": "资源类型",
+      "view": "视图",
+      "settings": "显示设置",
+      "timezone": "时区",
+      "weekStart": "每周开始于",
+      "monday": "星期一",
+      "sunday": "星期日",
+      "hourRange": "显示的时段",
+      "showWeekends": "显示周末",
+      "showPast": "显示历史运行",
+      "showPastHint": "显示过去几天实际运行的内容。",
+      "showPaused": "显示已暂停的定时",
+      "compact": "紧凑行距",
+      "reset": "重置显示设置"
+    },
+    "menu": {
+      "runNow": "立即运行",
+      "runNowHint": "原定的运行仍会照常进行。",
+      "move": "移动…",
+      "pause": "暂停定时",
+      "resume": "恢复定时",
+      "open": "打开资源",
+      "openRun": "打开这次运行"
+    },
+    "move": {
+      "title": "移动 {name}",
+      "description": "新日期：{date}",
+      "timeLabel": "时间",
+      "scopeNext": "仅此一次",
+      "scopeNextHint": "之后的运行会回到原来的时间。",
+      "scopeAll": "全部",
+      "scopeAllHint": "定时本身改到这个时间。",
+      "scopeAllUnavailable": "不可用：{cron} 没有唯一的时间点可供移动。",
+      "pastWarning": "该时间已过，运行将在下一次检查时开始。",
+      "confirm": "移动",
+      "scopeNextUnavailable": "只有下一次运行可以单独移动，这一次在更后面。"
+    },
+    "common": {
+      "cancel": "取消",
+      "working": "处理中…"
+    },
+    "truncated": {
+      "schedules": "{n, plural, other {# 个计划}}触发过于频繁，无法在此完整显示。请切换到日视图查看全部。",
+      "past": "该时间范围内的部分较早运行未显示。"
+    },
+    "empty": {
+      "title": "这里没有安排",
+      "description": "工作流、应用和智能体的定时任务会显示在此日历上。",
+      "allFilteredTitle": "未选择任何资源类型",
+      "allFilteredDescription": "重新启用一种资源类型即可查看已安排的内容。",
+      "searchTitle": "没有匹配项",
+      "searchDescription": "该时间段内没有与搜索匹配的已安排资源。",
+      "filteredTitle": "没有符合筛选条件的内容",
+      "filteredDescription": "你的显示设置隐藏了该时间段内的全部内容。"
+    },
+    "errors": {
+      "loadTitle": "无法加载日程",
+      "loadMessage": "请重试。",
+      "patternNotShiftable": "该定时没有唯一的时间点，无法整体移动。请只移动这一次。",
+      "weekdaySetNotMatched": "该定时在固定的星期几运行，所选日期不在其中。请只移动这一次。",
+      "dayOfMonthUnsafe": "按月的定时不能定在 28 日之后，因为有些月份没有那一天。",
+      "notArmed": "该定时已暂停。",
+      "executionRefused": "运行未能启动。",
+      "notFound": "该定时已不存在。",
+      "generic": "出了点问题。",
+      "notTheNextOccurrence": "只有下一次运行可以单独移动。移动更晚的一次会取消它之前的所有运行。请改用“全部”，或移动下一次。",
+      "viewerRole": "你在该工作区的角色不允许修改定时。",
+      "scheduleRejected": "无法修改该定时，它可能已被归档。"
+    },
+    "toasts": {
+      "movedTitle": "已移动",
+      "movedAll": "今后所有运行都使用新时间。",
+      "movedNext": "下一次运行已移动，之后的保持不变。",
+      "ranTitle": "已启动",
+      "ranMessage": "原定的运行仍会照常进行。",
+      "runFailedTitle": "无法运行",
+      "pausedTitle": "已暂停",
+      "pausedMessage": "在你恢复之前不会触发。",
+      "resumedTitle": "已恢复",
+      "resumedMessage": "已重新就绪。",
+      "toggleFailedTitle": "无法修改定时"
+    },
+    "hiddenOnWeekends": "{n, plural, other {有 # 次运行落在被隐藏的周末。}} 显示周末。"
+  },
+  "badges": {
+    "title": "成就",
+    "subtitle": "当您在 LiveContext 上搭建、运行和分享时，徽章会自动解锁。",
+    "summary": "已解锁 {unlocked}/{total}",
+    "recent": "最近解锁",
+    "nextUp": "即将解锁",
+    "locked": "未解锁",
+    "unlockedOn": "解锁于 {date}",
+    "progress": "{value} / {threshold}",
+    "loadError": "无法加载成就。",
+    "publicHeading": "成就",
+    "publicEmpty": "暂无成就。",
+    "showAll": "显示全部",
+    "showLess": "收起",
+    "detail": {
+      "requirementLabel": "如何获得",
+      "remaining": "还差 {count}",
+      "ladder": "同系列"
+    },
+    "family": {
+      "FOUNDER": "起源",
+      "TENURE": "忠诚",
+      "BUILDER": "构建者",
+      "APP_MAKER": "应用创作者",
+      "SHIPPER": "上线发布",
+      "OPERATOR": "运行操作",
+      "RELIABILITY": "可靠性",
+      "CONSISTENCY": "持之以恒",
+      "NIGHT_OWL": "夜班",
+      "PUBLISHER": "发布",
+      "SHARER": "分享",
+      "POPULARITY": "影响力"
+    },
+    "tier": {
+      "BRONZE": "青铜",
+      "SILVER": "白银",
+      "GOLD": "黄金",
+      "PLATINUM": "铂金",
+      "DIAMOND": "钻石"
+    },
+    "requirement": {
+      "MEMBER_DAYS": "成为会员满 {count} 天",
+      "WORKFLOWS_CREATED": "创建 {count} 个工作流",
+      "APPLICATIONS_CREATED": "创建 {count} 个应用",
+      "RUNS_LAUNCHED": "启动 {count} 次执行",
+      "RUNS_COMPLETED": "成功完成 {count} 次运行",
+      "ACTIVE_DAYS": "在 {count} 个不同的日子里运行过任务",
+      "NIGHT_LAUNCHES": "在 UTC 时间 0 点至 5 点之间启动 {count} 次执行",
+      "WORKFLOWS_PINNED": "将 {count} 个工作流固定到生产环境",
+      "PUBLICATIONS_PUBLISHED": "在市场中发布 {count} 个作品",
+      "PUBLICATIONS_PUBLIC": "将 {count} 个作品设为公开",
+      "PUBLICATION_USES": "您的作品被安装 {count} 次",
+      "DAYS_UNTIL_JOIN_CUTOFF": "早期加入 LiveContext"
+    },
+    "item": {
+      "founder_2026": {
+        "name": "创始成员",
+        "requirement": "在 2026 年底前注册"
+      },
+      "tenure_30": {
+        "name": "第一个月"
+      },
+      "tenure_100": {
+        "name": "百日"
+      },
+      "tenure_730": {
+        "name": "两周年"
+      },
+      "tenure_1095": {
+        "name": "三周年"
+      },
+      "tenure_1825": {
+        "name": "五周年"
+      },
+      "builder_1": {
+        "name": "首次搭建"
+      },
+      "builder_5": {
+        "name": "手艺人"
+      },
+      "builder_10": {
+        "name": "流程铁匠"
+      },
+      "builder_50": {
+        "name": "自动化架构师"
+      },
+      "builder_100": {
+        "name": "建造大师"
+      },
+      "builder_300": {
+        "name": "流程传奇"
+      },
+      "appmaker_1": {
+        "name": "应用工匠"
+      },
+      "appmaker_3": {
+        "name": "应用工作室"
+      },
+      "appmaker_25": {
+        "name": "应用工厂"
+      },
+      "appmaker_60": {
+        "name": "应用帝国"
+      },
+      "shipper_1": {
+        "name": "已上线"
+      },
+      "shipper_5": {
+        "name": "生产运行"
+      },
+      "shipper_50": {
+        "name": "生产线"
+      },
+      "operator_1": {
+        "name": "首次启动"
+      },
+      "operator_10": {
+        "name": "热身中"
+      },
+      "operator_100": {
+        "name": "操作员"
+      },
+      "operator_5000": {
+        "name": "飞行控制员"
+      },
+      "operator_50000": {
+        "name": "任务控制中心"
+      },
+      "operator_1000000": {
+        "name": "轨道指挥部"
+      },
+      "reliability_25": {
+        "name": "绿灯"
+      },
+      "reliability_250": {
+        "name": "稳健之手"
+      },
+      "reliability_10000": {
+        "name": "精准如钟"
+      },
+      "reliability_50000": {
+        "name": "完美引擎"
+      },
+      "consistency_3": {
+        "name": "渐入佳境"
+      },
+      "consistency_10": {
+        "name": "常客"
+      },
+      "consistency_90": {
+        "name": "坚持不懈"
+      },
+      "consistency_250": {
+        "name": "永不停歇"
+      },
+      "consistency_750": {
+        "name": "始终在场"
+      },
+      "nightowl_1": {
+        "name": "夜班"
+      },
+      "nightowl_25": {
+        "name": "夜猫子"
+      },
+      "nightowl_500": {
+        "name": "不眠引擎"
+      },
+      "publisher_1": {
+        "name": "首次发布"
+      },
+      "publisher_3": {
+        "name": "发布者"
+      },
+      "publisher_25": {
+        "name": "高产发布者"
+      },
+      "publisher_60": {
+        "name": "出版社"
+      },
+      "sharer_1": {
+        "name": "分享给世界"
+      },
+      "sharer_5": {
+        "name": "慷慨分享"
+      },
+      "sharer_40": {
+        "name": "社区支柱"
+      },
+      "popularity_1": {
+        "name": "首次安装"
+      },
+      "popularity_10": {
+        "name": "口口相传"
+      },
+      "popularity_500": {
+        "name": "人气之选"
+      },
+      "popularity_5000": {
+        "name": "爆红"
+      },
+      "popularity_50000": {
+        "name": "家喻户晓"
+      }
+    }
+  },
+  "generation": {
+    "formats": {
+      "image": "图像",
+      "video": "视频",
+      "audio": "音效",
+      "voice": "语音",
+      "music": "音乐"
+    },
+    "params": {
+      "negative_prompt": "避免出现",
+      "voice": "音色",
+      "language": "语言",
+      "style": "风格",
+      "aspect_ratio": "画面比例",
+      "resolution": "分辨率",
+      "quality": "质量",
+      "duration_seconds": "时长（秒）",
+      "n": "数量",
+      "seed": "随机种子",
+      "input_image": "参考图片",
+      "input_audio": "参考音频",
+      "input_video": "参考视频"
+    },
+    "price": {
+      "perUnit": "每 {unit} {rate} 积分",
+      "plusBase": "另加 {base} 起步",
+      "flat": "{credits} 积分",
+      "min": "最低 {credits}",
+      "max": "上限 {credits}",
+      "total": "本次请求 {credits} 积分",
+      "unpriced": "平台密钥不提供此模型"
+    },
+    "fields": {
+      "providerPlaceholder": "选择服务商",
+      "optionsLoading": "正在加载可选值...",
+      "optionsTruncated": "仅显示 {count} 个值中的前几个。如果找不到需要的值，请直接输入。",
+      "optionsEmpty": "服务商未返回该字段的任何可选值。如果知道具体值，请直接输入。"
+    },
+    "modelCount": "{count} 个模型",
+    "empty": "目前还没有可用的生成模型。",
+    "billedOn": "按 {quantity} {unit} 计费",
+    "assetRoles": {
+      "source": "源图片",
+      "first_frame": "首帧",
+      "reference": "参考图片",
+      "mask": "蒙版"
+    }
+  },
+  "studio": {
+    "composer": {
+      "placeholder": "描述你想用 {model} 创作的内容",
+      "placeholderNoModel": "选择一个模型即可开始创作",
+      "send": "创作",
+      "missingRequired": "请先填写标出的设置",
+      "addFile": "添加文件",
+      "allSlotsFull": "该模型不能再接收文件",
+      "uploading": "正在上传",
+      "uploadFailed": "上传失败",
+      "retryUpload": "重新上传该文件",
+      "removeFile": "移除该文件",
+      "parameters": "参数"
+    },
+    "modelPicker": {
+      "change": "更换模型",
+      "none": "选择模型",
+      "empty": "暂时没有可用的生成模型。",
+      "back": "返回",
+      "stepKind": "要创作什么",
+      "stepProvider": "服务商"
+    },
+    "params": {
+      "required": "{label} 为必填项",
+      "loadingOptions": "正在向服务商查询",
+      "optionsUnavailable": "无法读取可用值，你仍然可以自行输入。",
+      "optionsTruncated": "当前仅显示部分值，你可以输入列表以外的值。",
+      "freeTextPlaceholder": "输入一个值",
+      "clear": "清除"
+    },
+    "untitled": "未命名作品",
+    "thread": {
+      "loading": "正在加载该创作记录"
+    },
+    "welcome": {
+      "title1": "创作出色的作品",
+      "title2": "今天我们创作什么？",
+      "title3": "描述它，它就会被创作出来。",
+      "title4": "一段视频、一张图、一个声音，由你决定。",
+      "title5": "你想看到什么？"
+    },
+    "turn": {
+      "noPrompt": "没有文字描述，这一次仅使用了所附文件与设置。",
+      "running": "正在创作。视频可能需要几分钟。",
+      "noAnswer": "这一次没有收到任何回应。它可能已经完成并已计费，请先查看你的文件，再决定是否重新运行。",
+      "failed": "这一次没有产出任何内容。",
+      "savedNoPreview": "已完成，但没有返回本页面可以显示的内容。如果生成了文件，它在你的文件里。",
+      "reuse": "再次使用",
+      "openInFiles": "在文件中查看",
+      "chargedNoAsset": "本次生成已执行并已计费，但文件未能保存。请通过下方链接及时保存：链接将在几分钟后失效。",
+      "recoverAsset": "从服务商处保存该文件"
+    },
+    "notices": {
+      "conversation_create_failed": "无法开始这段创作记录，因此没有发送任何内容，也没有产生费用。",
+      "conversation_unreadable": "无法读取该会话，因此无法在其中创作。请重新加载页面，或新建一个创作。",
+      "connection_lost": "运行过程中连接中断。它可能仍在完成，也可能已经计费，请先查看你的文件，再决定是否重新发送。",
+      "refused": "该请求在运行前被拒绝，因此没有产生费用。你的描述和文件都还在。",
+      "unexpected": "过程中出了点问题。",
+      "catalogue_empty": "暂时没有可用的生成模型，管理员可以添加。",
+      "dismiss": "关闭"
+    },
+    "modeSwitch": {
+      "label": "在这里做什么",
+      "chat": "对话",
+      "studio": "创作"
+    },
+    "apps": {
+      "title": "创作应用",
+      "favorites": "我的创作应用"
+    },
+    "payer": {
+      "change": "由谁付费",
+      "platform": "平台密钥",
+      "ownKey": "我的密钥"
+    }
+  },
+  "budget": {
+    "advancedSection": "高级",
+    "amountWithUnit": "{amount}{unit}",
+    "capHelp": "留空表示不设上限。统计除编辑器测试运行之外所有运行的智能体花费。付费集成与内容生成单独计费，不计入此额度。",
+    "capHelpCredits": "此工作流可花费的最大额度。达到后不会启动新的运行。",
+    "capHelpDollars": "此工作流的最大支出。达到后不会启动新的运行。",
+    "capLabel": "成本预算",
+    "capPlaceholder": "无限制",
+    "chipTitleCapped": "{period}智能体花费：{values}（{unit}），对比上限",
+    "chipTitleUncapped": "{period}智能体花费：{values}。未设置上限。",
+    "periodCumulative": "从不（永久累计）",
+    "periodLabel": "重置周期",
+    "periodMonth": "本月",
+    "periodMonthly": "每月",
+    "periodTotal": "累计",
+    "periodWeek": "本周",
+    "periodWeekly": "每周",
+    "popoverCap": "上限",
+    "popoverNeverResets": "此上限从不重置，额度不会自行重新开始。",
+    "popoverNoCap": "未设置",
+    "popoverResetsOn": "额度将于 {date} 重新开始。",
+    "popoverScope": "统计智能体花费（{unit}）。付费集成与内容生成单独计费。",
+    "popoverSpent": "已消耗",
+    "popoverStopped": "已达上限：在额度重新开始之前不会启动新的运行。",
+    "popoverStoppedForGood": "已达上限：在您提高上限或更改其重置方式之前，不会启动新的运行。",
+    "popoverTitle": "智能体花费",
+    "runCostTitle": "本次运行的总花费（含所有轮次）",
+    "unitCredits": "额度",
+    "unitDollars": "美元"
+  },
+  "memory": {
+    "explainer": "本工作区的智能体已经学到的内容。下面每条摘要都会进入每个智能体的上下文；摘要背后的详情只在智能体需要时才读取。记忆属于本工作区：切换工作区后，你看到的是那个工作区的记忆。",
+    "searchPlaceholder": "搜索记忆...",
+    "createButton": "新建记忆",
+    "filterAll": "全部",
+    "emptyTitle": "暂无记忆",
+    "emptySubtitle": "智能体会在工作过程中把长期有效的事实存在这里，你也可以随时添加或修正。",
+    "noMatches": "没有匹配的记忆",
+    "noMatchesSubtitle": "换个词试试，或清除筛选条件。",
+    "createTitle": "新建记忆",
+    "editTitle": "编辑记忆",
+    "fieldTitle": "标题",
+    "fieldTitlePlaceholder": "发布节奏",
+    "fieldSummary": "摘要",
+    "fieldSummaryPlaceholder": "团队每周四发布，周三下午封版。",
+    "fieldSummaryHint": "这一行会在每次运行时加入本工作区每个智能体的上下文。请直接陈述事实，而不是指向它。{count}/{max}",
+    "fieldContent": "详情",
+    "fieldContentPlaceholder": "例外情况、原因，以及智能体判断这条记忆相关后应当阅读的一切内容。",
+    "fieldContentHint": "不进入上下文。智能体在摘要看起来相关时才按需打开。",
+    "fieldType": "类型",
+    "fieldPinned": "始终保留在上下文中",
+    "fieldPinnedHint": "置顶会把完整详情加入这里每个智能体的每次运行，因此只用于绝不能遗漏的规则。",
+    "pinnedBadge": "已置顶",
+    "pinAction": "始终保留在上下文中",
+    "unpinAction": "不再保留在上下文中",
+    "editAction": "编辑",
+    "deleteAction": "删除",
+    "scopeWorkspace": "工作区",
+    "scopeAgent": "单个智能体",
+    "sourceUser": "由真人添加",
+    "sourceAgent": "由智能体保存",
+    "metaLine": "{slug} · 已调用 {recalls} 次 · 更新于 {updated}",
+    "save": "保存",
+    "saving": "保存中...",
+    "cancel": "取消",
+    "close": "关闭",
+    "toastCreated": "记忆已保存。",
+    "toastUpdated": "记忆已更新。",
+    "toastDeleted": "记忆已删除。",
+    "type": {
+      "user": "关于用户",
+      "feedback": "反馈",
+      "project": "项目",
+      "reference": "参考"
+    },
+    "deleteConfirm": "删除记忆「{title}」？此操作无法撤销。若只想让智能体停止使用而保留该条目，请改为停用。",
+    "deleteTitle": "删除该记忆？",
+    "inactiveBadge": "已停用",
+    "activateAction": "重新启用",
+    "deactivateAction": "停用",
+    "loadFailedTitle": "无法加载记忆",
+    "loadFailedSubtitle": "列表未能加载，因此并不一定为空。请重试。"
   }
 }

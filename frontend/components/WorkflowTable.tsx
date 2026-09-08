@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from '@/i18n/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, Plus, Trash2, Workflow as WorkflowIcon, Clock, Copy, Globe, Lock, AlertTriangle, ArrowUpDown, Eye } from 'lucide-react';
+import { Search, Plus, Trash2, Workflow as WorkflowIcon, Clock, Copy, Globe, Lock, AlertTriangle, ArrowUpDown, Eye, Pencil } from 'lucide-react';
 import { formatRelativeDate } from '@/lib/utils/dateFormatters';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { favoritesFirst, type ListSortKey, type VisibilityFilter } from '@/lib/utils/listSort';
@@ -15,6 +15,9 @@ import { useToast } from './Toast';
 import ToastContainer from './ToastContainer';
 import { orchestratorApi, Workflow } from '@/lib/api';
 import { CreateWorkflowModal } from './chat/CreateWorkflowModal';
+import { EditMetadataModal } from '@/components/app/EditMetadataModal';
+import { BudgetChip } from '@/components/budget/BudgetChip';
+import { budgetChipHasContent } from '@/components/budget/budgetPeriod';
 import { useTranslations } from 'next-intl';
 import { useSelectableItems } from '@/hooks/useSelectableItems';
 import { BulkDeleteModal } from '@/components/ui/BulkDeleteModal';
@@ -86,6 +89,11 @@ export default function WorkflowTable({
   const [newWorkflowName, setNewWorkflowName] = useState('');
   const [newWorkflowDescription, setNewWorkflowDescription] = useState('');
   const [showCreateWorkflowModal, setShowCreateWorkflowModal] = useState(false);
+  // The workflow the bulk bar's Update button is editing, or null. Holds the
+  // ROW, not just its id, so the modal opens on the values the list already has
+  // (name, description, cap) instead of flashing empty while a fetch lands.
+  const [editingWorkflow, setEditingWorkflow] = useState<Workflow | null>(null);
+  const [isSavingWorkflowMetadata, setIsSavingWorkflowMetadata] = useState(false);
   // Sub-workflow neighbourhood per card, resolved for the WHOLE page in one request rather than
   // one per card. A workflow absent from the map has no relation and shows no indicator.
   const [relationsByWorkflow, setRelationsByWorkflow] = useState<Record<string, WorkflowRelations>>({});
@@ -197,6 +205,46 @@ export default function WorkflowTable({
 
   // The hook reloads through this ref, so it can be created before the fetch it triggers.
   reloadRef.current = fetchWorkflows;
+
+  /**
+   * Save the bulk bar's Update. Same call the builder's breadcrumb makes, so a
+   * workflow renamed or capped from the list and from inside it goes through
+   * one endpoint.
+   */
+  const handleSaveWorkflowMetadata = useCallback(async (values: {
+    name: string;
+    description: string;
+    budgetCredits?: number | null;
+    budgetPeriodMode?: string | null;
+  }) => {
+    if (!editingWorkflow) return;
+    setIsSavingWorkflowMetadata(true);
+    try {
+      await orchestratorApi.updateWorkflow(editingWorkflow.id, {
+        name: values.name,
+        description: values.description,
+        budgetCredits: values.budgetCredits,
+        budgetPeriodMode: values.budgetPeriodMode,
+      });
+      setEditingWorkflow(null);
+      // The card shows every field this modal edits, so the list has to be told.
+      fetchWorkflows();
+      addToast({
+        type: 'success',
+        title: t('modals.editMetadata.successTitle'),
+        message: t('modals.editMetadata.successMessage', { name: values.name }),
+      });
+    } catch (err) {
+      console.error('Failed to update workflow:', err);
+      addToast({
+        type: 'error',
+        title: t('modals.editMetadata.errorTitle'),
+        message: t('modals.editMetadata.errorMessage'),
+      });
+    } finally {
+      setIsSavingWorkflowMetadata(false);
+    }
+  }, [editingWorkflow, fetchWorkflows, addToast, t]);
 
   // Clone selected workflows
   const cloneSelectedWorkflows = async () => {
@@ -413,7 +461,7 @@ export default function WorkflowTable({
           </div>
         )}
         {canMutate && !loading && (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 md:shrink-0">
             {/* Templates sit behind this button rather than in a permanent banner:
                 a starting point should not cost scroll on every visit. Shown even
                 when the list is empty, which is when it helps most. */}
@@ -464,7 +512,7 @@ export default function WorkflowTable({
               className="flex w-full rounded-xl border border-theme bg-[var(--bg-primary)] px-4 text-sm text-[var(--text-primary)] ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 pl-11"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={visibilityFilter} onValueChange={(v) => setVisibilityFilter(v as VisibilityFilter)}>
               <SelectTrigger className="w-auto gap-1.5" aria-label={t('common.filterByVisibility')}>
                 <Eye className="h-3.5 w-3.5 opacity-70" />
@@ -501,6 +549,18 @@ export default function WorkflowTable({
             <BulkBarButton onClick={folders.openMoveDialog}>
               <FolderPlus className="h-3.5 w-3.5" />
               {t('folders.moveToFolder')}
+            </BulkBarButton>
+          )}
+          {/* Update (edit) - single selection only, mirrors the agent list and
+              the applications board. Editing "the selection" makes no sense for
+              more than one row: the modal edits a name. */}
+          {canMutate && selectedWorkflows.size === 1 && (
+            <BulkBarButton onClick={() => {
+              const workflow = workflows.find((w) => selectedWorkflows.has(w.id));
+              if (workflow) setEditingWorkflow(workflow);
+            }}>
+              <Pencil className="h-3.5 w-3.5" />
+              {t('common.update')}
             </BulkBarButton>
           )}
           {canMutate && (
@@ -633,20 +693,61 @@ export default function WorkflowTable({
                       {w.description && (
                         <p className="text-xs text-theme-muted truncate mt-0.5">{w.description}</p>
                       )}
+                      {/* ONE line, always.
+                          This row accumulates: a modified date, a run count, a
+                          spending figure, a live dot, a review or rejected
+                          badge, a shared globe, and the relations button. What
+                          made it wrap was never the flex track (`display:flex`
+                          is `nowrap` already) but the TEXT inside each segment:
+                          on a narrow card the date alone took two lines and
+                          pushed the rest of the row down with it.
+
+                          So `truncate` on the date is the whole mechanism: it
+                          stops that text wrapping AND lets the segment's
+                          automatic minimum size resolve to 0, which is what
+                          allows it to give up width. Every OTHER child, the
+                          relations button at the end included, is `shrink-0`,
+                          so the date is the only thing that gives. That is the
+                          right thing to sacrifice: it is the only segment still
+                          readable when cut ("Modified 2 days...") and the only
+                          one whose absence changes nothing about what the card
+                          says.
+
+                          Deliberately NOT `overflow-hidden`, for ONE reason:
+                          clipping here would cut the BudgetChip's focus ring,
+                          which is drawn 3px outside its box and is that
+                          control's only keyboard affordance. The card root
+                          clips anyway, so this buys no protection against a row
+                          that genuinely cannot fit - it only moves the clip out
+                          to where the ring survives it. */}
                       <div className="flex items-center gap-1 mt-1 text-xs text-theme-muted">
-                        <Clock className="h-3 w-3" />
-                        <span>{t('workflow.modified')} {formatRelativeDate(w.updatedAt)}</span>
+                        <Clock className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{t('workflow.modified')} {formatRelativeDate(w.updatedAt)}</span>
                         {w.runCount != null && w.runCount > 0 && (
                           <>
-                            <span className="text-slate-300 dark:text-slate-600">·</span>
-                            <span>{t('workflow.runCount', { count: w.runCount })}</span>
+                            <span className="shrink-0 text-slate-300 dark:text-slate-600">·</span>
+                            <span className="shrink-0 whitespace-nowrap">{t('workflow.runCount', { count: w.runCount })}</span>
+                          </>
+                        )}
+                        {/* What this automation is costing, where people already
+                            look. Renders nothing until a production fire has
+                            actually spent something. */}
+                        {budgetChipHasContent(w.budgetPeriodSpent, w.budgetCredits) && (
+                          <>
+                            <span className="shrink-0 text-slate-300 dark:text-slate-600">·</span>
+                            <BudgetChip
+                              spent={w.budgetPeriodSpent}
+                              cap={w.budgetCredits}
+                              periodMode={w.budgetPeriodMode}
+                              resetsAt={w.budgetPeriodResetsAt}
+                            />
                           </>
                         )}
                         {w.hasActiveRun && w.pinnedVersion != null && (
                           <>
-                            <span className="text-slate-300 dark:text-slate-600">·</span>
-                            <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span className="shrink-0 text-slate-300 dark:text-slate-600">·</span>
+                            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-emerald-600 dark:text-emerald-400">
+                              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
                               {t('workflow.live')}
                             </span>
                           </>
@@ -659,32 +760,32 @@ export default function WorkflowTable({
                             isPublished (= ACTIVE-only) drives the last. */}
                         {w.publicationStatus === 'PENDING_REVIEW' && (
                           <>
-                            <span className="text-slate-300 dark:text-slate-600">·</span>
+                            <span className="shrink-0 text-slate-300 dark:text-slate-600">·</span>
                             <span
-                              className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"
+                              className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-amber-600 dark:text-amber-400"
                               title={t('workflow.sharedInReview')}
                             >
-                              <Clock className="h-3 w-3" />
+                              <Clock className="h-3 w-3 shrink-0" />
                               {t('workflow.inReview')}
                             </span>
                           </>
                         )}
                         {w.publicationStatus === 'REJECTED' && (
                           <>
-                            <span className="text-slate-300 dark:text-slate-600">·</span>
+                            <span className="shrink-0 text-slate-300 dark:text-slate-600">·</span>
                             <span
-                              className="inline-flex items-center gap-1 text-red-600 dark:text-red-400"
+                              className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-red-600 dark:text-red-400"
                               title={t('workflow.sharedRejected')}
                             >
-                              <AlertTriangle className="h-3 w-3" />
+                              <AlertTriangle className="h-3 w-3 shrink-0" />
                               {t('workflow.rejected')}
                             </span>
                           </>
                         )}
                         {w.isPublished && (
                           <>
-                            <span className="text-slate-300 dark:text-slate-600">·</span>
-                            <span title={t('workflow.shared')}><Globe className="h-3 w-3" /></span>
+                            <span className="shrink-0 text-slate-300 dark:text-slate-600">·</span>
+                            <span className="shrink-0" title={t('workflow.shared')}><Globe className="h-3 w-3" /></span>
                           </>
                         )}
                         {/* Private marker - a Lock for any workflow that is NOT publicly shared
@@ -692,8 +793,8 @@ export default function WorkflowTable({
                             chips above). The public counterpart to the "shared" Globe. */}
                         {!w.isPublished && w.publicationStatus !== 'PENDING_REVIEW' && w.publicationStatus !== 'REJECTED' && (
                           <>
-                            <span className="text-slate-300 dark:text-slate-600">·</span>
-                            <span title={t('common.visibilityPrivate')} aria-label={t('common.visibilityPrivate')}><Lock className="h-3 w-3" /></span>
+                            <span className="shrink-0 text-slate-300 dark:text-slate-600">·</span>
+                            <span className="shrink-0" title={t('common.visibilityPrivate')} aria-label={t('common.visibilityPrivate')}><Lock className="h-3 w-3" /></span>
                           </>
                         )}
                         {/* Sub-workflow neighbourhood. Renders nothing unless this workflow calls
@@ -701,7 +802,12 @@ export default function WorkflowTable({
                             the right edge: it is the one control in this row, not another marker. */}
                         <WorkflowRelationsMenu
                           relations={relationsByWorkflow[w.id]}
-                          className="ml-auto"
+                          // `shrink-0` with the rest of the row: without it this
+                          // 28px button shares the shrinking with the date and
+                          // is squashed out of square before the date has
+                          // finished truncating - and it is the row's ONLY
+                          // interactive control.
+                          className="ml-auto shrink-0"
                           data-testid={`workflow-relations-${w.id}`}
                         />
                       </div>
@@ -744,6 +850,19 @@ export default function WorkflowTable({
       />
 
       {/* Modal de création de workflow */}
+      {editingWorkflow && (
+        <EditMetadataModal
+          resourceType="workflow"
+          initialName={editingWorkflow.name}
+          initialDescription={editingWorkflow.description || ''}
+          initialBudgetCredits={editingWorkflow.budgetCredits ?? null}
+          initialBudgetPeriodMode={editingWorkflow.budgetPeriodMode ?? null}
+          isSaving={isSavingWorkflowMetadata}
+          onClose={() => setEditingWorkflow(null)}
+          onSave={handleSaveWorkflowMetadata}
+        />
+      )}
+
       {showCreateWorkflowModal && (
         <CreateWorkflowModal
           onClose={() => setShowCreateWorkflowModal(false)}

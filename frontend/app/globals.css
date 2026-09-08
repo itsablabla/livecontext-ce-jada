@@ -114,19 +114,6 @@
   display: none;
 }
 
-/* Button contrast adjustments */
-.dark [data-variant="contrast"] {
-  background-color: #ededec;
-  color: #161615;
-  box-shadow: 0 12px 32px rgba(255, 255, 255, 0.08);
-}
-
-.dark [data-variant="contrast"]:hover {
-  background-color: #d5d4d0;
-  color: #161615;
-  box-shadow: 0 14px 36px rgba(255, 255, 255, 0.12);
-}
-
 /* Styles for Markdown rendering - see unified .prose pre below */
 
 .prose code {
@@ -407,6 +394,33 @@ code[class*="language-"] {
     --expression-color: #1d4ed8;
     --shimmer-color: rgba(255, 255, 255, 0.3);
     --shimmer-color-strong: rgba(255, 255, 255, 0.3);
+    /* Credit "over allowance" gold. Two palettes, not one shared metal: the
+       bright gold reads correctly on the dark ground but sits at 1.8:1 on white.
+       Light mode therefore splits by ROLE rather than dimming everything to the
+       strictest threshold, which is what made it read bronze:
+         - INK is text ("+X% over your plan"), so it needs AA 4.5:1. #9a6d04 is
+           4.60:1 on white, the goldest hue that still clears it.
+         - ARC and FILL are graphical objects, which need only 3:1. #b8860b
+           (darkgoldenrod) is 3.25:1 on white and reads as actual metal.
+       The arc's contrast that matters is against the CARD it sits on, not
+       against its own track: the track is a faint hint of the full circle, and
+       is deliberately low-contrast so the arc is what the eye picks up. */
+    --credit-gold-ink: #9a6d04;
+    --credit-gold-arc: #b8860b;
+    --credit-gold-arc-track: rgba(184, 134, 11, 0.20);
+    --credit-gold-fill-from: #9a6d04;
+    --credit-gold-fill-to: #c9930a;
+    --credit-gold-track: rgba(184, 134, 11, 0.16);
+    /* The ring is stroked with a metallic SWEEP, not a flat colour, and that is
+       what finally makes it read as gold on white. A flat swatch cannot: any
+       hue bright enough to look like metal sits under 3:1 there, so a single
+       value is forced down into bronze. A gradient escapes the trade-off - the
+       deep stops carry the legibility while the bright stop is the shine, and
+       the eye reads the whole sweep as one metal. Deep -> bright -> mid, the
+       same order light falls on a curved gold surface. */
+    --credit-gold-metal-1: #7a5600;
+    --credit-gold-metal-2: #e0aa22;
+    --credit-gold-metal-3: #a97a08;
   }
 
   .dark {
@@ -428,6 +442,20 @@ code[class*="language-"] {
     --expression-color: #38bdf8;
     --shimmer-color: rgba(23, 22, 20, 0.25);
     --shimmer-color-strong: rgba(23, 22, 20, 0.4);
+    /* See the light-mode block: on the dark ground the bright metal is the
+       readable one (~8:1) and the bronze would disappear. */
+    /* Dark has room to be fully gold: #f0c43f is 10.8:1 on this ground, so the
+       same value serves as text and as the ring, with no role split needed. */
+    --credit-gold-ink: #f0c43f;
+    --credit-gold-arc: #f0c43f;
+    --credit-gold-arc-track: rgba(240, 196, 63, 0.26);
+    --credit-gold-fill-from: #d4a017;
+    --credit-gold-fill-to: #ffe08a;
+    --credit-gold-track: rgba(255, 214, 122, 0.22);
+    /* Same sweep on the dark ground, where there is headroom to go brighter. */
+    --credit-gold-metal-1: #c08a16;
+    --credit-gold-metal-2: #ffe9a8;
+    --credit-gold-metal-3: #f0c43f;
 
     /* Override Tailwind grays with warm stone in dark mode only */
     --color-gray-50: #fafaf9;
@@ -468,6 +496,19 @@ code[class*="language-"] {
     color: var(--expression-color);
     border-radius: 2px;
     padding: 0 1px;
+  }
+
+  /*
+   * The same expression colour without the filled block behind it.
+   *
+   * `.token-expression` marks a template INSIDE running text - an expression
+   * editor, a credential value - where the tint is what separates the token from
+   * the prose around it. A variable row in the inspector is already nothing but
+   * the token, so the tint paints the whole line and reads as a selected state
+   * the user did not choose. The colour alone still says "this is an expression".
+   */
+  .token-expression-plain {
+    color: var(--expression-color);
   }
 
   .bg-theme-primary {
@@ -606,6 +647,73 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .run-row-focus-flash {
     animation: run-row-focus-hold 1.6s step-end;
+  }
+}
+
+/* A column the user just created, announced. `addNewColumn` refetches the whole
+   grid, so the new column simply appears - appended to the RIGHT of a table that is
+   usually wider than the viewport, which is to say: off screen, with a success toast
+   as the only evidence it exists. The grid scrolls it into view and plays this: the
+   header holds an accent ring while the cells fade up out of a wash of the same
+   colour, so "where did it land, and what does it look like?" is answered without
+   hunting the header row.
+
+   Same blue-400 literal, for the same reason, as `run-row-focus-flash` above:
+   `--accent-primary` is near-black in light and near-white in dark, so the two themes
+   would flash different hues and neither would read as a highlight.
+
+   Applied from React state (`revealedColumnField`) rather than imperatively, so
+   nothing here fires `animationend` - but both animations must still END at the
+   element's plain appearance, because the class is pulled once the window closes and
+   that removal has to be invisible. Nothing animates the HEADER's background: it is
+   sticky, and a background driven to transparent would let the rows scroll through it. */
+@keyframes table-column-reveal-head {
+  0% { box-shadow: inset 0 0 0 0 rgba(96, 165, 250, 0); }
+  12% { box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.95); }
+  55% { box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.5); }
+  100% { box-shadow: inset 0 0 0 0 rgba(96, 165, 250, 0); }
+}
+/* One wash, two users: the cells of a new column, and every ROW a duplicate just
+   produced. They are the same sentence ("this is the thing that just appeared"), and
+   a table that answered it two different ways would read as two different events.
+
+   Colour only, deliberately no fade-in. The class arrives from React state one render
+   AFTER the refetch that produced these elements, so they have already been painted
+   opaque once: an animation starting at `opacity: 0` would blink them out and back.
+   Animating opacity on a row would also put it, and the sticky cells inside it, into
+   a composited layer for the whole cue. */
+@keyframes table-reveal-wash {
+  0% { background-color: rgba(96, 165, 250, 0.3); }
+  35% { background-color: rgba(96, 165, 250, 0.22); }
+  100% { background-color: rgba(96, 165, 250, 0); }
+}
+.table-column-reveal-head {
+  animation: table-column-reveal-head 1.6s ease-out;
+}
+.table-column-reveal-cell,
+.table-row-reveal {
+  animation: table-reveal-wash 1.6s ease-out;
+}
+/* Reduced motion keeps the ANSWER and drops the movement: a flat tint held for the
+   same window, then gone in one step - no fade on the cells, no beat on the header.
+   Staying silent would be the wrong call, since losing a new column off the right
+   edge (or a copy among a hundred rows) is exactly as likely for someone who asked
+   for less motion. */
+@keyframes table-column-reveal-head-hold {
+  0% { box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.7); }
+  100% { box-shadow: inset 0 0 0 0 rgba(96, 165, 250, 0); }
+}
+@keyframes table-reveal-wash-hold {
+  0% { background-color: rgba(96, 165, 250, 0.18); }
+  100% { background-color: rgba(96, 165, 250, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .table-column-reveal-head {
+    animation: table-column-reveal-head-hold 1.6s step-end;
+  }
+  .table-column-reveal-cell,
+  .table-row-reveal {
+    animation: table-reveal-wash-hold 1.6s step-end;
   }
 }
 

@@ -644,10 +644,14 @@ public class ScheduleExecutorService {
             // Schedule already advanced - no need to re-advance on exception.
             throw e;
         }
-        if (isExecutionQueueUnavailableResult(result)) {
-            // Queue unavailable: restore the schedule so it fires on the next tick.
-            restoreScheduleDispatchIfQueueUnavailable(schedule, null, result);
-        }
+        // Nothing to restore on the daemon path: claimAndAdvanceDueSchedules already
+        // advanced the row, and the daemon deliberately KEEPS that advance on a failed
+        // fire - the slot has had its turn, and re-arming it would retry a broken workflow
+        // every minute. The manual path is the one that undoes its advance, in executeNow.
+        //
+        // This used to call restoreScheduleDispatchIfQueueUnavailable(schedule, null, ...),
+        // which returned immediately on the null and so did nothing, while reading like a
+        // live safety net. Removed rather than left as decoration.
 
         // Phase 4: log outcome
         logExecutionResult(schedule.getWorkflowId(), info.run().getRunIdPublic(), result);
@@ -660,8 +664,39 @@ public class ScheduleExecutorService {
      *
      * When withMemory is true (schedule field), reuses the agent's existing conversation
      * so the agent has access to prior messages. Otherwise creates a fresh conversation.
+     *
+     * @return {@code null} when the agent ran, otherwise a short reason it did not.
+     *         <p>The cron daemon IGNORES this value, exactly as it ignored the old
+     *         {@code void} return: a scheduled fire that cannot run is logged and the tick
+     *         moves on. It exists for the MANUAL paths ({@link #executeNow}, and through it
+     *         the agenda's run-early action and the execute-now endpoint), which until now
+     *         reported success for a run that never happened - the failure was logged here
+     *         and swallowed before the caller could see it. A user pressing "run now" and
+     *         being told it started, while the log says the provider is not configured, is
+     *         the exact case this closes.
      */
-    private void executeAgentSchedule(ScheduledExecutionDto schedule) {
+    private String executeAgentSchedule(ScheduledExecutionDto schedule) {
+        return executeAgentSchedule(schedule, true);
+    }
+
+    /**
+     * @param unattended whether nobody is waiting on this run: TRUE on the cron daemon,
+     *        FALSE on a manual one (the agenda's run-early, the execute-now endpoint).
+     *        Two policies follow from it, and both are the same question asked twice.
+     *        <ul>
+     *          <li><b>A missing agent may ARCHIVE the schedule only when unattended</b>,
+     *              where a schedule pointing at an agent that no longer exists would
+     *              otherwise retry forever. On a manual run ARCHIVED is permanent
+     *              (toggle-on refuses it), so a transient agent-service RPC failure would
+     *              turn one click into irreversible loss of the schedule.</li>
+     *          <li><b>A failed run keeps its optimistic advance only when unattended.</b>
+     *              The daemon's slot has had its turn and re-arming it would retry a
+     *              broken agent every minute. A manual run that did not happen must not
+     *              leave the schedule charged for it - see
+     *              {@link #restoreDispatchAfterFailedManualRun}.</li>
+     *        </ul>
+     */
+    private String executeAgentSchedule(ScheduledExecutionDto schedule, boolean unattended) {
         UUID agentEntityId = schedule.getAgentEntityId();
         String tenantId = schedule.getTenantId();
         String staticPrompt = schedule.getSchedulePrompt();
@@ -683,7 +718,7 @@ public class ScheduleExecutorService {
         if (prompt == null || prompt.isBlank()) {
             logger.warn("[Schedule] Agent schedule {} has no effective prompt (no tasks and no static schedulePrompt), skipping",
                     schedule.getId());
-            return;
+            return "This schedule has no prompt to run.";
         }
 
         // Post-V261 - daemon thread has no RequestContextHolder, so the
@@ -693,15 +728,22 @@ public class ScheduleExecutorService {
         // matches the row's organization_id.
         AgentDto agent = agentClient.getAgent(agentEntityId, tenantId, schedule.getOrganizationId());
         if (agent == null) {
-            logger.warn("[Schedule] Agent {} not found in scope (org={}), disabling schedule {}",
-                    agentEntityId, schedule.getOrganizationId(), schedule.getId());
-            triggerClient.disableSchedule(schedule.getId());
-            return;
+            if (unattended) {
+                logger.warn("[Schedule] Agent {} not found in scope (org={}), disabling schedule {}",
+                        agentEntityId, schedule.getOrganizationId(), schedule.getId());
+                triggerClient.disableSchedule(schedule.getId());
+            } else {
+                logger.warn("[Schedule] Agent {} not found in scope (org={}) on a manual run of "
+                                + "schedule {} - refusing without archiving, since a transient lookup "
+                                + "failure must not permanently retire the schedule",
+                        agentEntityId, schedule.getOrganizationId(), schedule.getId());
+            }
+            return "The agent no longer exists in this workspace.";
         }
 
         if (Boolean.FALSE.equals(agent.getIsActive())) {
             logger.info("[Schedule] Agent {} is inactive, skipping schedule {}", agentEntityId, schedule.getId());
-            return;
+            return "The agent is inactive.";
         }
 
         // PR22c R3 - workspace-scope guard for agent schedules. Mirror the workflow-schedule
@@ -716,15 +758,43 @@ public class ScheduleExecutorService {
         if (!com.apimarketplace.common.scope.ScopeGuard.crossResourceMatches(scheduleOrg, agentOrg)) {
             logger.info("[Schedule] Skipping agent schedule fire for agent {} - workspace mismatch "
                 + "(schedule org={}, agent org={})", agentEntityId, scheduleOrg, agentOrg);
-            return;
+            return "The agent belongs to a different workspace.";
         }
 
         // Phase 2: optimistic advance
         ScheduledExecutionDto recordedSchedule = advanceSchedule(schedule.getId());
+        String failure = runAgentAfterAdvance(schedule, agent, prompt, recordedSchedule);
+        if (failure != null && !unattended) {
+            // ONE restore covering every exit past the advance, rather than a call at each
+            // of them: four exits live below, and the fix that only covered the workflow
+            // branch is the reason this one is written to survive a fifth being added.
+            restoreDispatchAfterFailedManualRun(schedule, recordedSchedule);
+        }
+        return failure;
+    }
+
+    /**
+     * The part of an agent run that happens AFTER the optimistic advance.
+     *
+     * <p>Split out so every way it can fail returns through a single point the caller can
+     * undo. Its exits are: the schedule was disabled between the advance and the run, the
+     * conversation could not be opened, conversation-service answered a failure, or the
+     * call threw.
+     *
+     * @return {@code null} when the agent ran, otherwise a short reason it did not.
+     */
+    private String runAgentAfterAdvance(ScheduledExecutionDto schedule,
+                                        AgentDto agent,
+                                        String prompt,
+                                        ScheduledExecutionDto recordedSchedule) {
+        UUID agentEntityId = schedule.getAgentEntityId();
+        String tenantId = schedule.getTenantId();
+        boolean withMemory = Boolean.TRUE.equals(schedule.getWithMemory());
+
         if (isRecordedScheduleInactive(recordedSchedule)) {
             logger.info("[Schedule] Skipping agent schedule {} after trigger-service disabled or archived it",
                     schedule.getId());
-            return;
+            return "The schedule was disabled before it could run.";
         }
 
         // Phase 3: create or reuse conversation, then send message via conversation-service
@@ -748,7 +818,7 @@ public class ScheduleExecutorService {
                     agentEntityId.toString(), tenantId, agent.getName(), scheduleOrgId);
             if (conversationId == null) {
                 logger.error("[Schedule] Failed to find/create agent conversation for {}", agentEntityId);
-                return;
+                return "Could not open the agent conversation.";
             }
             // TODO: wire withMemory to chat-time history loading in conversation-service.
             // Today executeSync never loads conversation history, so withMemory is inert
@@ -767,13 +837,16 @@ public class ScheduleExecutorService {
             if (success) {
                 logger.info("[Schedule] Agent {} executed successfully (schedule: {}, conversation: {})",
                         agentEntityId, schedule.getId(), conversationId);
-            } else {
-                logger.error("[Schedule] Agent {} execution failed (schedule: {}): {}",
-                        agentEntityId, schedule.getId(), result.get("error"));
+                return null;
             }
+            logger.error("[Schedule] Agent {} execution failed (schedule: {}): {}",
+                    agentEntityId, schedule.getId(), result.get("error"));
+            Object error = result.get("error");
+            return error != null ? error.toString() : "The agent run failed.";
         } catch (Exception e) {
             logger.error("[Schedule] Agent {} execution threw exception (schedule: {}): {}",
                     agentEntityId, schedule.getId(), e.getMessage(), e);
+            return e.getMessage() != null ? e.getMessage() : "The agent run threw an exception.";
         }
     }
 
@@ -945,29 +1018,52 @@ public class ScheduleExecutorService {
         return false;
     }
 
-    private void restoreScheduleDispatchIfQueueUnavailable(
-            ScheduledExecutionDto previousSchedule,
-            ScheduledExecutionDto recordedSchedule,
-            TriggerExecutionResult result) {
-        if (!isExecutionQueueUnavailableResult(result) || recordedSchedule == null) {
+    /**
+     * Undo the optimistic advance after a MANUAL run that did not start.
+     *
+     * <p>The daemon deliberately keeps the advance on a failed fire: the slot has had its
+     * turn and re-arming it would have a broken workflow retried every minute. A manual run
+     * is the opposite case. Nothing ran, so every dispatch marker the advance moved is now
+     * a false record, and two of them are load-bearing:
+     *
+     * <ul>
+     *   <li>{@code execution_count} feeds {@code hasReachedMaxExecutions()}. A schedule
+     *       capped at 5 sitting on 4 was retired PERMANENTLY by one failed click - the
+     *       calendar then greys it out and refuses every further action, for a run that
+     *       never happened.</li>
+     *   <li>{@code last_execution_at} is what the bell and the agenda rail display as
+     *       "last run", so the UI reported a run that did not occur.</li>
+     * </ul>
+     *
+     * <p>Restoring is safe against a concurrent writer: trigger-service applies this only
+     * while the row still carries the exact markers observed here, and returns the row
+     * untouched otherwise.
+     */
+    private void restoreDispatchAfterFailedManualRun(ScheduledExecutionDto previousSchedule,
+                                                     ScheduledExecutionDto recordedSchedule) {
+        if (recordedSchedule == null || previousSchedule == null) {
             return;
         }
-        int previousCount = previousSchedule != null ? previousSchedule.getExecutionCount() : 0;
-        int advancedCount = recordedSchedule.getExecutionCount();
+        // The fire time goes back only when it is still AHEAD. An overdue one is already
+        // claimable - the daemon's query is `next_execution_at <= now` - so writing it back
+        // would have the next tick fire it within the minute, turning one failed click into
+        // a run the user never asked for. The counters go back either way: they are pure
+        // accounting and must not record a run that did not happen.
+        //
+        // AgendaActionService.restorePendingFire has always had this guard and the docs
+        // described it as covering this path too, which was not true until now.
+        Instant previousFire = previousSchedule.getNextExecutionAt();
+        Instant fireToRestore = previousFire != null && previousFire.isAfter(Instant.now())
+                ? previousFire
+                : recordedSchedule.getNextExecutionAt();
         triggerClient.restoreScheduleDispatch(
                 recordedSchedule.getId(),
-                previousSchedule != null ? previousSchedule.getNextExecutionAt() : null,
-                previousSchedule != null ? previousSchedule.getLastExecutionAt() : null,
+                fireToRestore,
+                previousSchedule.getLastExecutionAt(),
                 recordedSchedule.getNextExecutionAt(),
                 recordedSchedule.getLastExecutionAt(),
-                previousCount,
-                advancedCount);
-    }
-
-    private static boolean isExecutionQueueUnavailableResult(TriggerExecutionResult result) {
-        return result != null
-                && !result.success()
-                && RedisExecutionQueueService.QUEUE_UNAVAILABLE_MESSAGE.equals(result.message());
+                previousSchedule.getExecutionCount(),
+                recordedSchedule.getExecutionCount());
     }
 
     private boolean isRecordedScheduleInactive(ScheduledExecutionDto recordedSchedule) {
@@ -1026,6 +1122,9 @@ public class ScheduleExecutorService {
         // Phase 2: optimistic advance
         ScheduledExecutionDto recordedSchedule = advanceSchedule(schedule.getId());
         if (isRecordedScheduleInactive(recordedSchedule)) {
+            // The advance already happened, so bailing out here without undoing it charged
+            // the schedule for a run it explicitly refused to start.
+            restoreDispatchAfterFailedManualRun(schedule, recordedSchedule);
             return TriggerExecutionResult.failure(null, null, TriggerType.SCHEDULE,
                     "Schedule was disabled before execution.");
         }
@@ -1037,7 +1136,9 @@ public class ScheduleExecutorService {
         payload = com.apimarketplace.orchestrator.trigger.ReusableTriggerService.sanitizePlanMarker(payload);
         TriggerExecutionResult result = triggerService.executeTrigger(
                 info.run(), info.triggerId(), TriggerType.SCHEDULE, payload);
-        restoreScheduleDispatchIfQueueUnavailable(schedule, recordedSchedule, result);
+        if (result == null || !result.success()) {
+            restoreDispatchAfterFailedManualRun(schedule, recordedSchedule);
+        }
 
         // Phase 4: log outcome
         logExecutionResult(schedule.getWorkflowId(), info.run().getRunIdPublic(), result);
@@ -1052,7 +1153,14 @@ public class ScheduleExecutorService {
      */
     private TriggerExecutionResult executeAgentNow(ScheduledExecutionDto schedule) {
         try {
-            executeAgentSchedule(schedule);
+            String failureReason = executeAgentSchedule(schedule, false);
+            if (failureReason != null) {
+                // Never report success on this path. The agent execution logs its failures
+                // and returns normally, so before this the manual caller was told the run
+                // started while the log said it had not - and the agenda then promised the
+                // user their run was under way.
+                return TriggerExecutionResult.failure(null, null, TriggerType.SCHEDULE, failureReason);
+            }
             return TriggerExecutionResult.success(null, null, TriggerType.SCHEDULE, null, 0);
         } catch (Exception e) {
             return TriggerExecutionResult.failure(null, null, TriggerType.SCHEDULE,

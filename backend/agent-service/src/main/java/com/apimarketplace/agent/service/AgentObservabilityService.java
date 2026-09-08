@@ -319,6 +319,20 @@ public class AgentObservabilityService {
     }
 
     /**
+     * Outcome-derived stop reason for a record that carries none: COMPLETED /
+     * PARTIAL_SUCCESS map to {@code COMPLETED}, FAILED maps to {@code ERROR}, an
+     * unknown or blank status yields null (never guess a category).
+     */
+    static String inferStopReasonFromStatus(String status) {
+        if (status == null) return null;
+        return switch (status.trim().toUpperCase()) {
+            case "COMPLETED", "PARTIAL_SUCCESS" -> AgentStopReason.COMPLETED.name();
+            case "FAILED" -> AgentStopReason.ERROR.name();
+            default -> null;
+        };
+    }
+
+    /**
      * Builds the PII-free property map for the {@code agent_run_stopped} event.
      * Package-private + static so it can be unit-tested without constructing the
      * full service. Emits enums / counts / UUIDs only - never tenant_id (that is
@@ -328,10 +342,20 @@ public class AgentObservabilityService {
         String stopReason = request.getStopReason();
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("status", request.getStatus());
+        // Every producer is expected to name a stop reason; when one does not
+        // (a new single-shot agent type, an older orchestrator still in flight
+        // during a rollout), fall back to the outcome so the event still lands
+        // in a terminal_category instead of a null bucket - and say so.
+        boolean inferred = false;
+        if (stopReason == null || stopReason.isBlank()) {
+            stopReason = inferStopReasonFromStatus(request.getStatus());
+            inferred = stopReason != null;
+        }
         props.put("stop_reason", stopReason);
         if (stopReason != null) {
             props.put("terminal_category", AgentStopReason.valueOfOrError(stopReason).terminal().name());
         }
+        if (inferred) props.put("stop_reason_inferred", true);
         props.put("budget_scope", request.getBudgetScope());
         props.put("agent_type", request.getAgentType());
         props.put("provider", request.getProvider());

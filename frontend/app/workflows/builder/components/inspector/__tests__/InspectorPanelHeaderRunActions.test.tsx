@@ -22,7 +22,12 @@ vi.mock('@/i18n/navigation', () => ({
   useRouter: () => ({ push: () => undefined }),
   Link: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
 }));
-vi.mock('@/components/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light' }) }));
+// `useOptionalTheme` is mocked alongside `useTheme`: the icons in this tree render
+// through `useThemeSafely`, which reads the context OPTIONALLY so the same icons can
+// render on the public marketplace outside any ThemeProvider. A mock missing it throws.
+vi.mock('@/components/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light' }),
+  useOptionalTheme: () => ({ theme: 'light' }),
+}));
 vi.mock('@/components/ui/LoadingSpinner', () => ({ LoadingSpinner: () => <span>spinner</span> }));
 
 import { InspectorPanelHeader } from '../InspectorPanelHeader';

@@ -149,11 +149,15 @@ class PlanSecretRedactorTest {
         params.put("credential_id", 42);
         Map<String, Object> generate = core("params", params);
         generate.put("type", "generate");
-        Map<String, Object> plan = planWith(generate);
+        // Filed with the AI family, which is where the redactor has to look for
+        // it: a scrub that only walked the cores would hand every share-link
+        // visitor, and every marketplace acquirer, the id of the author's own
+        // provider key.
+        Map<String, Object> plan = planWithAgents(generate);
 
         PlanSecretRedactor.redact(plan);
 
-        Map<String, Object> after = firstCoreChild(plan, "params");
+        Map<String, Object> after = firstAgentChild(plan, "params");
         assertThat(after).doesNotContainKey("credential_id");
         // The pool is not a credential: it says whether the run buys on the
         // platform's key or uses the reader's own, which the reader is entitled
@@ -162,6 +166,34 @@ class PlanSecretRedactorTest {
                 .containsEntry("credential_source", "user")
                 .containsEntry("model", "seedance-2.0-fast")
                 .containsEntry("prompt", "a paper boat");
+    }
+
+    /**
+     * The bucket every EXISTING generate node is in.
+     *
+     * <p>The node moved to the AI family, but a plan saved before that move
+     * still carries it among the cores, and a share link serves that plan
+     * exactly as it was stored. A scrub that only walked the new home would
+     * leak the author's key id out of every workflow written until now.
+     */
+    @Test
+    @DisplayName("redacts the pinned key of a generate node still filed under cores, which is where every saved one is")
+    void redactsGenerateCredentialIdInTheLegacyCoresBucket() {
+        Map<String, Object> params = new HashMap<>();
+        params.put("model", "seedance-2.0-fast");
+        params.put("credential_source", "user");
+        params.put("credential_id", 42);
+        Map<String, Object> generate = core("params", params);
+        generate.put("type", "generate");
+        Map<String, Object> plan = planWith(generate);
+
+        PlanSecretRedactor.redact(plan);
+
+        Map<String, Object> after = firstCoreChild(plan, "params");
+        assertThat(after).doesNotContainKey("credential_id");
+        assertThat(after)
+                .containsEntry("credential_source", "user")
+                .containsEntry("model", "seedance-2.0-fast");
     }
 
     @Test
@@ -183,6 +215,65 @@ class PlanSecretRedactorTest {
         assertThat(firstCoreChild(plan, "params")).containsEntry("credential_id", 42);
     }
 
+    /** A plan holding one AI node, in the bucket the node lives in today. */
+    private Map<String, Object> planWithAgent(Map<String, Object> agent) {
+        Map<String, Object> plan = new HashMap<>();
+        List<Object> agents = new ArrayList<>();
+        agents.add(agent);
+        plan.put("agents", agents);
+        return plan;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> firstAgentParams(Map<String, Object> plan) {
+        List<Object> agents = (List<Object>) plan.get("agents");
+        return (Map<String, Object>) ((Map<String, Object>) agents.get(0)).get("params");
+    }
+
+    @Test
+    @DisplayName("redacts the pinned key of a generate node in the agents bucket, where new ones are written")
+    void redactsGenerateCredentialIdInTheAgentsBucket() {
+        Map<String, Object> params = new HashMap<>();
+        params.put("model", "seedance-2.0-fast");
+        params.put("credential_source", "user");
+        params.put("credential_id", 42);
+        Map<String, Object> agent = core("params", params);
+        agent.put("type", "generate");
+
+        Map<String, Object> plan = planWithAgent(agent);
+        PlanSecretRedactor.redact(plan);
+
+        assertThat(firstAgentParams(plan)).doesNotContainKey("credential_id");
+    }
+
+    /**
+     * The negative the cores side already had and this side did not.
+     *
+     * <p>The scrub walks a bucket that holds every AI node and every MCP step,
+     * so an unconditional removal here would strip a field of the same name
+     * from a node that means something else by it. That is not a leak, which
+     * is why nothing would catch it: the share link would simply serve a
+     * workflow missing a value, and the reader would see a step configured
+     * differently from the one that runs.
+     */
+    @Test
+    @DisplayName("an ordinary AI node in the same bucket keeps its params untouched")
+    void leavesOtherAgentParamsAlone() {
+        Map<String, Object> params = new HashMap<>();
+        params.put("prompt", "summarise this");
+        params.put("credential_id", 7);
+        Map<String, Object> agent = core("params", params);
+        agent.put("type", "agent");
+
+        Map<String, Object> plan = planWithAgent(agent);
+        PlanSecretRedactor.redact(plan);
+
+        assertThat(firstAgentParams(plan))
+                .as("the removal is scoped to the node that actually pins a provider key")
+                .containsEntry("credential_id", 7)
+                .containsEntry("prompt", "summarise this");
+    }
+
     @Test
     @DisplayName("null plan and plan without cores are handled without error")
     void handlesNullAndEmpty() {
@@ -193,6 +284,23 @@ class PlanSecretRedactorTest {
     }
 
     @SuppressWarnings("unchecked")
+    @SafeVarargs
+    private Map<String, Object> planWithAgents(Map<String, Object>... agents) {
+        Map<String, Object> plan = new HashMap<>();
+        List<Object> list = new ArrayList<>();
+        for (Map<String, Object> a : agents) {
+            list.add(a);
+        }
+        plan.put("agents", list);
+        return plan;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> firstAgentChild(Map<String, Object> plan, String child) {
+        List<?> agents = (List<?>) plan.get("agents");
+        return (Map<String, Object>) ((Map<String, Object>) agents.get(0)).get(child);
+    }
+
     private Map<String, Object> firstCoreChild(Map<String, Object> plan, String child) {
         List<?> cores = (List<?>) plan.get("cores");
         return (Map<String, Object>) ((Map<String, Object>) cores.get(0)).get(child);

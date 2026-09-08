@@ -57,7 +57,7 @@ class ApiCatalogGenerationPriceReaderTest {
     private static ApiRow api(String slug, String platformCredentialName, List<ToolRow> tools) {
         return new ApiRow(UUID.randomUUID(), slug, slug, "d", "https://x", null, "Cat", "cat",
                 "Sub", "sub", "apikey", null, null, "public", true, true, false, "free",
-                "APPROVED", "1.0.0", slug, platformCredentialName, null, null, null, null, tools);
+                "APPROVED", "1.0.0", slug, platformCredentialName, null, null, null, null, null, tools);
     }
 
     @SuppressWarnings("unchecked")

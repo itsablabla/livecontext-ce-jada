@@ -113,7 +113,7 @@ class InternalTriggerControllerAgentScheduleMergeTest {
     @Test
     @DisplayName("cron-only edit on existing row preserves schedule_prompt and with_memory (the 2026-06-14 incident)")
     void cronOnlyEdit_preservesPromptAndMemory() {
-        when(cronParser.isValid("0 * * * *")).thenReturn(true);
+        when(cronParser.isAcceptableInput("0 * * * *")).thenReturn(true);
         when(cronParser.getNextExecution("0 * * * *", "UTC"))
                 .thenReturn(Instant.parse("2026-06-14T08:00:00Z"));
         when(scheduleRepository.findAllByAgentEntityIdAndOrganizationIdStrict(agentId, ORG))
@@ -136,7 +136,7 @@ class InternalTriggerControllerAgentScheduleMergeTest {
     @Test
     @DisplayName("explicit schedulePrompt overwrites the stored prompt")
     void explicitPrompt_overwrites() {
-        when(cronParser.isValid("0 * * * *")).thenReturn(true);
+        when(cronParser.isAcceptableInput("0 * * * *")).thenReturn(true);
         when(cronParser.getNextExecution("0 * * * *", "UTC"))
                 .thenReturn(Instant.parse("2026-06-14T08:00:00Z"));
         when(scheduleRepository.findAllByAgentEntityIdAndOrganizationIdStrict(agentId, ORG))
@@ -153,7 +153,7 @@ class InternalTriggerControllerAgentScheduleMergeTest {
     @Test
     @DisplayName("explicit empty schedulePrompt clears the prompt (intentional reset still works)")
     void explicitEmptyPrompt_clears() {
-        when(cronParser.isValid("0 * * * *")).thenReturn(true);
+        when(cronParser.isAcceptableInput("0 * * * *")).thenReturn(true);
         when(cronParser.getNextExecution("0 * * * *", "UTC"))
                 .thenReturn(Instant.parse("2026-06-14T08:00:00Z"));
         when(scheduleRepository.findAllByAgentEntityIdAndOrganizationIdStrict(agentId, ORG))
@@ -170,7 +170,7 @@ class InternalTriggerControllerAgentScheduleMergeTest {
     @Test
     @DisplayName("explicit withMemory=false on existing row is honoured (explicit toggle still works)")
     void explicitWithMemoryFalse_isHonoured() {
-        when(cronParser.isValid("0 * * * *")).thenReturn(true);
+        when(cronParser.isAcceptableInput("0 * * * *")).thenReturn(true);
         when(cronParser.getNextExecution("0 * * * *", "UTC"))
                 .thenReturn(Instant.parse("2026-06-14T08:00:00Z"));
         when(scheduleRepository.findAllByAgentEntityIdAndOrganizationIdStrict(agentId, ORG))
@@ -189,7 +189,7 @@ class InternalTriggerControllerAgentScheduleMergeTest {
     @Test
     @DisplayName("new schedule defaults to null prompt and with_memory=false when fields are omitted")
     void newSchedule_defaults() {
-        when(cronParser.isValid("0 * * * *")).thenReturn(true);
+        when(cronParser.isAcceptableInput("0 * * * *")).thenReturn(true);
         when(cronParser.getNextExecution("0 * * * *", "UTC"))
                 .thenReturn(Instant.parse("2026-06-14T08:00:00Z"));
         when(scheduleRepository.findAllByAgentEntityIdAndOrganizationIdStrict(agentId, ORG))

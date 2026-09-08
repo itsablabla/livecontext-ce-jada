@@ -85,6 +85,31 @@ public class RemoteToolExecutionService implements ToolExecutionService {
     private com.apimarketplace.agent.tools.skill.SkillToolsProvider skillToolsProvider;
 
     /**
+     * {@code @Lazy} for the same reason as the skill provider directly above: both
+     * reach back into services this one sits on the dependency path of, so eager
+     * injection closes a cycle at context refresh. Stated here because an
+     * unexplained {@code @Lazy} reads as cargo, and the next reader would either
+     * copy it without knowing why or remove it and break the boot.
+     */
+    @Lazy
+    @Autowired(required = false)
+    private com.apimarketplace.agent.tools.memory.MemoryToolsProvider memoryToolsProvider;
+
+    /**
+     * The question-to-the-user tool. Local for the same reason the approval gate is: the
+     * park it performs lives in this process, and it needs the call's own id and the raw
+     * credentials, which only this service has at hand.
+     */
+    @Lazy
+    @Autowired(required = false)
+    private com.apimarketplace.agent.tools.askuser.AskUserToolsProvider askUserToolsProvider;
+
+    /** Test seam: wire the question tool without a Spring context. */
+    void configureAskUserForTest(com.apimarketplace.agent.tools.askuser.AskUserToolsProvider provider) {
+        this.askUserToolsProvider = provider;
+    }
+
+    /**
      * Approval gate collaborators. Optional on purpose: when any of them is absent the
      * call behaves exactly as it did before the gate existed (card painted by the result
      * consumer, turn ends, user resumes). That is also what keeps the many direct-{@code new}
@@ -194,6 +219,25 @@ public class RemoteToolExecutionService implements ToolExecutionService {
                 Object action = toolCall.arguments() != null ? toolCall.arguments().get("action") : null;
                 log.info("Intercepting skill(action='{}') locally via SkillToolsProvider", action);
                 return executeLocalProvider(skillToolsProvider, toolCall, tenantId, credentials, startTime);
+            }
+
+            // Memory tool: same deal, and the rows live in this service's own schema.
+            if ("memory".equals(toolName) && memoryToolsProvider != null) {
+                Object action = toolCall.arguments() != null ? toolCall.arguments().get("action") : null;
+                log.info("Intercepting memory(action='{}') locally via MemoryToolsProvider", action);
+                return executeLocalProvider(memoryToolsProvider, toolCall, tenantId, credentials, startTime);
+            }
+
+            // ask_user: parks on the approval gate right here. The provider needs the call's
+            // own id (the gate key) and when the call began (the park ceilings), neither of
+            // which the provider contract carries, so both ride in on the credentials.
+            if (com.apimarketplace.agent.tools.askuser.AskUserToolsProvider.TOOL_NAME.equals(toolName)
+                    && askUserToolsProvider != null) {
+                Map<String, Object> withCall = new HashMap<>(credentials != null ? credentials : Map.of());
+                withCall.put(com.apimarketplace.agent.tools.askuser.AskUserToolsProvider.KEY_TOOL_CALL_ID, toolCall.id());
+                withCall.put(com.apimarketplace.agent.tools.askuser.AskUserToolsProvider.KEY_CALL_STARTED_EPOCH_MS, startTime);
+                log.info("Intercepting ask_user locally via AskUserToolsProvider (call {})", toolCall.id());
+                return executeLocalProvider(askUserToolsProvider, toolCall, tenantId, withCall, startTime);
             }
 
             // Check if this tool should route to conversation-service via callback URL
@@ -309,10 +353,7 @@ public class RemoteToolExecutionService implements ToolExecutionService {
         // Advertise the park BEFORE the card exists. A blocking card the answer side cannot
         // match to a park is a dead end: the user clicks, nothing is released, and no turn
         // restarts either. Failing to advertise means we simply do not claim to be holding.
-        ToolApprovalGate.ParkRequest parkRequest = new ToolApprovalGate.ParkRequest(
-                conversationId, gateKey, streamId, deadlineOf(credentials),
-                inactivityWindowMsOf(credentials), callStartedEpochMs, executionReserveMsOf(credentials),
-                cliBridgeSessionOf(credentials));
+        ToolApprovalGate.ParkRequest parkRequest = ParkRequests.of(credentials, gateKey, callStartedEpochMs);
         if (!approvalGate.beginPark(parkRequest)) {
             return gateResult;
         }
@@ -404,10 +445,7 @@ public class RemoteToolExecutionService implements ToolExecutionService {
         // See parkForAuthorization: the park must be advertised before its card exists, and
         // refusing here is also what stops a SECOND park drawing a card the shared window
         // has already run out of time for.
-        ToolApprovalGate.ParkRequest parkRequest = new ToolApprovalGate.ParkRequest(
-                conversationId, gateKey, streamId, deadlineOf(credentials),
-                inactivityWindowMsOf(credentials), startTime, executionReserveMsOf(credentials),
-                cliBridgeSessionOf(credentials));
+        ToolApprovalGate.ParkRequest parkRequest = ParkRequests.of(credentials, gateKey, startTime);
         if (!approvalGate.beginPark(parkRequest)) {
             return result;
         }
@@ -523,46 +561,6 @@ public class RemoteToolExecutionService implements ToolExecutionService {
         }
     }
 
-    /**
-     * True when a CLI is holding this call open at the other end of an MCP request, which
-     * bounds how long the gate may hold it. Stamped by {@code CliAgentService} on the
-     * session, because no other credential identifies the route: the inactivity window is
-     * absent when the watchdog is disabled and present on the direct route when an agent
-     * configures one.
-     *
-     * <p>The reading lives with the key, in {@code ToolAuthorizationScope}, so one
-     * credential cannot end up with two truthiness rules. It accepts the text form for the
-     * same reason the numeric markers do: the two mistakes are not symmetrical, since
-     * failing to recognise the marker removes the cap and restores the original bug, while
-     * recognising a stray one only shortens a wait.
-     */
-    private static boolean cliBridgeSessionOf(Map<String, Object> credentials) {
-        return ToolAuthorizationScope.isCliBridgeSession(credentials);
-    }
-
-    /**
-     * How long the tool needs to RUN once a park releases it, held back from the caller's
-     * deadline. Written by {@code AgentLoopExecutor} (the tool's own timeout); absent on
-     * routes with no deadline at all, where there is nothing to reserve from.
-     */
-    private static long executionReserveMsOf(Map<String, Object> credentials) {
-        if (credentials == null) {
-            return 0L;
-        }
-        Object reserve = credentials.get("__toolExecutionReserveMs__");
-        if (reserve instanceof Number num) {
-            return Math.max(0L, num.longValue());
-        }
-        if (reserve instanceof String str && !str.isBlank()) {
-            try {
-                return Math.max(0L, Long.parseLong(str.trim()));
-            } catch (NumberFormatException e) {
-                return 0L;
-            }
-        }
-        return 0L;
-    }
-
     /** The {@code action} argument, which together with the tool name names the rule. */
     private static String actionOf(Map<String, Object> arguments) {
         Object action = arguments != null ? arguments.get("action") : null;
@@ -570,80 +568,11 @@ public class RemoteToolExecutionService implements ToolExecutionService {
     }
 
     private static String conversationIdOf(Map<String, Object> credentials) {
-        return stringCredential(credentials, "conversationId");
+        return ParkRequests.conversationIdOf(credentials);
     }
 
     private static String streamIdOf(Map<String, Object> credentials) {
-        String streamId = stringCredential(credentials, "__streamId__");
-        return streamId != null ? streamId : stringCredential(credentials, "streamId");
-    }
-
-    /**
-     * Absolute ceiling the caller's own tool timeout imposes on this call, or {@code 0} when
-     * the caller sets none (the CLI-bridge path, whose HTTP read timeout is far longer than
-     * any park). Injected by {@code AgentLoopExecutor} so the gate cannot park past the
-     * moment its own result would be discarded as a timeout.
-     */
-    private static long deadlineOf(Map<String, Object> credentials) {
-        if (credentials == null) {
-            return 0L;
-        }
-        Object deadline = credentials.get("__toolDeadlineEpochMs__");
-        if (deadline instanceof Number num) {
-            return num.longValue();
-        }
-        if (deadline instanceof String str) {
-            try {
-                return Long.parseLong(str.trim());
-            } catch (NumberFormatException e) {
-                return 0L;
-            }
-        }
-        return 0L;
-    }
-
-    /**
-     * The run's inactivity watchdog window in ms, or {@code 0} when no watchdog applies.
-     *
-     * <p>A run that goes silent for this long is killed, and a parked call is silent - so
-     * the park has to fit inside it WITH room for the tool that follows. The value is
-     * per-agent ({@code __inactivityTimeoutSeconds__}, contract: 0 disables, 10 to 7200 sets
-     * a window), which is why it cannot be a constant on the gate's side: an agent
-     * configured with a 60 s window would otherwise be killed by its own approval card.
-     *
-     * <p>This says nothing about the ROUTE, and reading it as a route was the bug this
-     * pairs with: a direct chat sets it too (from the chat's own inactivity option), and a
-     * bridge run omits it whenever its watchdog is disabled. Use
-     * {@link #cliBridgeSessionOf} for the route.
-     */
-    private static long inactivityWindowMsOf(Map<String, Object> credentials) {
-        if (credentials == null) {
-            return 0L;
-        }
-        Object raw = credentials.get("__inactivityTimeoutSeconds__");
-        long seconds;
-        if (raw instanceof Number num) {
-            seconds = num.longValue();
-        } else if (raw instanceof String str && !str.isBlank()) {
-            try {
-                seconds = Long.parseLong(str.trim());
-            } catch (NumberFormatException e) {
-                return 0L;
-            }
-        } else {
-            return 0L;
-        }
-        // 0 = the watchdog is off, so nothing constrains the park. Out-of-contract values
-        // are ignored the same way the bridge ignores them, rather than inventing a window.
-        return seconds >= 10 && seconds <= 7200 ? seconds * 1000L : 0L;
-    }
-
-    private static String stringCredential(Map<String, Object> credentials, String key) {
-        if (credentials == null) {
-            return null;
-        }
-        Object value = credentials.get(key);
-        return value instanceof String s && !s.isBlank() ? s : null;
+        return ParkRequests.streamIdOf(credentials);
     }
 
     /**
@@ -1010,6 +939,7 @@ public class RemoteToolExecutionService implements ToolExecutionService {
         copyCredential(request, credentials, "applicationAccessMode", "__applicationAccessMode__", "applicationAccessMode");
         copyCredential(request, credentials, "skillAccessMode", "__skillAccessMode__", "skillAccessMode");
         copyCredential(request, credentials, "fileAccessMode", "__fileAccessMode__", "fileAccessMode");
+        copyCredential(request, credentials, "memoryAccessMode", "__memoryAccessMode__", "memoryAccessMode");
     }
 
     private void copyCredential(Map<String, Object> request, Map<String, Object> credentials,

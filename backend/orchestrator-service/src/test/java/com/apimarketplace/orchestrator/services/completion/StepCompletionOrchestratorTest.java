@@ -1524,4 +1524,55 @@ class StepCompletionOrchestratorTest {
         }
     }
 
+
+    @Nested
+    @DisplayName("product analytics wiring (workflow_node_failed)")
+    class AnalyticsWiring {
+
+        private com.apimarketplace.orchestrator.services.analytics.WorkflowAnalyticsEmitter emitter;
+
+        @BeforeEach
+        void wireEmitter() {
+            emitter = mock(com.apimarketplace.orchestrator.services.analytics.WorkflowAnalyticsEmitter.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(orchestrator, "workflowAnalyticsEmitter", emitter);
+            lenient().when(persistenceService.recordStep(eq(execution), eq(NODE_ID), eq(NODE_LABEL),
+                    eq(NODE_ID), any(StepExecutionResult.class), anyInt(), any()))
+                    .thenReturn(StepPersistenceResult.success(UUID.randomUUID()));
+            lenient().when(stateSnapshotService.recordNodeCompletionAndGetCounts(eq(RUN_ID), eq(NODE_ID), anyString(), any(), anyInt(), anyLong()))
+                    .thenReturn(ONE_COMPLETED);
+            // A NON_FINAL_ATTEMPT only READS the counts (it mutates nothing).
+            lenient().when(stateSnapshotService.getNodeCounts(anyString(), anyString())).thenReturn(ONE_COMPLETED);
+        }
+
+        @Test
+        @DisplayName("a TERMINAL completion is offered to the emitter exactly once (the emitter keeps only failures)")
+        void terminalIsOfferedOnce() {
+            StepCompletionContext ctx = StepCompletionContext.of(execution, NODE_ID, NODE_LABEL,
+                    StepExecutionResult.failure(NODE_ID, "boom", new RuntimeException("boom"), 5), 0, 0);
+
+            orchestrator.complete(ctx, null, CompletionKind.TERMINAL, true);
+
+            verify(emitter, times(1)).nodeFailed(any(StepCompletionContext.class));
+        }
+
+        @Test
+        @DisplayName("a NON_FINAL_ATTEMPT (retry) is never counted: only the outcome is a failure event")
+        void retryAttemptIsNotCounted() {
+            StepCompletionContext ctx = StepCompletionContext.of(execution, NODE_ID, NODE_LABEL,
+                    StepExecutionResult.failure(NODE_ID, "boom", new RuntimeException("boom"), 5), 0, 0);
+
+            orchestrator.complete(ctx, null, CompletionKind.NON_FINAL_ATTEMPT, false);
+
+            verify(emitter, never()).nodeFailed(any());
+        }
+
+        @Test
+        @DisplayName("no emitter wired (hand-built orchestrator): completion is unaffected")
+        void noEmitter() {
+            org.springframework.test.util.ReflectionTestUtils.setField(orchestrator, "workflowAnalyticsEmitter", null);
+            StepCompletionContext ctx = StepCompletionContext.of(execution, NODE_ID, NODE_LABEL,
+                    StepExecutionResult.success(NODE_ID, Map.of(), 1), 0, 0);
+            assertThat(orchestrator.complete(ctx).persisted()).isTrue();
+        }
+    }
 }

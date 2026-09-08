@@ -77,9 +77,10 @@ export function WorkflowPanelActions({ workflowId, isRunMode, isPreviewOnly, can
   const openShare = useCallback(() => setIsShareOpen(true), []);
   const closeShare = useCallback(() => setIsShareOpen(false), []);
 
-  // Neither a preview nor someone else's workflow can be saved, run or
-  // published. The preview renders a frozen snapshot; the non-owned case reaches
-  // a live workflow in another tenant, where all three would be refused.
+  // Three cases where all three would be refused: a preview (a frozen snapshot),
+  // someone else's workflow (live, in another tenant), and an INSTALLED
+  // application - which does sit in the caller's own tenant, but whose plan the
+  // backend freezes.
   if (isPreviewOnly || !canEdit) return null;
 
   return (

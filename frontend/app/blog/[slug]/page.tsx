@@ -47,7 +47,11 @@ export async function generateMetadata({ params }: BlogArticleParams): Promise<M
       tags: post.tags,
       images: [{ url: `${SITE_URL}${post.cover}`, width: 2000, height: 1125, alt: post.coverAlt }],
     },
-    robots: IS_CE ? { index: false, follow: false } : undefined,
+    // Withheld while the blog is being reworked: unlinked from the landing and
+    // absent from the sitemap, so no crawler should index it in the meantime.
+    // (CE never indexes anything either.) Drop this back to
+    // `IS_CE ? { index: false, follow: false } : undefined` when it ships again.
+    robots: { index: false, follow: false },
   };
 }
 

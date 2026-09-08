@@ -81,6 +81,53 @@ public class WorkflowInspectorController {
     }
 
     /**
+     * GET /api/workflow-inspector/apis/popular
+     *
+     * <p>The same page shape as {@code /apis}, ordered by how much the platform actually
+     * RUNS each integration instead of alphabetically. Declared before the
+     * {@code /apis/{apiSlug}} mapping below only for reading order - Spring matches the
+     * literal path first either way.
+     *
+     * <p>Falls back to an empty page rather than a 500: this feeds one section of the
+     * add-node palette, and a ledger that cannot be read must cost that section, never the
+     * palette.
+     */
+    @GetMapping("/apis/popular")
+    public ResponseEntity<Map<String, Object>> getPopularApis(
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        try {
+            List<WorkflowApiDTO> content = workflowInspectorService.getPopularApisForWorkflow(page, size);
+            int total = workflowInspectorService.countActiveApis();
+            int effectiveSize = Math.max(1, Math.min(size, 200));
+            int totalPages = total > 0 ? (int) Math.ceil((double) total / effectiveSize) : 0;
+
+            Map<String, Object> response = new java.util.HashMap<>();
+            response.put("content", content);
+            response.put("totalElements", total);
+            response.put("totalPages", totalPages);
+            response.put("page", page);
+            response.put("size", effectiveSize);
+            response.put("first", page == 0);
+            response.put("last", page >= totalPages - 1);
+            response.put("numberOfElements", content.size());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error fetching the ranked API list: {}", e.getMessage(), e);
+            Map<String, Object> empty = new java.util.HashMap<>();
+            empty.put("content", List.of());
+            empty.put("totalElements", 0);
+            empty.put("totalPages", 0);
+            empty.put("page", page);
+            empty.put("size", size);
+            empty.put("first", true);
+            empty.put("last", true);
+            empty.put("numberOfElements", 0);
+            return ResponseEntity.ok(empty);
+        }
+    }
+
+    /**
      * Récupère une API spécifique par son slug (uniquement les champs nécessaires)
      * GET /api/workflow-inspector/apis/{apiSlug}
      */

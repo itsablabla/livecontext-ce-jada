@@ -50,15 +50,32 @@ class ParamAliasCreatorParityTest {
      * loop     -> UtilityNodeCreator: condition/loopCondition/loop_condition/expression/while,
      *             max_iterations/maxIterations/limit
      * response -> UtilityNodeCreator: message, text, content, body, response
+     * download_file -> UtilityNodeCreator.executeAddDownloadFile: url/source/link/file_url/href/src,
+     *             filename/file_name/output
+     * http_request -> UtilityNodeCreator.executeAddHttpRequest: url/endpoint/uri, authType/auth_type,
+     *             bodyType/body_type, authConfig/auth_config, queryParams/query_params
+     * approval -> DecisionNodeCreator.executeAddApproval: approver_roles/approverRoles/roles,
+     *             required_approvals/requiredApprovals, timeout_ms/timeoutMs/timeout,
+     *             contextTemplate/context_template, continuationMode/continuation_mode, delegation
      */
-    private static final Map<String, Set<String>> CREATOR_READS = Map.of(
-        "agent", Set.of("prompt", "instruction", "message", "task", "input", "withMemory", "with_memory"),
-        "classify", Set.of("prompt", "instruction", "system_prompt", "content", "input", "text", "data"),
-        "guardrail", Set.of("input", "content", "text", "prompt", "system_prompt", "instruction"),
-        "decision", Set.of("conditions", "decisionConditions", "cases", "condition", "branches", "rules"),
-        "loop", Set.of("condition", "loopCondition", "loop_condition", "expression", "while",
-                       "max_iterations", "maxIterations", "limit"),
-        "response", Set.of("message", "text", "content", "body", "response")
+    private static final Map<String, Set<String>> CREATOR_READS = Map.ofEntries(
+        Map.entry("agent", Set.of("prompt", "instruction", "message", "task", "input", "withMemory", "with_memory")),
+        Map.entry("classify", Set.of("prompt", "instruction", "system_prompt", "content", "input", "text", "data")),
+        Map.entry("guardrail", Set.of("input", "content", "text", "prompt", "system_prompt", "instruction")),
+        Map.entry("decision", Set.of("conditions", "decisionConditions", "cases", "condition", "branches", "rules")),
+        Map.entry("loop", Set.of("condition", "loopCondition", "loop_condition", "expression", "while",
+                       "max_iterations", "maxIterations", "limit")),
+        Map.entry("response", Set.of("message", "text", "content", "body", "response")),
+        Map.entry("download_file", Set.of("url", "source", "link", "file_url", "href", "src",
+                       "filename", "file_name", "output")),
+        Map.entry("http_request", Set.of("url", "endpoint", "uri", "authType", "auth_type",
+                       "bodyType", "body_type", "authConfig", "auth_config",
+                       "queryParams", "query_params")),
+        Map.entry("approval", Set.of("approver_roles", "approverRoles", "roles",
+                       "required_approvals", "requiredApprovals",
+                       "timeout_ms", "timeoutMs", "timeout",
+                       "contextTemplate", "context_template",
+                       "continuationMode", "continuation_mode", "delegation"))
     );
 
     @SuppressWarnings("unchecked")
@@ -70,6 +87,19 @@ class ParamAliasCreatorParityTest {
         } catch (ReflectiveOperationException e) {
             throw new AssertionError(
                 "PARAM_ALIASES moved or was renamed - this parity guard must be updated with it", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Map<String, String>> nestedConfigAliases() {
+        try {
+            Field f = com.apimarketplace.orchestrator.tools.workflow.builder.WorkflowBuilderModifier.class
+                .getDeclaredField("NESTED_CONFIG_ALIASES");
+            f.setAccessible(true);
+            return (Map<String, Map<String, String>>) f.get(null);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(
+                "NESTED_CONFIG_ALIASES moved or was renamed - this parity guard must be updated with it", e);
         }
     }
 
@@ -129,6 +159,87 @@ class ParamAliasCreatorParityTest {
             assertThat(rejected)
                 .as("UtilityNodeCreator.createLoop honours these, so add_node must not reject them")
                 .isEmpty();
+        }
+
+        /**
+         * The bug this guard was extended for. {@code DecisionNodeCreator.executeAddApproval} honours
+         * both conventions for every approval param, and the builder help advertises the camelCase
+         * ones, but the node's documented schema stores a single spelling each - so the other one
+         * came back as "Unknown parameter" for a value that would have worked.
+         */
+        @Test
+        @DisplayName("regression: approval accepts every spelling executeAddApproval reads (timeoutMs was rejected)")
+        void approvalSpellingsAreAccepted() {
+            // Assert the entry exists first: without this the pre-change run dies in an NPE and
+            // the message below, written for exactly this failure, never prints.
+            assertThat(paramAliases())
+                .as("the approval node has aliases to declare, so the map must carry an entry for it")
+                .containsKey("approval");
+
+            Set<String> accepted = new java.util.HashSet<>(paramAliases().get("approval").keySet());
+            // canonical schema names, accepted without an alias entry
+            accepted.addAll(Set.of("timeout_ms", "approver_roles", "required_approvals",
+                                   "contextTemplate", "continuationMode", "delegation"));
+
+            Set<String> rejected = new TreeSet<>(CREATOR_READS.get("approval"));
+            rejected.removeAll(accepted);
+
+            assertThat(rejected)
+                .as("DecisionNodeCreator.executeAddApproval honours these, so add_node must not reject them")
+                .isEmpty();
+        }
+
+        /**
+         * The alias VALUE is what the required-param bypass resolves against
+         * ({@code NodeParamsValidator} checks whether an alias covers a missing required param).
+         * Approval has no required param today, so a typo in a value would be inert - and
+         * invisible to every other test here, which reads only {@code keySet()}. Pin the
+         * targets so the map cannot rot into a set of keys pointing nowhere.
+         */
+        @Test
+        @DisplayName("approval: each alias resolves to the canonical name the schema declares")
+        void approvalAliasesPointAtCanonicalNames() {
+            assertThat(paramAliases().get("approval"))
+                .containsEntry("timeoutMs", "timeout_ms")
+                .containsEntry("timeout", "timeout_ms")
+                .containsEntry("approverRoles", "approver_roles")
+                .containsEntry("roles", "approver_roles")
+                .containsEntry("requiredApprovals", "required_approvals")
+                .containsEntry("context_template", "contextTemplate")
+                .containsEntry("continuation_mode", "continuationMode");
+        }
+
+        /**
+         * The third copy of the same truth. add_node normalizes through the creator, modify
+         * normalizes through {@code WorkflowBuilderModifier.NESTED_CONFIG_ALIASES}. Nothing
+         * else fails if the modify table loses a spelling the add path still accepts, and the
+         * result is the original bug back on the edit half: a green call that changes nothing.
+         *
+         * <p>Storage names are the camelCase fields {@code WorkflowPlanParser.parseApprovalConfig}
+         * reads. Every OTHER spelling add_node knows must be rewritten to one of them on modify.
+         */
+        @Test
+        @DisplayName("regression: every approval spelling add_node accepts is normalized on the modify path too")
+        void approvalSpellingsAreNormalizedOnModify() {
+            Set<String> storageNames = Set.of("timeoutMs", "approverRoles", "requiredApprovals",
+                                              "contextTemplate", "continuationMode", "delegation");
+            Map<String, String> modifyAliases = nestedConfigAliases().get("approval");
+            assertThat(modifyAliases)
+                .as("the modify path must declare the approval node's aliases")
+                .isNotNull();
+
+            Set<String> addPathSpellings = new TreeSet<>(paramAliases().get("approval").keySet());
+            addPathSpellings.addAll(paramAliases().get("approval").values());  // canonical schema names
+            addPathSpellings.removeAll(storageNames);
+
+            assertThat(modifyAliases.keySet())
+                .as("a spelling add_node accepts but modify does not rewrite lands under a key "
+                    + "WorkflowPlanParser never reads, so the edit silently does nothing")
+                .containsExactlyInAnyOrderElementsOf(addPathSpellings);
+
+            assertThat(modifyAliases.values())
+                .as("every rewrite must target a field the parser actually reads")
+                .isSubsetOf(storageNames);
         }
 
         @Test

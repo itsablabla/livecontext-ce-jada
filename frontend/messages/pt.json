@@ -93,7 +93,9 @@
     "noResults": "Nenhum resultado para \"{query}\"",
     "searching": "Pesquisando...",
     "untitled": "Sem título",
-    "clear": "Limpar pesquisa"
+    "clear": "Limpar pesquisa",
+    "shortcutKeys": "Ctrl K",
+    "shortcutKeysMac": "⌘K"
   },
   "reward": {
     "page": {
@@ -382,6 +384,16 @@
     "deleteRows": "Excluir linhas",
     "deleteColumnsButton": "Excluir colunas",
     "deleteRowsConfirm": "Are you sure you want to delete {count} selected row(s)? This action cannot be undone.",
+    "duplicateRows": "Duplicar",
+    "duplicateRowsSuccessTitle": "Linhas duplicadas",
+    "duplicateRowsSuccessMessage": "{count} linha(s) foram copiadas",
+    "duplicateRowsSuccessMessageVector": "{count} linha(s) foram copiadas. Ficam fora da pesquisa por similaridade até serem novamente incorporadas.",
+    "duplicateRowsPartialTitle": "Algumas linhas não foram duplicadas",
+    "duplicateRowsPartialMessage": "{done} de {total} linha(s) foram copiadas: {reason}",
+    "duplicateRowsReasonNotLoaded": "as linhas selecionadas noutra página não estavam carregadas",
+    "duplicateRowsReasonUnknown": "sem motivo indicado",
+    "duplicateRowsErrorTitle": "Erro ao duplicar as linhas",
+    "duplicateRowsErrorMessage": "Não foi possível duplicar as linhas selecionadas: {reason}",
     "cancel": "Cancel",
     "saveRow": "Save Row",
     "addRow": "Add Row",
@@ -436,6 +448,7 @@
     "assetUrl": "Usar uma ligação",
     "assetUrlPlaceholder": "Cole o URL de uma imagem ou ficheiro",
     "assetUrlConfirm": "Usar",
+    "assetUrlBack": "Voltar às origens de ficheiro",
     "assetUrlInvalid": "Este URL não parece utilizável",
     "assetExternal": "Ligação externa",
     "assetUnresolvableHint": "Este ficheiro já não está disponível. Pode ter sido eliminado de Ficheiros.",
@@ -494,6 +507,8 @@
     "openBottom": "Abrir o painel embaixo",
     "detach": "Desacoplar o painel",
     "attach": "Reacoplar o painel",
+    "maximize": "Tela cheia",
+    "restoreSize": "Sair da tela cheia",
     "moveWindow": "Mover o painel",
     "moveWindowHint": "Mover o painel: arraste-o ou use as setas (Shift para redimensionar a partir do canto inferior direito, Ctrl+Shift a partir do superior esquerdo, Alt para passos de 1px)",
     "collapseWindow": "Recolher o painel",
@@ -508,6 +523,7 @@
     "errorLoading": "Falha ao carregar itens",
     "aiChat": "Chat IA",
     "runTab": "Execução",
+    "inspectorTab": "Inspetor",
     "welcomeTitle": "Como posso ajudar você?",
     "agent": "Agente",
     "workflowPanel": "Painel de Workflow",
@@ -528,21 +544,35 @@
     "deleteWorkflowConfirm": "Tem certeza de que deseja excluir \"{name}\"? Esta ação não pode ser desfeita.",
     "deleteWorkflowTitle": "Excluir fluxo de trabalho"
   },
+  "platformStatus": {
+    "headline": {
+      "operational": "Todos os sistemas operacionais",
+      "maintenance": "Manutenção em andamento",
+      "degraded": "Desempenho degradado",
+      "major_outage": "Interrupção grave",
+      "unknown": "Estado indisponível"
+    },
+    "strip": {
+      "incident": "Incidente em andamento",
+      "maintenance": "Manutenção em andamento",
+      "view": "Ver estado",
+      "dismiss": "Fechar"
+    },
+    "card": {
+      "title": "Estado da plataforma",
+      "subtitle": "Estado atual da cloud da LiveContext",
+      "state": "Estado",
+      "incidents": "Incidentes em curso",
+      "lastChecked": "Última verificação",
+      "loadError": "Não foi possível carregar o estado."
+    }
+  },
   "sidebar": {
-    "board": "Quadro",
     "expandSidebar": "Expandir barra lateral",
     "collapseSidebar": "Recolher barra lateral",
     "closeSidebar": "Fechar barra lateral",
-    "newChat": "Novo chat",
     "searchChats": "Buscar chats",
-    "home": "Início",
-    "applications": "Aplicações",
-    "marketplace": "Marketplace",
-    "workflows": "Workflows",
-    "tables": "Tabelas",
-    "interfaces": "Interfaces",
     "projects": "Projetos",
-    "agents": "Agentes",
     "chats": "Chats",
     "noConversations": "Sem conversas",
     "generatingTitle": "Gerando titulo...",
@@ -556,24 +586,22 @@
     "allChats": "Todos",
     "filterChats": "Filtrar conversas",
     "shareConversation": "Compartilhar conversa",
-    "credits": "Créditos",
     "viewQuota": "Ver uso e cota",
     "noProjects": "Nenhum projeto ainda",
     "newProject": "Novo projeto",
     "nav": {
       "board": "Quadro",
-      "home": "Início",
       "marketplace": "Marketplace",
-      "agents": "Agents",
-      "applications": "Applications",
+      "agents": "Agentes",
+      "applications": "Aplicações",
       "workflows": "Workflows",
       "interfaces": "Interfaces",
-      "tables": "Tables",
+      "tables": "Tabelas",
       "files": "Arquivos",
-      "newChat": "New Chat"
+      "newChat": "Novo chat",
+      "agenda": "Agenda"
     },
     "settings": "Settings",
-    "pricing": "Pricing",
     "about": "About",
     "information": "Information",
     "workspace": "Workspace",
@@ -599,7 +627,7 @@
     "darkMode": "Modo escuro",
     "autoMode": "Automático",
     "signOut": "Sign out",
-    "upgrade": "Upgrade",
+    "upgrade": "Fazer upgrade",
     "signIn": "Sign In",
     "clearMessages": "Limpar mensagens",
     "cost": "Custo",
@@ -611,7 +639,25 @@
       "typeWorkflow": "fluxo de trabalho"
     },
     "scheduledAgent": "Agente agendado",
-    "webhookAgent": "Agente webhook"
+    "webhookAgent": "Agente webhook",
+    "more": {
+      "title": "Mais",
+      "back": "Voltar"
+    },
+    "customize": {
+      "title": "Personalizar",
+      "pagesTitle": "Páginas na barra lateral",
+      "pagesHint": "Marque as páginas que quer na barra lateral. Pelo menos {count} são sempre mantidas.",
+      "minimumReached": "A barra lateral mantém pelo menos {count} páginas. Adicione outra para remover esta.",
+      "quickOpenTitle": "Abertura rápida",
+      "quickOpenHint": "Para onde levam o atalho da página inicial e as teclas abaixo.",
+      "reset": "Repor predefinições",
+      "shortcutKeys": "Ctrl Shift O",
+      "shortcutKeysMac": "⇧⌘O",
+      "shortcutAria": "Atalho de teclado",
+      "shortcutTitle": "{label} ({keys})"
+    },
+    "studioChats": "Estúdio"
   },
   "dashboard": {
     "title": "Configuracoes",
@@ -693,6 +739,17 @@
           "datasource": "Tabela de dados",
           "workflow": "Fluxo",
           "error": "Erro"
+        },
+        "triggerActions": {
+          "label": "Ações de agendamento",
+          "runNow": "Executar agora",
+          "runNowHint": "A execução agendada acontece na mesma.",
+          "runInstead": "Executar em vez da execução agendada",
+          "runInsteadHint": "Consome a execução que estava a chegar.",
+          "openAgenda": "Abrir na agenda",
+          "ranKeeping": "Iniciado. A execução agendada continua a acontecer.",
+          "ranReplacing": "Iniciado, em vez da execução agendada.",
+          "runFailed": "Não foi possível iniciar."
         }
       },
       "recent": {
@@ -731,7 +788,9 @@
           "AGENT_TASK_ASSIGNED": "{count, plural, one {# tarefa atribuída} other {# tarefas atribuídas}}",
           "AGENT_TASK_AWAITING_REVIEW": "{count, plural, one {# tarefa aguardando sua revisão} other {# tarefas aguardando sua revisão}}",
           "BRIDGE_LOW_CREDIT": "{count, plural, one {# bridge com pouco crédito} other {# bridges com pouco crédito}}",
-          "ORG_INVITATION_PENDING": "{count, plural, one {# convite de organização} other {# convites de organização}}"
+          "ORG_INVITATION_PENDING": "{count, plural, one {# convite de organização} other {# convites de organização}}",
+          "BADGE_UNLOCKED": "{count, plural, one {# novo troféu} other {# novos troféus}}",
+          "BUDGET_REACHED": "{count, plural, one {# fluxo parado pelo limite de gasto} other {# fluxos parados pelo limite de gasto}}"
         },
         "approvalOpen": "Abrir",
         "approvalReview": "Revisar",
@@ -1077,6 +1136,9 @@
     "reactivateRun": {
       "title": "Reativar esta execução"
     },
+    "runAction": {
+      "failed": "Não funcionou. Tente novamente."
+    },
     "applicationMode": "Modo Aplicação",
     "application": "Aplicação",
     "templates": {
@@ -1147,14 +1209,15 @@
       "budgetReached": "Orçamento atingido, nenhuma nova execução será iniciada",
       "epochCost": "Época {epoch}",
       "budgetBlockedTitle": "Orçamento atingido",
-      "budgetBlockedMessage": "Gasto {spent} de {budget}. Nenhuma nova execução foi iniciada.",
+      "budgetBlockedMessage": "Gasto {spent} de {budget} {period}. Nenhuma execução nova foi iniciada; ela recomeça sozinha no próximo período.",
       "openInPanel": "Abrir os detalhes da execução no painel",
       "backToWorkflow": "Voltar ao workflow",
       "scrollLeft": "Mostrar os detalhes anteriores",
       "scrollRight": "Mostrar mais detalhes",
       "cost": "Custo",
       "scopeAll": "todas as épocas",
-      "scopeEpoch": "época {epoch}"
+      "scopeEpoch": "época {epoch}",
+      "budgetBlockedMessageCumulative": "Gasto {spent} de {budget}, e este limite nunca reinicia. Nenhuma execução nova foi iniciada; aumente o limite ou mude o seu reinício para continuar."
     }
   },
   "workflowRelations": {
@@ -1444,7 +1507,11 @@
     "publishing": "Publicando...",
     "publishingMessage": "Empacotando seu fluxo de trabalho e seus recursos, aguarde",
     "retry": "Tentar novamente",
-    "updateResubmittedForReview": "Atualização enviada para revisão - ela estará disponível novamente assim que um administrador a aprovar."
+    "updateResubmittedForReview": "Atualização enviada para revisão - ela estará disponível novamente assim que um administrador a aprovar.",
+    "studioLabel": "Prateleira Studio",
+    "studioHint": "A prateleira Studio reúne os aplicativos que produzem mídia. O aplicativo mantém também sua categoria: é um eixo separado, não uma substituição.",
+    "studioToggle": "Mostrar na prateleira Studio",
+    "studioToggleHint": "Para aplicativos que produzem uma imagem, um vídeo ou um som."
   },
   "showcase": {
     "preview": "Preview da Demonstracao",
@@ -1603,6 +1670,9 @@
     "ceExclusiveTooltip": "Funciona apenas numa instalação auto-hospedada (Community Edition)",
     "ceExclusiveTitle": "Instalação auto-hospedada necessária",
     "ceExclusiveDescription": "Esta app usa recursos que só funcionam numa instalação auto-hospedada, por isso não pode ser instalada aqui. Instale-a a partir de uma implantação auto-hospedada para a utilizar.",
+    "planUpgradeTitle": "É necessário um plano superior",
+    "planUpgradeDescription": "Este app usa um recurso que o plano do seu espaço de trabalho ainda não inclui. Fazer upgrade libera a instalação.",
+    "planUpgradeCta": "Ver planos",
     "ceExclusiveFeatureCliAgent": "Agentes CLI locais (Claude Code, Codex, Gemini CLI, Mistral Vibe)",
     "ceExclusiveFeatureVectorSearch": "Pesquisa vetorial (embeddings)",
     "acquiring": "Instalando...",
@@ -1708,7 +1778,10 @@
     "viewRejectionReason": "Ver motivo da rejeição",
     "settingsMenu": {
       "label": "Definições da aplicação"
-    }
+    },
+    "studioFilterChip": "Somente Studio",
+    "studioFilterClear": "Mostrar todo o marketplace",
+    "studioSubtitle": "Aplicativos que produzem uma imagem, um vídeo ou um som."
   },
   "reviews": {
     "title": "Avaliações",
@@ -2009,13 +2082,6 @@
       "pricing": "Precos",
       "safeToClose": "Voce pode fechar esta pagina com seguranca."
     },
-    "welcomeGift": {
-      "title": "Presente de boas-vindas!",
-      "subtitle": "Para começar bem",
-      "credits": "créditos",
-      "description": "Adicionamos {amount} créditos gratuitos à sua conta para você explorar todas as funcionalidades.",
-      "cta": "Começar a explorar"
-    },
     "insufficientCredits": {
       "title": "Seus créditos acabaram",
       "description": "Seu saldo de créditos é insuficiente para realizar esta ação. Atualize seu plano para continuar.",
@@ -2122,10 +2188,11 @@
       "cancel": "Cancelar",
       "create": "Criar Workflow",
       "creating": "Criando...",
-      "success": "Sucesso",
-      "successMessage": "Workflow \"{name}\" criado com sucesso",
       "error": "Erro",
-      "errorMessage": "Falha ao criar workflow"
+      "errorMessage": "Falha ao criar workflow",
+      "budgetErrorTitle": "Limite não guardado",
+      "budgetErrorMessage": "O fluxo foi criado. Defina novamente o limite a partir do builder.",
+      "openAnyway": "Abrir o fluxo"
     },
     "createInterface": {
       "title": "Criar Nova Interface",
@@ -2291,8 +2358,7 @@
       },
       "configVectorDimension": "Dimensão de embedding",
       "configVectorMetric": "Métrica de distância",
-      "ceOnlyBadge": "Somente CE",
-      "ceOnlyTooltip": "Disponível apenas na Community Edition auto-hospedada",
+      "planOnlyTooltip": "Disponível a partir do plano {plan}. Faça upgrade para usar colunas de embeddings.",
       "mediaRender": {
         "label": "Mostrar como",
         "thumbnail": "Miniatura",
@@ -2492,7 +2558,11 @@
       "scheduleWithMemoryHelp": "O agente pode acessar o histórico de conversas anterior quando habilitado.",
       "backlogEnabled": "Participação no backlog compartilhado",
       "backlogEnabledHelp": "Quando ativado, este agente recebe tarefas não atribuídas do backlog compartilhado ao despertar e pode reivindicá-las. Deixe desativado para agentes especializados, para que trabalhem apenas as tarefas atribuídas diretamente a eles.",
-      "duplicateName": "Já existe um agente chamado \"{name}\". Escolhe outro nome."
+      "duplicateName": "Já existe um agente chamado \"{name}\". Escolhe outro nome.",
+      "memoryAccessLabel": "Memória de longo prazo",
+      "memoryAccessInfo": "O que este agente guarda é adicionado ao contexto de todos os agentes do espaço de trabalho. Escolha apenas consulta para um agente que deva usar os factos sem os alterar.",
+      "memoryAccessWrite": "Pode guardar e eliminar",
+      "memoryAccessRead": "Apenas consulta"
     },
     "createSkill": {
       "title": "Criar Habilidade",
@@ -2824,12 +2894,7 @@
       "saving": "Salvando...",
       "successMessage": "\"{name}\" atualizado com sucesso",
       "successTitle": "Atualizado",
-      "title": "Editar detalhes",
-      "advancedSection": "Avançado",
-      "budgetLabel": "Orçamento de custo",
-      "budgetPlaceholder": "Sem limite",
-      "budgetHelpCredits": "Créditos máximos que este fluxo de trabalho pode gastar. Ao atingir, nenhuma nova execução é iniciada.",
-      "budgetHelpDollars": "Gasto máximo para este fluxo de trabalho. Ao atingir, nenhuma nova execução é iniciada."
+      "title": "Editar detalhes"
     },
     "suggestedApps": {
       "cta": "Explorar o marketplace",
@@ -2841,7 +2906,7 @@
   },
   "nodeTypeSettings": {
     "title": "Tipos de Nodes",
-    "subtitle": "Ativar ou desativar tipos de nodes disponíveis para o agente IA",
+    "subtitle": "Ative ou desative os tipos de nó e defina o plano mínimo exigido por cada nó e integração",
     "searchPlaceholder": "Pesquisar tipos de nodes...",
     "enabled": "Ativado",
     "disabled": "Desativado",
@@ -2864,9 +2929,35 @@
     },
     "errors": {
       "fetchFailed": "Falha ao carregar os tipos de nodes",
-      "toggleFailed": "Falha ao alterar o tipo de node"
+      "toggleFailed": "Falha ao alterar o tipo de node",
+      "planChangeFailed": "Falha ao alterar o plano mínimo"
     },
-    "adminOnlyBadge": "Apenas administradores"
+    "adminOnlyBadge": "Apenas administradores",
+    "plan": {
+      "label": "Plano mínimo",
+      "everyone": "Todos"
+    },
+    "tabs": {
+      "nodes": "Nós",
+      "integrations": "Integrações",
+      "capabilities": "Recursos"
+    },
+    "integrations": {
+      "searchPlaceholder": "Pesquisar integrações...",
+      "hint": "Abra uma integração para definir o plano de cada um dos seus endpoints. Normalmente são os endpoints de publicação que ficam restritos, não os de leitura.",
+      "previous": "Anterior",
+      "next": "Seguinte",
+      "back": "Todas as integrações",
+      "apiLevelHint": "Integração completa, leitura incluída",
+      "wholeApiGated": "Integração completa a partir de {plan}",
+      "gatedEndpoints": "{count} endpoint(s) num plano pago"
+    },
+    "capabilities": {
+      "vectorSearch": {
+        "label": "Colunas vetoriais e busca por similaridade",
+        "description": "Colunas de embeddings, consultas por similaridade (RAG) e instalação de apps do marketplace que as usam. Os embeddings compartilham o banco gerenciado, por isso a barra é um plano pago em vez de acesso livre."
+      }
+    }
   },
   "myOAuthApps": {
     "title": "Suas conexoes OAuth personalizadas",
@@ -3400,7 +3491,7 @@
       "appliesTo": "Aplica-se a",
       "scopeAll": "Todas as superfícies",
       "scopeChat": "Chat geral",
-      "scopeWorkflow": "Agente de fluxo",
+      "scopeWorkflow": "Nó de fluxo",
       "scopeWebhook": "Webhook",
       "scopeWidget": "Widget",
       "scopeSchedule": "Agendamento",
@@ -4833,12 +4924,16 @@
         "storage1tb": "1 TB de armazenamento",
         "logs7": "Retenção de logs de execução por 7 dias",
         "logs30": "Retenção de logs de execução por 30 dias",
-        "logs60": "Retenção de logs de execução por 60 dias",
+        "logs90": "Retenção de logs de execução por 90 dias",
         "logsCustom": "Retenção de logs personalizada",
         "versioning": "Versionamento de workflows",
         "apiAccess": "Acesso à API",
         "cePlatformCreds": "Credenciais de integração gerenciadas",
         "cePlatformCredsTooltip": "Uma instalação auto-hospedada vinculada à nuvem pode executar integrações de terceiros com as credenciais de plataforma do LiveContext, sem precisar de suas próprias chaves de API. Uma pequena margem em créditos é aplicada a cada chamada.",
+        "vectorSearch": "Busca vetorial e RAG na nuvem",
+        "vectorSearchTooltip": "Colunas de embeddings e busca por similaridade nas suas tabelas, para geração aumentada por recuperação. Os embeddings compartilham o banco de dados gerenciado, então na nuvem começam no Pro. Uma instalação auto-hospedada os tem em todos os planos, porque possui o próprio banco.",
+        "browserAgent": "Nó Agente de navegador",
+        "browserAgentTooltip": "Um LLM que controla um navegador real: navegar, preencher formulários, extrair dados estruturados de sites sem API. Ele ocupa uma sessão de navegador durante toda a tarefa, um recurso escasso em infraestrutura compartilhada, por isso começa no Pro.",
         "priorityExecution": "Execução prioritária",
         "executionSearch": "Busca de execuções",
         "analyticsBasic": "Análises básicas",
@@ -4859,7 +4954,85 @@
         "supportPriority": "Suporte prioritário 24/7",
         "supportSla": "Suporte prioritário com SLA",
         "accountManager": "Gerente de conta dedicado",
-        "onboarding": "Onboarding e treinamento personalizados"
+        "onboarding": "Onboarding e treinamento personalizados",
+        "nodesCore": "Biblioteca de nós essenciais (integrações de publicação não incluídas)",
+        "nodesPublishing": "Integrações de publicação incluídas",
+        "nodesAll": "Todos os nós e integrações, sem restrições",
+        "nodesPublishingTooltip": "Publique diretamente a partir de um fluxo nas plataformas sociais e de vídeo do catálogo, entre elas YouTube, Instagram, TikTok, X e LinkedIn, e vão sendo acrescentadas mais."
+      }
+    },
+    "compare": {
+      "open": "Comparar planos",
+      "title": "Comparar planos",
+      "subtitle": "O que cada plano inclui, lado a lado. Preços com o pacote de {credits} créditos.",
+      "cycleLabel": "Período de faturação",
+      "featureColumn": "Funcionalidade",
+      "unlocksBadge": "Desbloqueia isto",
+      "included": "Incluído",
+      "notIncluded": "Não incluído",
+      "footnote": "O pacote de créditos ajusta-se em qualquer plano pago: escolha o seu na página de planos. Preços sem impostos.",
+      "sections": {
+        "usage": "Utilização e limites",
+        "building": "Criação de workflows",
+        "collaboration": "Equipa e espaços de trabalho",
+        "security": "Segurança e governação",
+        "support": "Análise e suporte"
+      },
+      "dimensions": {
+        "credits": "Créditos mensais",
+        "nodes": "Nós e integrações",
+        "nodesTooltip": "Só a publicação fica reservada: publicar no YouTube, Instagram, TikTok, X, LinkedIn e outras 13 plataformas exige um plano pago. Ler a partir delas, e qualquer outro nó, está em todos os planos.",
+        "concurrent": "Execuções simultâneas",
+        "storage": "Armazenamento",
+        "logs": "Retenção dos registos de execução",
+        "variables": "Variáveis de workflow",
+        "users": "Utilizadores",
+        "workspaces": "Espaços de trabalho",
+        "analytics": "Análise",
+        "support": "Suporte",
+        "creditsTooltip": "Os créditos pagam o que os modelos e as ferramentas realmente processam, por isso o que um mês rende depende do trabalho. Calculado num modelo de topo como o Claude Sonnet 5: cerca de {simpleCredits} créditos por uma pergunta e a sua resposta sem qualquer ferramenta, cerca de {agentCredits} por uma conversa em que um agente constrói um fluxo por si (cerca de 5 turnos e 45 chamadas, e uma construção mais longa custa mais), e cerca de {classifyCredits} por um único passo de classificação num fluxo em execução. Os modelos mais leves custam várias vezes menos."
+      },
+      "values": {
+        "creditsFree": "1000 / mês",
+        "creditsDynamic": "A partir de {credits} / mês",
+        "creditsCustom": "Personalizado",
+        "nodesCore": "Tudo menos a publicação",
+        "nodesPublishing": "Tudo",
+        "nodesAll": "Tudo",
+        "concurrent1": "1",
+        "concurrent5": "5",
+        "concurrent20": "20",
+        "concurrent50": "50",
+        "concurrentUnlimited": "Ilimitadas",
+        "storage100mb": "100 MB",
+        "storage1gb": "1 GB",
+        "storage10gb": "10 GB",
+        "storage100gb": "100 GB partilhados",
+        "storage1tb": "1 TB",
+        "logs7": "7 dias",
+        "logs30": "30 dias",
+        "logs90": "90 dias",
+        "logsCustom": "Personalizado",
+        "variables3": "3",
+        "variables25": "25",
+        "variables100": "100",
+        "variables500": "500",
+        "variablesUnlimited": "Ilimitadas",
+        "users1": "1",
+        "users25": "Até 25",
+        "usersUnlimited": "Ilimitados",
+        "workspaces1": "1",
+        "workspaces3": "3",
+        "workspaces10": "10",
+        "workspacesUnlimited": "Ilimitados",
+        "analyticsBasic": "Básica",
+        "analyticsDetailed": "Detalhada",
+        "analyticsTeam": "Equipa + relatórios",
+        "analyticsAdvanced": "Avançada + relatórios",
+        "supportCommunity": "Comunidade",
+        "supportEmail": "E-mail",
+        "supportPriority": "Prioritário 24/7",
+        "supportSla": "Prioritário + SLA"
       }
     },
     "businessPlans": {
@@ -4876,7 +5049,7 @@
       "title": "Como funcionam os creditos?",
       "toolUsage": {
         "title": "Uso de ferramentas",
-        "description": "Cada uso de uma ferramenta MCP consome 1 credito. Ferramentas complexas podem consumir mais creditos dependendo da sua intensidade."
+        "description": "Cada chamada a uma ferramenta MCP custa 1 crédito, e uma ferramenta mais pesada custa mais. O que um modelo lê e escreve é cobrado à parte, pelos seus tokens."
       },
       "dataStorage": {
         "title": "Armazenamento de dados",
@@ -4890,20 +5063,43 @@
     "faq": {
       "title": "Perguntas Frequentes",
       "exceedCredits": {
-        "question": "O que acontece se eu exceder meus creditos?",
-        "answer": "Voce pode fazer upgrade da sua assinatura, adicionar um pacote de creditos ao seu plano atual pelo controle deslizante ou comprar uma recarga unica Pay As You Go ($10 / $50 / $100). Os creditos PAYG sao conservados entre ciclos de renovacao e consumidos depois que os creditos da assinatura se esgotam."
+        "question": "O que acontece se eu ficar sem créditos?",
+        "answer": "Novas execuções e conversas ficam em espera até você recarregar, portanto um trabalho descontrolado nunca pode cobrar em silêncio. Pode aumentar o pacote de créditos do seu plano no controlo deslizante, mudar de plano, ou comprar uma recarga pontual Pay As You Go ($10 / $50 / $100). Os créditos PAYG permanecem entre ciclos de renovação e são consumidos depois dos do plano."
       },
       "changePlans": {
         "question": "Posso mudar de plano a qualquer momento?",
-        "answer": "Sim, voce pode fazer upgrade a qualquer momento. Para fazer downgrade, voce precisara aguardar ate o final do seu periodo de cobranca atual."
+        "answer": "As subidas de plano entram em vigor imediatamente e são calculadas proporcionalmente pelo prestador de pagamentos. Uma descida de plano, ou um pacote de créditos menor, fica agendada para o fim do período já pago, por isso mantém o que comprou até lá. Uma alteração agendada pode normalmente ser cancelada antes de se aplicar."
       },
       "payAsYouGo": {
-        "question": "Como funciona o plano Pay As You Go?",
-        "answer": "O Pay As You Go e uma recarga unica: escolha um nivel de $10 / $50 / $100 e seu saldo recebe 8.000 / 40.000 / 80.000 creditos (aprox. $1,25 por 1.000 creditos). Sem assinatura, os creditos sao conservados entre ciclos de renovacao e consumidos apenas depois que os creditos da assinatura se esgotam."
+        "question": "Como funciona o Pay As You Go?",
+        "answer": "O Pay As You Go é uma recarga pontual: escolha $10, $50 ou $100 e a sua carteira recebe 8.000, 40.000 ou 80.000 créditos. Sem necessidade de subscrição. Esses créditos permanecem entre ciclos de renovação e só são gastos quando os créditos do seu plano acabam."
       },
       "sharedStorage": {
-        "question": "O armazenamento e compartilhado entre usuarios?",
-        "answer": "Nao, cada conta tem seu proprio espaco de armazenamento. Para equipes, o armazenamento pode ser compartilhado entre membros dependendo do seu plano e necessidades."
+        "question": "O armazenamento é partilhado entre utilizadores?",
+        "answer": "Cada conta tem o seu próprio armazenamento. Os planos Team acrescentam um espaço comum: os ficheiros de um espaço de trabalho contam para a dotação da equipa e não para a quota de cada membro."
+      },
+      "conversationCost": {
+        "question": "Quantas conversas os meus créditos cobrem?",
+        "answer": "Depende do trabalho que pede, por isso ficam os dois extremos. Uma pergunta e a sua resposta, sem qualquer ferramenta, custa cerca de {simpleCredits} créditos. Trabalhar com um agente para construir um fluxo é o extremo pesado: ele procura no catálogo de ferramentas, lê as suas tabelas, cria e liga os nós, executa o fluxo e volta a ler os resultados, e em cada uma dessas chamadas todo o histórico é reenviado ao modelo. Medido em todas as conversas reais em que um agente chamou ferramentas, cerca de 5 turnos e 45 chamadas, uma custa cerca de {agentCredits} créditos, e uma construção que leve mais turnos custa proporcionalmente mais. Um único passo de classificação num fluxo em execução fica em torno de {classifyCredits} créditos. Os números são calculados num modelo de topo como o Claude Sonnet 5; os modelos mais leves custam várias vezes menos. A cobrança é pelos tokens que o modelo lê e escreve, nunca por mensagem.",
+        "examplesCaption": "O que compram os {credits} créditos incluídos em todos os planos pagos:",
+        "examples": {
+          "simpleChat": {
+            "count": "{count} conversas",
+            "detail": "Pergunta e resposta, sem qualquer ferramenta. Cerca de {credits} créditos cada."
+          },
+          "agentChat": {
+            "count": "{count} conversas de construção",
+            "detail": "Um agente que procura ferramentas, cria e liga nós e testa a execução consigo. Calculado sobre uma conversa típica com chamadas a ferramentas, cerca de 5 turnos e 45 chamadas; uma construção mais longa custa mais. Cerca de {credits} créditos cada."
+          },
+          "classifyStep": {
+            "count": "{count} passos de classificação",
+            "detail": "Uma única decisão de encaminhamento ou de triagem num fluxo em execução. Cerca de {credits} créditos cada."
+          }
+        }
+      },
+      "rollover": {
+        "question": "Os créditos não usados transitam para o mês seguinte?",
+        "answer": "Os créditos do plano são reiniciados em cada renovação: o pacote do mês existe para ser gasto nesse mês. As recargas Pay As You Go funcionam de outra forma: ficam na sua carteira entre renovações e só são usadas quando os créditos do mês acabam."
       }
     },
     "creditSlider": {
@@ -5325,6 +5521,10 @@
     "unauthorized": "Acesso Nao Autorizado",
     "mustBeLoggedIn": "Voce deve estar logado para acessar as configuracoes.",
     "signIn": "Entrar",
+    "agentDefaults": {
+      "title": "Padrões dos agentes e do chat",
+      "subtitle": "Opções aplicadas por padrão a cada conversa de agente e a cada novo chat geral deste espaço de trabalho."
+    },
     "bundles": {
       "title": "Pacotes de catálogo",
       "subtitle": "Distribua pacotes assinados dos catálogos de modelos e de APIs para as edições comunitárias.",
@@ -5497,7 +5697,8 @@
       "security": "Seguranca",
       "preferences": "Preferencias",
       "notifications": "Notificacoes",
-      "advanced": "Avancado"
+      "advanced": "Avancado",
+      "trophies": "Troféus"
     },
     "common": {
       "loading": "Carregando...",
@@ -5580,11 +5781,20 @@
       "creditLimitDescription": "Numero de creditos usaveis sem confirmacao",
       "chatDefaultsTitle": "Padrões do chat",
       "chatDefaultsDescription": "Opções padrão aplicadas às novas conversas deste espaço de trabalho.",
+      "chatDefaultsLink": "Abrir as configurações de agentes e chat",
       "savePreferences": "Salvar Preferencias",
       "workflowLayoutDirection": "Disposição do fluxo de trabalho",
       "workflowLayoutDirectionDescription": "Sentido de leitura do editor de fluxos: da esquerda para a direita ou de cima para baixo. Define onde ficam as ligações e os botões dos nós, e como a disposição automática organiza o grafo.",
       "workflowLayoutDirectionHorizontal": "Da esquerda para a direita",
-      "workflowLayoutDirectionVertical": "De cima para baixo"
+      "workflowLayoutDirectionVertical": "De cima para baixo",
+      "inspectorDock": "Inspetor de nó",
+      "inspectorDockDescription": "Onde a configuração de um nó abre: flutuante sobre a tela ou como aba do painel lateral, para não cobrir o gráfico.",
+      "inspectorDockCanvas": "Flutuante sobre a tela",
+      "inspectorDockPanel": "No painel lateral",
+      "inspectorOpenMode": "Um clique num nó abre",
+      "inspectorOpenModeDescription": "Quanto se abre ao clicar num nó durante a construção: apenas as suas definições, ou a vista completa com o que alimenta o nó e o que ele produziu. Abrir uma execução mostra sempre a vista completa.",
+      "inspectorOpenModeSimple": "Apenas as definições",
+      "inspectorOpenModeAdvanced": "Definições, entrada e saída"
     },
     "notifications": {
       "title": "Preferencias de Notificacao",
@@ -5928,7 +6138,9 @@
       "workflowFailedTitle": "Workflow falhou",
       "workflowFailedMessage": "A execução do workflow falhou. Verifique os passos com falha para mais detalhes.",
       "workflowTimeoutTitle": "Tempo limite do workflow excedido",
-      "workflowTimeoutMessage": "A execução do workflow excedeu o tempo máximo permitido."
+      "workflowTimeoutMessage": "A execução do workflow excedeu o tempo máximo permitido.",
+      "rerunRefusedTitle": "Recomeço recusado",
+      "rerunRefusedMessage": "A execução não conseguiu recomeçar dali. Pode ainda estar a decorrer, ou essa etapa não tem qualquer resultado para refazer. Se ainda estiver a correr, espere que estabilize e tente de novo."
     },
     "inspector": {
       "manualTriggerTitle": "Trigger Manual",
@@ -6190,6 +6402,46 @@
       "item": "Item",
       "noData": "No data",
       "noExecutionData": "Nenhum dado de execução",
+      "runData": {
+        "viewFile": "Ver ficheiro",
+        "downloadFile": "Descarregar ficheiro",
+        "copyValue": "Copiar valor",
+        "copyAll": "Copiar tudo",
+        "copied": "Copiado",
+        "viewSwitcherLabel": "Visualização dos dados",
+        "viewTree": "Árvore",
+        "viewJson": "JSON bruto",
+        "viewTable": "Tabela",
+        "tableUnavailable": "Estes dados não são uma lista de linhas, por isso não podem ser mostrados como tabela.",
+        "tableColumnsTruncated": "A mostrar as primeiras {shown} colunas, mais {hidden} estão ocultas.",
+        "jsonBadge": "JSON",
+        "expandJson": "Expandir este valor JSON",
+        "collapseJson": "Recolher este valor JSON",
+        "showMore": "Ver mais",
+        "showLess": "Ver menos",
+        "unresolvedBadge": "Não resolvido",
+        "unresolvedInvalidTemplate": "O motor não conseguiu interpretar esta expressão, por isso o valor ficou como estava.",
+        "unresolvedVariable": "Um modelo de variável chegou a este valor sem ser substituído.",
+        "unresolvedStringifiedObject": "Um objeto foi convertido em texto antes de chegar a este valor.",
+        "stateRunning": "Em execução",
+        "stateAwaiting": "À espera",
+        "stateRunningParams": "O nó está a executar. Estes são os valores com que foi lançado, antes de serem resolvidos.",
+        "stateRunningOutput": "O nó está a executar. A sua saída aparece aqui assim que terminar.",
+        "stateAwaitingParams": "O nó está em pausa num sinal. Estes são os valores com que foi lançado.",
+        "stateAwaitingOutput": "O nó está em pausa num sinal. A sua saída aparece aqui quando o sinal for resolvido.",
+        "signalWaitTimer": "Temporizador de espera",
+        "signalUserApproval": "Aprovação do utilizador",
+        "signalWebhookWait": "Retorno de webhook",
+        "signalInterface": "Ação de interface",
+        "signalAgentExecution": "Execução de agente",
+        "signalBrowserTakeover": "Controlo do navegador",
+        "signalExpiresAt": "expira {date}",
+        "noResolvedParams": "Sem parâmetros resolvidos",
+        "configuredParamsTitle": "Lançado com",
+        "mismatchTitle": "{count, plural, one {# parâmetro não reportado por esta execução} other {# parâmetros não reportados por esta execução}}",
+        "mismatchRenamed": "Reportado com outro nome: {runtimeKey}",
+        "mismatchNotReported": "Configurado no nó mas ausente do que a execução reportou."
+      },
       "moreActions": "Mais ações",
       "nodeOutputs": "Saídas do nó",
       "report": {
@@ -6836,7 +7088,9 @@
     "rerunConfirm": {
       "title": "Recomeçar desta etapa?",
       "message": "Esta execução é automática. Recomeçar aqui reexecuta esta etapa e depois deixa o resto do fluxo correr sozinho, o que pode chamar ferramentas pagas e enviar mensagens reais.",
-      "confirm": "Recomeçar"
+      "confirm": "Recomeçar",
+      "scopeEpoch": "Época {epoch}",
+      "scopeLatestEpoch": "Última época desta etapa"
     },
     "canvas": {
       "portSingleTargetHint": "Esta saída já está conectada. Uma porta vai para um único nó - adicione um nó Fork para executar vários em paralelo.",
@@ -6875,6 +7129,9 @@
       "backToHome": "Voltar ao início",
       "searchPlaceholder": "Pesquisar {context}...",
       "frequentlyUsed": "Usados com frequência",
+      "paletteCategories": "Categorias",
+      "paletteNodes": "Nós",
+      "paletteIntegrations": "Integrações",
       "mcp": "MCP",
       "noApiFound": "Nenhuma API encontrada",
       "noToolFound": "Nenhuma ferramenta encontrada",
@@ -7007,7 +7264,24 @@
       "close": "Fechar",
       "layoutDirection": "Disposição",
       "layoutHorizontal": "Da esquerda para a direita",
-      "layoutVertical": "De cima para baixo"
+      "layoutVertical": "De cima para baixo",
+      "inspectorDock": "Inspetor",
+      "inspectorDockCanvas": "Flutuante",
+      "inspectorDockPanel": "Painel lateral",
+      "inspectorOpenMode": "Um clique num nó abre",
+      "inspectorOpenModeSimple": "Apenas as definições",
+      "inspectorOpenModeAdvanced": "Definições, entrada e saída",
+      "paletteTooltip": {
+        "badgeTrigger": "Gatilho",
+        "badgeIntegration": "Integração",
+        "badgeCategory": "Categoria",
+        "badgeNode": "Nó",
+        "details": "Detalhes",
+        "requiresPlan": "Requer {plan}",
+        "hintClickAdd": "Clique para adicionar",
+        "hintClickBrowse": "Clique para explorar",
+        "hintDrag": "ou arraste para a tela"
+      }
     },
     "nodes": {
       "filePreview": {
@@ -7159,11 +7433,17 @@
       "generate": {
         "title": "Gerar",
         "description": "Gera um recurso a partir de um comando: imagem, vídeo, áudio, voz ou música. O modelo escolhido define o formato produzido, os parâmetros aceites e o custo de cada execução.",
+        "assetType": "Tipo de recurso",
+        "provider": "Fornecedor",
+        "credential": "Chave e faturamento",
         "model": "Modelo",
         "modelPlaceholder": "Selecionar um modelo",
         "modelsLoading": "A carregar modelos...",
         "modelHint": "Mudar de modelo remove os parâmetros que o novo modelo não aceita.",
         "noModels": "Não há modelos de geração disponíveis nesta instalação.",
+        "modelsUnavailable": "Não foi possível ler o catálogo de modelos. Isto não diz nada sobre se a geração funciona aqui: tente novamente daqui a pouco.",
+        "unknownModel": "Este nó utiliza o modelo «{model}», que esta instalação não oferece. Escolha outro modelo, caso contrário a execução será recusada.",
+        "parameters": "Parâmetros",
         "selectValue": "Selecionar um valor",
         "filePlaceholder": "ex. {{core:download.output.file}}",
         "limitRange": "Intervalo permitido: {min} a {max}",
@@ -7305,7 +7585,37 @@
         "opacityHint": "Entre {min} e {max}. Padrão: 1.",
         "startSeconds": "Início (segundos)",
         "endSeconds": "Fim (segundos)",
-        "overlayTimingHint": "Deixe início e fim vazios para mostrar a sobreposição durante todo o vídeo."
+        "overlayTimingHint": "Deixe início e fim vazios para mostrar a sobreposição durante todo o vídeo.",
+        "opSubtitles": "Gravar legendas",
+        "opSubtitlesDesc": "Grava legendas sincronizadas na imagem de um vídeo",
+        "subtitlesVideoHint": "Legende por último: as legendas passam a fazer parte da imagem e não podem mais ser removidas.",
+        "cues": "Legendas",
+        "cue": "Legenda {index}",
+        "cueText": "Texto",
+        "cueTextPlaceholder": "A linha exibida na tela",
+        "cueStartSeconds": "Aparece aos (segundos)",
+        "cueEndSeconds": "Desaparece aos (segundos)",
+        "addCue": "Adicionar legenda",
+        "removeCue": "Remover legenda",
+        "moveCueUp": "Mover legenda para cima",
+        "moveCueDown": "Mover legenda para baixo",
+        "cuesHint": "Até {max} legendas, em ordem e sem sobreposição. Ajuste-as ao áudio que está de fato no vídeo.",
+        "cuesExpressionHint": "Esta faixa de legendas é calculada por um nó anterior, portanto não pode ser editada aqui.",
+        "subtitleStyle": "Estilo",
+        "subtitleStyleTiktok": "Formato curto",
+        "subtitleStyleTiktokDesc": "Grande, em negrito, maiúsculas, acima do centro",
+        "subtitleStyleClassic": "Clássico",
+        "subtitleStyleClassicDesc": "Menor, com minúsculas, perto da base",
+        "fontFamily": "Fonte",
+        "fontFamilyPlaceholder": "Fonte padrão",
+        "fontFamilyHint": "Deixe vazio a menos que precise de uma fonte específica: uma fonte não encontrada faz a execução falhar em vez de ser substituída.",
+        "fontSizePercent": "Tamanho (% da altura)",
+        "fontSizePercentHint": "Entre {min} e {max}. Vazio mantém o tamanho do estilo.",
+        "positionPercent": "Posição (% a partir do topo)",
+        "positionPercentHint": "Entre {min} e {max}. Vazio mantém a posição do estilo.",
+        "textColor": "Cor do texto",
+        "outlineColor": "Cor do contorno",
+        "outlineColorHint": "O contorno é o que mantém as legendas legíveis sobre uma cena clara."
       },
       "fork": {
         "outputBranches": "Ramos de saída",
@@ -7672,7 +7982,8 @@
       "paste": "Colar",
       "selectAll": "Selecionar tudo",
       "autoLayout": "Layout automático",
-      "fitView": "Ajustar visualização"
+      "fitView": "Ajustar visualização",
+      "ctrlKeyName": "Ctrl"
     },
     "credentialSelector": {
       "accountLabel": "Conta usada por esta etapa",
@@ -7867,7 +8178,9 @@
       "tabFleet": "Frota",
       "tabMetrics": "Métricas",
       "shared": "Compartilhado",
-      "tabBoard": "Quadro"
+      "tabBoard": "Quadro",
+      "tabMemory": "Memória",
+      "tabSettings": "Configurações"
     },
     "skill": {
       "title": "Habilidades",
@@ -8215,8 +8528,13 @@
     "role": "Qual e sua funcao?",
     "customRolePlaceholder": "Digite sua funcao...",
     "companySize": "Tamanho da Empresa",
-    "useCasesLabel": "Para que voce usara o LiveContext?",
-    "experienceLevel": "Nivel de Experiencia",
+    "primaryGoalLabel": "Seu objetivo principal",
+    "primaryGoalRequired": "Escolha um objetivo principal para continuar",
+    "toolsUsedLabel": "Quais ferramentas você já usa?",
+    "toolsUsedHint": "Opcional, selecione todas as que se aplicam",
+    "previousToolLabel": "Com o que você automatiza hoje?",
+    "referralSourceLabel": "Como você conheceu o LiveContext?",
+    "step3Required": "Responda às duas perguntas para concluir",
     "loginRequired": "Login Necessario",
     "loginRequiredDescription": "Por favor, faca login para completar a configuracao do seu perfil",
     "signIn": "Entrar",
@@ -8228,12 +8546,12 @@
       "description": "Conte-nos um pouco sobre voce para personalizar sua experiencia"
     },
     "step2": {
-      "title": "O que te interessa?",
-      "description": "Selecione os topicos que mais te interessam"
+      "title": "O que você quer automatizar primeiro?",
+      "description": "Escolha o que mais importa, isso orienta suas primeiras sugestões"
     },
     "step3": {
-      "title": "Seus objetivos",
-      "description": "Ajude-nos a entender como podemos te ajudar melhor"
+      "title": "Quase lá",
+      "description": "Duas últimas perguntas e você está dentro"
     },
     "roles": {
       "sales": "Vendas",
@@ -8251,62 +8569,51 @@
       "freelancer": "Freelancer",
       "other": "Outro"
     },
-    "interests": {
-      "automation": "Automacao",
-      "aiMl": "IA e Machine Learning",
-      "dataAnalytics": "Dados e Analytics",
-      "integrations": "Integracoes",
-      "productivity": "Ferramentas de Produtividade",
-      "businessIntelligence": "Business Intelligence",
-      "customerExperience": "Experiencia do Cliente",
-      "salesCrm": "Vendas e CRM",
-      "marketingAutomation": "Automacao de Marketing",
-      "ecommerceTools": "Ferramentas de E-commerce",
-      "other": "Outro"
+    "primaryGoals": {
+      "emailFollowUps": "Follow-ups e respostas por e-mail",
+      "contentPublishing": "Criação e publicação de conteúdo",
+      "leadGeneration": "Geração de leads e CRM",
+      "customerSupport": "Suporte ao cliente",
+      "reporting": "Relatórios e painéis",
+      "dataSync": "Sincronizar dados entre ferramentas",
+      "monitoringAlerts": "Monitoramento e alertas",
+      "aiAssistant": "Um assistente de IA para minha equipe",
+      "other": "Outra coisa"
     },
-    "customInterestPlaceholder": "Digite seu interesse...",
-    "useCases": {
-      "workflowAutomation": "Automacao de Workflows",
-      "chatbotsAssistants": "Chatbots e Assistentes",
-      "dataIntegration": "Integracao de Dados",
-      "contentGeneration": "Geracao de Conteudo",
-      "leadGeneration": "Geracao de Leads",
-      "customerSupport": "Suporte ao Cliente",
-      "reportingDashboards": "Relatorios e Dashboards",
-      "ecommerceAutomation": "Automacao de E-commerce",
-      "teamCollaboration": "Colaboracao em Equipe",
-      "monitoringAlerts": "Monitoramento e Alertas",
-      "other": "Outro"
+    "tools": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "googleSheets": "Google Sheets",
+      "slack": "Slack",
+      "notion": "Notion",
+      "hubspot": "HubSpot",
+      "salesforce": "Salesforce",
+      "shopify": "Shopify",
+      "stripe": "Stripe",
+      "github": "GitHub",
+      "discord": "Discord",
+      "telegram": "Telegram",
+      "linkedin": "LinkedIn",
+      "airtable": "Airtable",
+      "other": "Outra"
     },
-    "customUseCasePlaceholder": "Digite seu caso de uso...",
-    "experience": {
-      "beginner": "Iniciante",
-      "beginnerDesc": "Estou comecando",
-      "intermediate": "Intermediario",
-      "intermediateDesc": "Alguma experiencia",
-      "advanced": "Especialista",
-      "advancedDesc": "Usuario avancado"
+    "previousTools": {
+      "none": "Nada ainda",
+      "zapierMake": "Zapier ou Make",
+      "n8n": "n8n",
+      "customCode": "Código ou scripts próprios",
+      "otherPlatform": "Outra plataforma"
+    },
+    "referralSources": {
+      "search": "Mecanismo de busca",
+      "social": "Redes sociais",
+      "wordOfMouth": "Um colega ou amigo",
+      "github": "GitHub",
+      "article": "Um artigo ou newsletter",
+      "aiAssistant": "Um assistente de IA recomendou",
+      "other": "Outro"
     },
     "ce": {
-      "experience": {
-        "firstInstall": "Primeira instalação",
-        "firstInstallDesc": "Configurando",
-        "operator": "Operador",
-        "operatorDesc": "Executando serviços",
-        "powerUser": "Usuário avançado",
-        "powerUserDesc": "Estendendo o CE"
-      },
-      "experienceLevel": "Experiência com auto-hospedagem",
-      "interests": {
-        "governance": "Governança",
-        "integrations": "Integrações",
-        "localAutomation": "Automação local",
-        "localMarketplace": "Marketplace local",
-        "other": "Outro",
-        "privateData": "Dados privados",
-        "selfHostedAgents": "Agentes auto-hospedados",
-        "teamWorkflows": "Fluxos de trabalho de equipe"
-      },
       "role": "Seu papel no CE",
       "roles": {
         "community": "Líder da comunidade",
@@ -8322,14 +8629,15 @@
         "title": "Configure seu espaço de trabalho CE"
       },
       "step2": {
-        "description": "Selecione os fluxos de trabalho locais e integrações que sua comunidade manterá",
-        "title": "Em que esta instância deve focar?"
+        "description": "Escolha o trabalho que este espaço auto-hospedado deve assumir primeiro",
+        "title": "O que esta instância deve automatizar primeiro?"
       },
       "step3": {
-        "description": "Escolha o trabalho que este espaço de trabalho auto-hospedado deve otimizar primeiro",
-        "title": "Objetivos operacionais do CE"
+        "description": "Duas últimas perguntas e seu espaço estará pronto",
+        "title": "Quase lá"
       },
       "teamSize": "Tamanho da equipe local",
+      "primaryGoalLabel": "O objetivo principal desta instância",
       "teamSizes": {
         "community": "Comunidade",
         "department": "Departamento",
@@ -8346,8 +8654,28 @@
         "privateAssistants": "Assistentes privados",
         "teamWorkspaces": "Espaços de trabalho de equipe",
         "toolOrchestration": "Orquestração de ferramentas"
+      }
+    },
+    "firstBuild": {
+      "goalPrompts": {
+        "emailFollowUps": "Crie um fluxo de trabalho que percorra minha caixa de entrada todas as manhãs de dias úteis, encontre os e-mails que ainda esperam uma resposta minha e me envie um único resumo curto em ordem de urgência.",
+        "contentPublishing": "Crie um fluxo de trabalho que transforme uma ideia em uma semana de conteúdo: redija as publicações, deixe que eu aprove e depois publique conforme um calendário.",
+        "leadGeneration": "Crie um fluxo de trabalho que capture cada novo contato, enriqueça com os dados da empresa, adicione ao meu CRM e envie uma primeira resposta personalizada em menos de um minuto.",
+        "customerSupport": "Crie um agente que leia os chamados de suporte recebidos, responda os mais comuns a partir da nossa documentação e encaminhe os demais para mim com uma sugestão de resposta.",
+        "reporting": "Crie um fluxo de trabalho que reúna meus números principais toda segunda-feira de manhã, transforme em um painel que eu possa abrir e me envie por e-mail o que mudou desde a semana passada.",
+        "dataSync": "Crie um fluxo de trabalho que mantenha minhas ferramentas sincronizadas: quando um registro mudar de um lado, atualize o outro e guarde um histórico de tudo o que foi alterado.",
+        "monitoringAlerts": "Crie um fluxo de trabalho que verifique regularmente o que me interessa e só me avise quando algo realmente precisar da minha atenção.",
+        "aiAssistant": "Crie um agente com quem minha equipe possa conversar, que conheça nossos documentos e saiba agir nas nossas ferramentas em vez de apenas responder.",
+        "internalAutomation": "Crie um fluxo de trabalho que cuide de ponta a ponta de uma das nossas tarefas internas recorrentes e me mostre cada execução para que eu possa confiar nele.",
+        "privateAssistants": "Crie um assistente que rode nesta instalação, responda a partir dos nossos próprios documentos e não os envie para nenhum outro lugar.",
+        "dataPipelines": "Crie um pipeline que colete dados regularmente, limpe, salve em uma tabela e me avise quando uma execução falhar.",
+        "toolOrchestration": "Crie um fluxo de trabalho que encadeie várias das nossas ferramentas em uma só operação, com uma etapa que eu aprove antes da última.",
+        "teamWorkspaces": "Crie um espaço de trabalho compartilhado para minha equipe: uma tabela em que todos escrevemos, uma página para consultá-la e um fluxo de trabalho que a mantenha atualizada.",
+        "marketplacePublishing": "Crie uma pequena aplicação que eu possa publicar, com uma página para usá-la e um fluxo de trabalho por trás.",
+        "evaluationSandbox": "Crie um pequeno exemplo de ponta a ponta que mostre o que esta plataforma consegue fazer: um gatilho, algumas etapas e uma página que mostre o resultado."
       },
-      "useCasesLabel": "O que esta instância CE executará?"
+      "toolsClause": "Trabalho principalmente com {tools}.",
+      "promptSeparator": " "
     }
   },
   "webhookSettings": {
@@ -8625,6 +8953,19 @@
     "manageSharedLinks": "Gerenciar links compartilhados"
   },
   "billing": {
+    "balance": {
+      "title": "Saldo",
+      "upgrade": "Fazer upgrade",
+      "total": "Concessão mensal",
+      "remaining": "Restante",
+      "remainingAmount": "{amount} créditos restantes",
+      "triggerLabel": "{amount}, {detail}",
+      "creditsAmount": "{amount} créditos",
+      "overAllowance": "+{percent}% acima do seu plano",
+      "overAllowanceTiny": "Ligeiramente acima do seu plano",
+      "usedPercent": "{percent}% do seu plano utilizado",
+      "viewUsage": "Ver consumo"
+    },
     "cancel": {
       "title": "Pagamento cancelado",
       "subtitle": "O seu pagamento não foi processado",
@@ -8695,6 +9036,9 @@
       "title": "Os seus créditos não podem pagar este modelo",
       "explanation": "Os seus créditos mensais cobrem a execução dos nós de fluxo, mas não o trabalho de um modelo (chat, agentes, geração). Esse é pago com créditos pré-pagos, e já não tem nenhum.",
       "cta": "Ver planos ou recarregar"
+    },
+    "planLocked": {
+      "nodeNotice": "Este nó está disponível a partir do plano {plan}. Vai falhar na execução do fluxo até fazer upgrade."
     }
   },
   "localMcp": {
@@ -9423,7 +9767,15 @@
       "top": "O mais capaz, mais lento e mais caro"
     },
     "tokens": "{count} tokens",
-    "tpmLabel": "Tokens / min"
+    "tpmLabel": "Tokens / min",
+    "creditEstimateShort": "~{credits} créditos",
+    "creditEstimateTooltip": {
+      "agentConversation": "Cerca de {credits} créditos para uma conversa típica em que este modelo trabalha com ferramentas: cerca de 5 turnos e 45 chamadas. Uma estimativa a partir do uso real, não um limite.",
+      "chatConversation": "Cerca de {credits} créditos para uma troca típica sem chamadas a ferramentas. Uma estimativa a partir do uso real, não um limite.",
+      "guardrailCheck": "Cerca de {credits} créditos por verificação de uma mensagem típica. Uma estimativa a partir do uso real, não um limite.",
+      "classifyStep": "Cerca de {credits} créditos por classificação de uma entrada típica. Uma estimativa a partir do uso real, não um limite."
+    },
+    "creditEstimateLabel": "Custo estimado"
   },
   "publicationReview": {
     "adminOnlyBadge": "Apenas administradores",
@@ -9761,6 +10113,26 @@
     "runTitle": "Executar esta ação?",
     "toolLabel": "Ferramenta"
   },
+  "askUser": {
+    "title": "O assistente tem uma pergunta",
+    "subtitle": "Escolha uma resposta para que ele possa continuar",
+    "stepOf": "Pergunta {current} de {total}",
+    "next": "Seguinte",
+    "back": "Voltar",
+    "waitingForYou": "O assistente está à espera da sua resposta para continuar.",
+    "answerResumes": "A vez dele terminou. A sua resposta irá retomá-lo.",
+    "selectOne": "Escolha uma opção",
+    "selectMultiple": "Escolha uma ou mais opções",
+    "otherOption": "Outro",
+    "otherPlaceholder": "Escreva a sua própria resposta",
+    "submit": "Enviar resposta",
+    "submitting": "A enviar",
+    "skip": "Ignorar",
+    "submitFailed": "Não foi possível enviar a sua resposta. Tente novamente.",
+    "submitFailedTitle": "Resposta não enviada",
+    "resumeIntro": "As minhas respostas:",
+    "noAnswer": "Ainda sem resposta"
+  },
   "board": {
     "toggle": {
       "task": "Tarefas",
@@ -9934,6 +10306,16 @@
     "copy": "Copiar",
     "copied": "Copiado",
     "anonymousCheckNotice": "A verificação diária de atualizações envia esta versão e um identificador de instalação aleatório, para que as instalações auto-hospedadas ativas possam ser contadas. O registo guardado não contém qualquer endereço IP, nome de host ou conta. Defina CE_VERSIONCHECK_SENDINSTALLID=false para parar de enviar o identificador, ou CE_VERSIONCHECK_ENABLED=false para desativar a verificação."
+  },
+  "changelog": {
+    "whatsNew": "Novidades",
+    "dismiss": "Entendi",
+    "learnMore": "Ver todas as atualizações",
+    "latest": {
+      "title": "Seus agentes não recomeçam do zero",
+      "body": "Os agentes passam a guardar o que aprendem: uma correção, uma preferência, uma regra da casa. Cada fato acompanha todas as execuções de todos os fluxos deste espaço de trabalho, então um agente agendado aplica na segunda o que você disse na sexta. A aba Memória mostra o que ficou retido: corrija, fixe o que importa e apague o resto.",
+      "mediaAlt": "A aba Memória listando o que os agentes de um espaço de trabalho retiveram, com tipo, escopo e fixação em cada entrada"
+    }
   },
   "optionalComponents": {
     "title": "Componentes opcionais",
@@ -10435,5 +10817,567 @@
     "renameFailed": "Não foi possível renomear a pasta.",
     "deleteFailed": "Não foi possível excluir a pasta.",
     "moveFailed": "Não foi possível concluir a movimentação."
+  },
+  "agenda": {
+    "nav": {
+      "previous": "Período anterior",
+      "next": "Período seguinte",
+      "today": "Hoje"
+    },
+    "view": {
+      "month": "Mês",
+      "week": "Semana",
+      "day": "Dia",
+      "list": "Lista"
+    },
+    "weekRange": "De {from} a {to}",
+    "searchPlaceholder": "Pesquisar",
+    "clock": {
+      "tooltip": "Hora atual em {zone}"
+    },
+    "datePicker": {
+      "open": "Ir para uma data",
+      "month": "Mês",
+      "year": "Ano",
+      "previousMonth": "Mês anterior",
+      "nextMonth": "Mês seguinte",
+      "openWith": "{period}. Ir para uma data"
+    },
+    "create": {
+      "title": "Novo fluxo agendado",
+      "description": "Proposto a partir do horário escolhido: {slot}.",
+      "slotWithTime": "{date} às {time}",
+      "nameLabel": "Nome",
+      "namePlaceholder": "Relatório semanal de receita",
+      "confirm": "Criar e abrir",
+      "createdTitle": "Fluxo criado",
+      "createdMessage": "\"{name}\" está pronto para ser construído.",
+      "notLiveYet": "O agendamento é guardado com o fluxo. Só dispara depois de o construir e defini-lo como produção.",
+      "slotActionAt": "Agendar algo em {date} às {time}",
+      "slotActionOn": "Agendar algo em {date}",
+      "monthlyDayGap": "Um agendamento no dia {day} não corre nos meses mais curtos."
+    },
+    "moreCount": "+{n} outros",
+    "showLess": "Ver menos",
+    "movedBadge": "Movido para fora do agendamento",
+    "resource": {
+      "workflow": "Workflows",
+      "application": "Aplicações",
+      "agent": "Agentes"
+    },
+    "kind": {
+      "schedule": "Agendamento",
+      "webhook": "Webhook",
+      "manual": "Manual",
+      "chat": "Chat",
+      "form": "Formulário",
+      "datasource": "Tabela",
+      "workflow": "Workflow",
+      "error": "Erro"
+    },
+    "status": {
+      "planned": "Agendado",
+      "running": "Em execução",
+      "completed": "Concluído",
+      "failed": "Falhou",
+      "fired": "Acionado",
+      "budgetBlocked": "Não vai executar: limite de gasto atingido"
+    },
+    "filters": {
+      "resourceTypes": "Tipos de recurso",
+      "view": "Vista",
+      "settings": "Definições de exibição",
+      "timezone": "Fuso horário",
+      "weekStart": "A semana começa em",
+      "monday": "Segunda-feira",
+      "sunday": "Domingo",
+      "hourRange": "Horas exibidas",
+      "showWeekends": "Mostrar fins de semana",
+      "showPast": "Mostrar execuções passadas",
+      "showPastHint": "Mostra o que realmente foi executado nos dias passados.",
+      "showPaused": "Mostrar agendamentos em pausa",
+      "compact": "Linhas compactas",
+      "reset": "Repor a exibição"
+    },
+    "menu": {
+      "runNow": "Executar agora",
+      "runNowHint": "A execução agendada acontece na mesma.",
+      "move": "Mover...",
+      "pause": "Pausar o agendamento",
+      "resume": "Retomar o agendamento",
+      "open": "Abrir o recurso",
+      "openRun": "Abrir esta execução"
+    },
+    "move": {
+      "title": "Mover {name}",
+      "description": "Nova data: {date}",
+      "timeLabel": "Hora",
+      "scopeNext": "Apenas esta ocorrência",
+      "scopeNextHint": "As execuções seguintes voltam ao horário habitual.",
+      "scopeAll": "Todas as ocorrências",
+      "scopeAllHint": "O próprio agendamento passa para esta hora.",
+      "scopeAllUnavailable": "Indisponível: {cron} não tem uma hora única para mover.",
+      "pastWarning": "Esta hora já passou, a execução começará na próxima verificação.",
+      "confirm": "Mover",
+      "scopeNextUnavailable": "Só a próxima execução pode ser movida sozinha; esta está mais à frente."
+    },
+    "common": {
+      "cancel": "Cancelar",
+      "working": "A processar..."
+    },
+    "truncated": {
+      "schedules": "{n, plural, one {# agendamento dispara} other {# agendamentos disparam}} com demasiada frequência para serem mostrados por inteiro aqui. Mude para a vista Dia.",
+      "past": "Algumas execuções mais antigas deste período não são mostradas."
+    },
+    "empty": {
+      "title": "Nada agendado aqui",
+      "description": "Os agendamentos dos seus workflows, aplicações e agentes aparecem neste calendário.",
+      "allFilteredTitle": "Nenhum tipo de recurso selecionado",
+      "allFilteredDescription": "Volte a ativar um tipo de recurso para ver o que está agendado.",
+      "searchTitle": "Sem resultados",
+      "searchDescription": "Nenhum recurso agendado corresponde à sua pesquisa neste período.",
+      "filteredTitle": "Nada corresponde aos seus filtros",
+      "filteredDescription": "As suas definições de exibição estão a ocultar tudo neste período."
+    },
+    "errors": {
+      "loadTitle": "Não foi possível carregar a agenda",
+      "loadMessage": "Tente novamente.",
+      "patternNotShiftable": "Este agendamento não tem uma hora única, por isso não pode ser movido por inteiro. Mova apenas esta ocorrência.",
+      "weekdaySetNotMatched": "Este agendamento corre em dias fixos e a data escolhida não é um deles. Mova apenas esta ocorrência.",
+      "dayOfMonthUnsafe": "Um agendamento mensal não pode cair depois do dia 28, porque alguns meses não têm esse dia.",
+      "notArmed": "Este agendamento está em pausa.",
+      "executionRefused": "Não foi possível iniciar a execução.",
+      "notFound": "Este agendamento já não existe.",
+      "generic": "Algo correu mal.",
+      "notTheNextOccurrence": "Só a próxima execução pode ser movida sozinha. Mover uma posterior cancelaria todas as anteriores. Use \"Todas as ocorrências\", ou mova a próxima.",
+      "viewerRole": "O seu papel neste espaço não permite alterar agendamentos.",
+      "scheduleRejected": "Não foi possível alterar o agendamento. Pode ter sido arquivado."
+    },
+    "toasts": {
+      "movedTitle": "Movido",
+      "movedAll": "Todas as execuções futuras usam a nova hora.",
+      "movedNext": "A próxima execução foi movida. As seguintes ficam iguais.",
+      "ranTitle": "Iniciado",
+      "ranMessage": "A execução agendada continua a acontecer como previsto.",
+      "runFailedTitle": "Não foi possível executar",
+      "pausedTitle": "Em pausa",
+      "pausedMessage": "Não vai disparar até o retomar.",
+      "resumedTitle": "Retomado",
+      "resumedMessage": "Está novamente ativo.",
+      "toggleFailedTitle": "Não foi possível alterar o agendamento"
+    },
+    "hiddenOnWeekends": "{n, plural, one {# execução cai} other {# execuções caem}} num fim de semana, que está oculto. Mostrar fins de semana."
+  },
+  "badges": {
+    "title": "Troféus",
+    "subtitle": "Os emblemas desbloqueiam-se sozinhos à medida que cria, executa e partilha no LiveContext.",
+    "summary": "{unlocked} de {total} desbloqueados",
+    "recent": "Desbloqueados recentemente",
+    "nextUp": "Os mais próximos",
+    "locked": "Bloqueado",
+    "unlockedOn": "Desbloqueado a {date}",
+    "progress": "{value} / {threshold}",
+    "loadError": "Não foi possível carregar os troféus.",
+    "publicHeading": "Troféus",
+    "publicEmpty": "Ainda não há troféus.",
+    "showAll": "Mostrar tudo",
+    "showLess": "Mostrar menos",
+    "detail": {
+      "requirementLabel": "Como conquistar",
+      "remaining": "faltam {count}",
+      "ladder": "Esta família"
+    },
+    "family": {
+      "FOUNDER": "Origem",
+      "TENURE": "Lealdade",
+      "BUILDER": "Construtor",
+      "APP_MAKER": "Criador de apps",
+      "SHIPPER": "Colocação em produção",
+      "OPERATOR": "Operações",
+      "RELIABILITY": "Confiabilidade",
+      "CONSISTENCY": "Constância",
+      "NIGHT_OWL": "Turno da noite",
+      "PUBLISHER": "Publicação",
+      "SHARER": "Partilha",
+      "POPULARITY": "Alcance"
+    },
+    "tier": {
+      "BRONZE": "Bronze",
+      "SILVER": "Prata",
+      "GOLD": "Ouro",
+      "PLATINUM": "Platina",
+      "DIAMOND": "Diamante"
+    },
+    "requirement": {
+      "MEMBER_DAYS": "Ser membro durante {count} dias",
+      "WORKFLOWS_CREATED": "Criar {count} fluxos de trabalho",
+      "APPLICATIONS_CREATED": "Criar {count} aplicações",
+      "RUNS_LAUNCHED": "Lançar {count} execuções",
+      "RUNS_COMPLETED": "Concluir {count} execuções com sucesso",
+      "ACTIVE_DAYS": "Executar algo em {count} dias diferentes",
+      "NIGHT_LAUNCHES": "Lançar {count} execuções entre a meia-noite e as 5h UTC",
+      "WORKFLOWS_PINNED": "Fixar {count} fluxos em produção",
+      "PUBLICATIONS_PUBLISHED": "Publicar {count} itens no marketplace",
+      "PUBLICATIONS_PUBLIC": "Tornar {count} publicações públicas",
+      "PUBLICATION_USES": "Conseguir {count} instalações das suas publicações",
+      "DAYS_UNTIL_JOIN_CUTOFF": "Juntar-se cedo ao LiveContext"
+    },
+    "item": {
+      "founder_2026": {
+        "name": "Membro fundador",
+        "requirement": "Registar-se antes do fim de 2026"
+      },
+      "tenure_30": {
+        "name": "Primeiro mês"
+      },
+      "tenure_100": {
+        "name": "Cem dias"
+      },
+      "tenure_730": {
+        "name": "Dois anos aqui"
+      },
+      "tenure_1095": {
+        "name": "Três anos aqui"
+      },
+      "tenure_1825": {
+        "name": "Cinco anos aqui"
+      },
+      "builder_1": {
+        "name": "Primeira criação"
+      },
+      "builder_5": {
+        "name": "Inventor"
+      },
+      "builder_10": {
+        "name": "Ferreiro de fluxos"
+      },
+      "builder_50": {
+        "name": "Arquiteto da automação"
+      },
+      "builder_100": {
+        "name": "Mestre construtor"
+      },
+      "builder_300": {
+        "name": "Lenda dos fluxos"
+      },
+      "appmaker_1": {
+        "name": "Artesão de apps"
+      },
+      "appmaker_3": {
+        "name": "Estúdio de apps"
+      },
+      "appmaker_25": {
+        "name": "Fábrica de apps"
+      },
+      "appmaker_60": {
+        "name": "Império de apps"
+      },
+      "shipper_1": {
+        "name": "Colocado em produção"
+      },
+      "shipper_5": {
+        "name": "Em produção"
+      },
+      "shipper_50": {
+        "name": "Linha de produção"
+      },
+      "operator_1": {
+        "name": "Primeiro lançamento"
+      },
+      "operator_10": {
+        "name": "A aquecer"
+      },
+      "operator_100": {
+        "name": "Operador"
+      },
+      "operator_5000": {
+        "name": "Controlador de voo"
+      },
+      "operator_50000": {
+        "name": "Controlo de missão"
+      },
+      "operator_1000000": {
+        "name": "Comando orbital"
+      },
+      "reliability_25": {
+        "name": "Luz verde"
+      },
+      "reliability_250": {
+        "name": "Mão firme"
+      },
+      "reliability_10000": {
+        "name": "Como um relógio"
+      },
+      "reliability_50000": {
+        "name": "Motor impecável"
+      },
+      "consistency_3": {
+        "name": "A ganhar ritmo"
+      },
+      "consistency_10": {
+        "name": "Habitual"
+      },
+      "consistency_90": {
+        "name": "Comprometido"
+      },
+      "consistency_250": {
+        "name": "Incansável"
+      },
+      "consistency_750": {
+        "name": "Sempre presente"
+      },
+      "nightowl_1": {
+        "name": "Turno da noite"
+      },
+      "nightowl_25": {
+        "name": "Ave noturna"
+      },
+      "nightowl_500": {
+        "name": "Motor noturno"
+      },
+      "publisher_1": {
+        "name": "Primeira publicação"
+      },
+      "publisher_3": {
+        "name": "Editor"
+      },
+      "publisher_25": {
+        "name": "Editor prolífico"
+      },
+      "publisher_60": {
+        "name": "Casa editorial"
+      },
+      "sharer_1": {
+        "name": "Partilhado com o mundo"
+      },
+      "sharer_5": {
+        "name": "Mão aberta"
+      },
+      "sharer_40": {
+        "name": "Pilar da comunidade"
+      },
+      "popularity_1": {
+        "name": "Primeira instalação"
+      },
+      "popularity_10": {
+        "name": "Boca a boca"
+      },
+      "popularity_500": {
+        "name": "Favorito do público"
+      },
+      "popularity_5000": {
+        "name": "Viral"
+      },
+      "popularity_50000": {
+        "name": "Nome conhecido por todos"
+      }
+    }
+  },
+  "generation": {
+    "formats": {
+      "image": "Imagem",
+      "video": "Vídeo",
+      "audio": "Som",
+      "voice": "Voz",
+      "music": "Música"
+    },
+    "params": {
+      "negative_prompt": "O que evitar",
+      "voice": "Voz",
+      "language": "Idioma",
+      "style": "Estilo",
+      "aspect_ratio": "Proporção",
+      "resolution": "Resolução",
+      "quality": "Qualidade",
+      "duration_seconds": "Duração (segundos)",
+      "n": "Quantos",
+      "seed": "Semente",
+      "input_image": "Imagem de referência",
+      "input_audio": "Áudio de referência",
+      "input_video": "Vídeo de referência"
+    },
+    "price": {
+      "perUnit": "{rate} créditos por {unit}",
+      "plusBase": "mais {base} de partida",
+      "flat": "{credits} créditos",
+      "min": "mínimo {credits}",
+      "max": "limitado a {credits}",
+      "total": "{credits} créditos por este pedido",
+      "unpriced": "Não é vendido com a chave da plataforma"
+    },
+    "fields": {
+      "providerPlaceholder": "Escolha um fornecedor",
+      "optionsLoading": "A carregar valores...",
+      "optionsTruncated": "A mostrar os primeiros valores de {count}. Escreva um valor se o que procura não aparecer.",
+      "optionsEmpty": "O fornecedor não devolveu valores para este campo. Escreva um se o souber."
+    },
+    "modelCount": "{count} modelos",
+    "empty": "Ainda não há nenhum modelo de geração disponível.",
+    "billedOn": "Faturado sobre {quantity} {unit}",
+    "assetRoles": {
+      "source": "Imagem de origem",
+      "first_frame": "Primeira imagem",
+      "reference": "Imagem de referência",
+      "mask": "Máscara"
+    }
+  },
+  "studio": {
+    "composer": {
+      "placeholder": "Descreva o que quer criar com {model}",
+      "placeholderNoModel": "Escolha um modelo para começar a criar",
+      "send": "Criar",
+      "missingRequired": "Preencha primeiro as definições assinaladas",
+      "addFile": "Adicionar um arquivo",
+      "allSlotsFull": "Este modelo não aceita mais arquivos",
+      "uploading": "A enviar",
+      "uploadFailed": "Falha no envio",
+      "retryUpload": "Tentar novamente com este arquivo",
+      "removeFile": "Remover este arquivo",
+      "parameters": "Parâmetros"
+    },
+    "modelPicker": {
+      "change": "Mudar de modelo",
+      "none": "Escolher um modelo",
+      "empty": "Ainda não há nenhum modelo de geração disponível.",
+      "back": "Voltar",
+      "stepKind": "O que criar",
+      "stepProvider": "Fornecedor"
+    },
+    "params": {
+      "required": "{label} é obrigatório",
+      "loadingOptions": "A consultar o fornecedor",
+      "optionsUnavailable": "Não foi possível ler os valores disponíveis. Pode escrever um.",
+      "optionsTruncated": "A mostrar uma amostra. Pode escrever um valor que não esteja na lista.",
+      "freeTextPlaceholder": "Escreva um valor",
+      "clear": "Limpar"
+    },
+    "untitled": "Criação sem título",
+    "thread": {
+      "loading": "A carregar este tópico de estúdio"
+    },
+    "welcome": {
+      "title1": "Crie algo grandioso",
+      "title2": "O que vamos criar hoje?",
+      "title3": "Descreva e será feito.",
+      "title4": "Um clipe, uma imagem, uma voz. Você escolhe.",
+      "title5": "O que gostaria de ver?"
+    },
+    "turn": {
+      "noPrompt": "Sem instrução, esta rodada rodou com os seus arquivos e configurações.",
+      "running": "A criar. O vídeo pode demorar alguns minutos.",
+      "noAnswer": "Nenhuma resposta voltou para este. Pode ter terminado e sido cobrado: verifique os seus arquivos antes de enviar de novo.",
+      "failed": "Isto não produziu nada.",
+      "savedNoPreview": "Terminou, mas não voltou nada que esta página consiga mostrar. Se um arquivo foi produzido, ele está nos seus arquivos.",
+      "reuse": "Reutilizar",
+      "openInFiles": "Ver em Arquivos",
+      "chargedNoAsset": "Esta geração foi executada e cobrada, mas o ficheiro não pôde ser guardado. Use a ligação abaixo para o manter: expira dentro de alguns minutos.",
+      "recoverAsset": "Guardar o ficheiro a partir do fornecedor"
+    },
+    "notices": {
+      "conversation_create_failed": "Este tópico de estúdio não pôde ser iniciado, por isso nada foi enviado nem cobrado.",
+      "conversation_unreadable": "Não foi possível ler esta conversa, por isso nada pode ser criado nela. Recarregue a página, ou comece um novo estúdio.",
+      "connection_lost": "A conexão caiu durante a execução. Pode ainda estar terminando, e sendo cobrado: verifique os seus arquivos antes de enviar de novo.",
+      "refused": "Isto foi recusado antes de rodar, portanto nada foi cobrado. Sua instrução e seus arquivos continuam aqui.",
+      "unexpected": "Algo correu mal pelo caminho.",
+      "catalogue_empty": "Ainda não há nenhum modelo de geração disponível. Um administrador pode adicionar um.",
+      "dismiss": "Ocultar"
+    },
+    "modeSwitch": {
+      "label": "O que fazer aqui",
+      "chat": "Conversa",
+      "studio": "Estúdio"
+    },
+    "apps": {
+      "title": "Aplicações de estúdio",
+      "favorites": "As minhas aplicações de estúdio"
+    },
+    "payer": {
+      "change": "Quem paga isto",
+      "platform": "Chave da plataforma",
+      "ownKey": "A minha chave"
+    }
+  },
+  "budget": {
+    "advancedSection": "Avançado",
+    "amountWithUnit": "{amount} {unit}",
+    "capHelp": "Deixe vazio para não ter limite. Conta o gasto dos agentes em todas as execuções, exceto os testes lançados a partir do editor. As integrações pagas e a geração são faturadas à parte e não são descontadas daqui.",
+    "capHelpCredits": "Créditos máximos que este fluxo de trabalho pode gastar. Ao atingir, nenhuma nova execução é iniciada.",
+    "capHelpDollars": "Gasto máximo para este fluxo de trabalho. Ao atingir, nenhuma nova execução é iniciada.",
+    "capLabel": "Orçamento de custo",
+    "capPlaceholder": "Sem limite",
+    "chipTitleCapped": "Gasto dos agentes {period}: {values} ({unit}), sobre o limite",
+    "chipTitleUncapped": "Gasto dos agentes {period}: {values}. Sem limite.",
+    "periodCumulative": "Nunca (vitalício)",
+    "periodLabel": "Reinicia",
+    "periodMonth": "este mês",
+    "periodMonthly": "Todo mês",
+    "periodTotal": "no total",
+    "periodWeek": "esta semana",
+    "periodWeekly": "Toda semana",
+    "popoverCap": "Limite",
+    "popoverNeverResets": "Este limite nunca reinicia, por isso a dotação não recomeça sozinha.",
+    "popoverNoCap": "Nenhum",
+    "popoverResetsOn": "A dotação recomeça a {date}.",
+    "popoverScope": "Conta o gasto dos agentes em {unit}. As integrações pagas e a geração são faturadas à parte.",
+    "popoverSpent": "Gasto",
+    "popoverStopped": "Limite atingido: nenhuma execução nova começa até a dotação recomeçar.",
+    "popoverStoppedForGood": "Limite atingido: nenhuma execução nova começa enquanto não o aumentar ou mudar o seu reinício.",
+    "popoverTitle": "Gasto dos agentes",
+    "runCostTitle": "Custo desta execução, em todas as épocas",
+    "unitCredits": "créditos",
+    "unitDollars": "dólares"
+  },
+  "memory": {
+    "explainer": "O que os agentes deste espaço de trabalho aprenderam. Cada resumo abaixo está no contexto de todos os agentes; o detalhe por trás só é lido quando um agente precisa dele. A memória pertence a este espaço de trabalho: se mudar de espaço, verá a dele.",
+    "searchPlaceholder": "Pesquisar na memória...",
+    "createButton": "Nova memória",
+    "filterAll": "Tudo",
+    "emptyTitle": "Ainda não há memórias",
+    "emptySubtitle": "Os agentes guardam aqui factos duradouros enquanto trabalham, e pode acrescentar ou corrigir um a qualquer momento.",
+    "noMatches": "Nenhuma memória corresponde",
+    "noMatchesSubtitle": "Tente outra palavra ou retire os filtros.",
+    "createTitle": "Nova memória",
+    "editTitle": "Editar memória",
+    "fieldTitle": "Título",
+    "fieldTitlePlaceholder": "Ritmo de lançamentos",
+    "fieldSummary": "Resumo",
+    "fieldSummaryPlaceholder": "A equipa lança às quintas-feiras e congela na quarta à tarde.",
+    "fieldSummaryHint": "Esta única linha é acrescentada ao contexto de cada agente deste espaço, em cada execução. Enuncie o facto em vez de apontar para ele. {count}/{max}",
+    "fieldContent": "Detalhes",
+    "fieldContentPlaceholder": "Exceções, razões, tudo o que um agente deva ler quando considerar esta entrada relevante.",
+    "fieldContentHint": "Não é acrescentado ao contexto. Um agente abre-o quando o resumo lhe parece relevante.",
+    "fieldType": "Tipo",
+    "fieldPinned": "Sempre no contexto",
+    "fieldPinnedHint": "Fixar acrescenta os detalhes completos a cada execução de cada agente daqui, por isso reserve-o para regras que nunca podem ser esquecidas.",
+    "pinnedBadge": "Fixada",
+    "pinAction": "Manter sempre no contexto",
+    "unpinAction": "Deixar de manter no contexto",
+    "editAction": "Editar",
+    "deleteAction": "Eliminar",
+    "scopeWorkspace": "Espaço de trabalho",
+    "scopeAgent": "Um só agente",
+    "sourceUser": "Adicionada por uma pessoa",
+    "sourceAgent": "Guardada por um agente",
+    "metaLine": "{slug} · consultada {recalls} vezes · atualizada a {updated}",
+    "save": "Guardar",
+    "saving": "A guardar...",
+    "cancel": "Cancelar",
+    "close": "Fechar",
+    "toastCreated": "Memória guardada.",
+    "toastUpdated": "Memória atualizada.",
+    "toastDeleted": "Memória eliminada.",
+    "type": {
+      "user": "Sobre o utilizador",
+      "feedback": "Comentário",
+      "project": "Projeto",
+      "reference": "Referência"
+    },
+    "deleteConfirm": "Eliminar a memória «{title}»? Esta ação é irreversível. Para que os agentes deixem de a usar sem a perder, desative-a em vez disso.",
+    "deleteTitle": "Eliminar esta memória?",
+    "inactiveBadge": "Inativa",
+    "activateAction": "Reativar",
+    "deactivateAction": "Desativar",
+    "loadFailedTitle": "Não foi possível carregar a memória",
+    "loadFailedSubtitle": "A lista não carregou, por isso não está necessariamente vazia. Tente novamente."
   }
 }

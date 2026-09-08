@@ -369,8 +369,8 @@ export const renderPresetPreview = (preset: ColumnStylePreset) => {
     case 'checkbox':
       return (
         <div className="flex items-center gap-2.5">
-          <div className="h-5 w-5 rounded-md border-2 border-black dark:border-white bg-black dark:bg-white flex items-center justify-center">
-            <svg className="h-3.5 w-3.5 text-white dark:text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+          <div className="h-5 w-5 rounded-md border-2 border-[var(--accent-primary)] bg-[var(--accent-primary)] flex items-center justify-center">
+            <svg className="h-3.5 w-3.5 text-[var(--accent-foreground)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
           </div>

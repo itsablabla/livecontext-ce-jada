@@ -639,4 +639,33 @@ class LimitNodeTest {
             }
         };
     }
+
+    @Test
+    @DisplayName("A blank input fails with the configuration reported as `input`, the plan's key name - and `config` follows it")
+    @SuppressWarnings("unchecked")
+    void blankInputReportsInputUnderPlanKeyName() {
+        LimitNode node = LimitNode.builder()
+            .nodeId("core:limit")
+            .count(5)
+            .from("first")
+            .offset(0)
+            .inputExpression("  ")
+            .build();
+
+        NodeExecutionResult result = node.execute(context);
+
+        assertFalse(result.isSuccess());
+        Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+        assertEquals("  ", params.get("input"));
+        assertFalse(params.containsKey("input_expression"),
+            "input_expression was a second name for a setting the success path already calls `input`");
+
+        // `config` is a DECLARED output field and shares this map. That is why the
+        // rename is a fix rather than a break: the success path and V167's
+        // documented shape both say {input, input_count, count, from, offset}, so
+        // the failure path was the only place emitting `input_expression`.
+        Map<String, Object> config = (Map<String, Object>) result.output().get("config");
+        assertEquals("  ", config.get("input"));
+        assertFalse(config.containsKey("input_expression"));
+    }
 }

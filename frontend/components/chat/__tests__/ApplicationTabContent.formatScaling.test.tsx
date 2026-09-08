@@ -53,6 +53,7 @@ async function flushEffects() {
   });
 }
 
+vi.mock('@/i18n/navigation', () => ({ usePathname: () => '/app/workflow/wf-1' }));
 vi.mock('@/contexts/WorkflowRunContext', () => ({
   useRun: () => [{ runStatus: 'completed', executionTotal: 0 }, { executeStep: vi.fn() }],
 }));

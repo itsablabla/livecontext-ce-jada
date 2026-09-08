@@ -54,6 +54,17 @@ public class WorkflowPublicationEntity {
     @Column(name = "category_slug", length = 100)
     private String categorySlug;
 
+    /**
+     * True when this publication belongs in the Studio: it PRODUCES a media asset rather than
+     * finding, publishing or reading one.
+     *
+     * <p>A SECOND AXIS, independent of {@link #categorySlug}. Modelled as another category first,
+     * which was wrong: the category column is single-valued, so a video studio would have had to
+     * stop being a Content app to become a studio one.
+     */
+    @Column(name = "studio", nullable = false)
+    private boolean studio = false;
+
     @Column(name = "category_name")
     private String categoryName;
 
@@ -121,7 +132,7 @@ public class WorkflowPublicationEntity {
 
     /**
      * True when the snapshot uses a feature that only exists on a self-hosted
-     * install (local-CLI agents, vector/embedding columns). Recomputed from the
+     * install (today: local-CLI agents. Vector search is LABELLED in ce_exclusive_features but does not set this flag, being plan-gated at acquire instead). Recomputed from the
      * snapshot on every publish and update by
      * {@code CeExclusiveFeatureDetector} - never set by the publisher - and
      * enforced at acquisition time on managed cloud.
@@ -460,6 +471,14 @@ public class WorkflowPublicationEntity {
 
     public void setShowcaseRunId(String showcaseRunId) {
         this.showcaseRunId = showcaseRunId;
+    }
+
+    public boolean isStudio() {
+        return studio;
+    }
+
+    public void setStudio(boolean studio) {
+        this.studio = studio;
     }
 
     public UUID getCategoryId() {

@@ -66,7 +66,7 @@ class WorkspacePurgeServiceTest {
     void skipsMissing() {
         when(organizationRepository.findById(orgId)).thenReturn(Optional.empty());
         assertThat(service.purgeWorkspace(orgId)).isFalse();
-        verify(workspaceDataPurger, never()).purgeOperationalData(anyString());
+        verify(workspaceDataPurger, never()).purgeOperationalData(anyString(), anyString());
     }
 
     @Test
@@ -74,7 +74,7 @@ class WorkspacePurgeServiceTest {
     void refusesPersonal() {
         when(organizationRepository.findById(orgId)).thenReturn(Optional.of(org(true, LocalDateTime.now().minusDays(40), null)));
         assertThat(service.purgeWorkspace(orgId)).isFalse();
-        verify(workspaceDataPurger, never()).purgeOperationalData(anyString());
+        verify(workspaceDataPurger, never()).purgeOperationalData(anyString(), anyString());
     }
 
     @Test
@@ -82,7 +82,7 @@ class WorkspacePurgeServiceTest {
     void refusesNotDeleted() {
         when(organizationRepository.findById(orgId)).thenReturn(Optional.of(org(false, null, null)));
         assertThat(service.purgeWorkspace(orgId)).isFalse();
-        verify(workspaceDataPurger, never()).purgeOperationalData(anyString());
+        verify(workspaceDataPurger, never()).purgeOperationalData(anyString(), anyString());
     }
 
     @Test
@@ -91,7 +91,7 @@ class WorkspacePurgeServiceTest {
         when(organizationRepository.findById(orgId))
                 .thenReturn(Optional.of(org(false, LocalDateTime.now().minusDays(40), LocalDateTime.now().minusDays(1))));
         assertThat(service.purgeWorkspace(orgId)).isFalse();
-        verify(workspaceDataPurger, never()).purgeOperationalData(anyString());
+        verify(workspaceDataPurger, never()).purgeOperationalData(anyString(), anyString());
     }
 
     @Test
@@ -104,7 +104,7 @@ class WorkspacePurgeServiceTest {
 
         assertThat(result).isTrue();
         // operational purge ran for THIS org id
-        verify(workspaceDataPurger).purgeOperationalData(orgId.toString());
+        verify(workspaceDataPurger).purgeOperationalData(orgId.toString(), WorkspaceDataPurger.SOURCE_WORKSPACE);
         // memberships deleted via native SQL (org_id is UUID -> ::text cast for the String param)
         verify(em).createNativeQuery("DELETE FROM auth.organization_member WHERE organization_id::text = ?1");
         // org row kept (tombstone) with purged_at stamped, deleted_at preserved

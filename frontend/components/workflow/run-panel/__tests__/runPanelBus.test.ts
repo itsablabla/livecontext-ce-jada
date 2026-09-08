@@ -265,6 +265,55 @@ describe('run actions', () => {
     } finally {
       window.removeEventListener(RUN_PANEL_ACTION_EVENT, handler);
     }
-    expect(seen[0]).toEqual({ action: 'reactivate', workflowId: 'wf-1', runId: 'run-1' });
+    // `handled` rides along so a listener can acknowledge the request; the
+    // caller reads it back to decide whether to fall back to the REST call.
+    expect(seen[0]).toEqual({ action: 'reactivate', workflowId: 'wf-1', runId: 'run-1', handled: false });
+  });
+
+  it('reports NOT handled when no canvas is listening', () => {
+    expect(requestRunAction({ action: 'stop', workflowId: 'wf-1', runId: 'run-1' }).handled).toBe(false);
+  });
+
+  it('reports handled once a listener claims the request', () => {
+    const handler = (e: Event) => { (e as CustomEvent).detail.handled = true; };
+    window.addEventListener(RUN_PANEL_ACTION_EVENT, handler);
+    try {
+      expect(requestRunAction({ action: 'stop', workflowId: 'wf-1', runId: 'run-1' }).handled).toBe(true);
+    } finally {
+      window.removeEventListener(RUN_PANEL_ACTION_EVENT, handler);
+    }
+  });
+
+  it('hands back the claimer promise, so the caller can wait for the real work', () => {
+    // Without it the caller only learns the request was ACCEPTED, never whether
+    // it worked: its in-flight state cleared in the next microtask and a
+    // canvas-side failure surfaced nowhere.
+    const result = Promise.resolve();
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      detail.handled = true;
+      detail.result = result;
+    };
+    window.addEventListener(RUN_PANEL_ACTION_EVENT, handler);
+    try {
+      expect(requestRunAction({ action: 'stop', workflowId: 'wf-1' }).result).toBe(result);
+    } finally {
+      window.removeEventListener(RUN_PANEL_ACTION_EVENT, handler);
+    }
+  });
+
+  it('does not mutate the request object the caller passed in', () => {
+    // The detail is a copy: a caller reusing its request object across surfaces
+    // would otherwise carry a stale `handled: true` into the next dispatch and
+    // silently skip the REST fallback.
+    const detail = { action: 'stop' as const, workflowId: 'wf-1', runId: 'run-1' };
+    const handler = (e: Event) => { (e as CustomEvent).detail.handled = true; };
+    window.addEventListener(RUN_PANEL_ACTION_EVENT, handler);
+    try {
+      requestRunAction(detail);
+    } finally {
+      window.removeEventListener(RUN_PANEL_ACTION_EVENT, handler);
+    }
+    expect((detail as Record<string, unknown>).handled).toBeUndefined();
   });
 });

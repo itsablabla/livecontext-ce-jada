@@ -3,6 +3,7 @@ package com.apimarketplace.auth.web;
 import com.apimarketplace.auth.domain.CreditLedgerEntry;
 import com.apimarketplace.auth.domain.ModelPricing;
 import com.apimarketplace.auth.service.CreditService;
+import com.apimarketplace.auth.service.LlmCostEstimateService;
 import com.apimarketplace.auth.service.LlmTokenBreakdown;
 import com.apimarketplace.auth.service.ModelPricingService;
 import com.apimarketplace.common.web.TenantResolver;
@@ -24,10 +25,13 @@ public class CreditController {
 
     private final CreditService creditService;
     private final ModelPricingService pricingService;
+    private final LlmCostEstimateService estimateService;
 
-    public CreditController(CreditService creditService, ModelPricingService pricingService) {
+    public CreditController(CreditService creditService, ModelPricingService pricingService,
+                            LlmCostEstimateService estimateService) {
         this.creditService = creditService;
         this.pricingService = pricingService;
+        this.estimateService = estimateService;
     }
 
     /**
@@ -303,6 +307,23 @@ public class CreditController {
             @RequestHeader("X-User-ID") Long userId,
             @PathVariable String runId) {
         return ResponseEntity.ok(creditService.getRunCostSummary(userId, runId));
+    }
+
+    /**
+     * Everything a client needs to show a pre-flight cost estimate next to a model,
+     * and nothing more: one coefficient per rate, per shape of work.
+     *
+     * <p>Deliberately NOT a per-model credit table. The client already holds every
+     * model's list rates (they come with the model catalogue), so publishing two
+     * coefficients instead of 779 pre-computed rows keeps the payload at a few
+     * hundred bytes and keeps the MARGIN server-side: a client that restated the
+     * multiplier would quote a price the ledger does not charge the day the lever
+     * moves. See {@link com.apimarketplace.auth.service.LlmCostEstimateService} for
+     * why the multiplier is folded into the coefficients rather than named.
+     */
+    @GetMapping("/estimate-basis")
+    public ResponseEntity<Map<String, Object>> getEstimateBasis() {
+        return ResponseEntity.ok(estimateService.buildBasis());
     }
 
     @GetMapping("/pricing")

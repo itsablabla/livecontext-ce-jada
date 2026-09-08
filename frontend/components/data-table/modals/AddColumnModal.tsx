@@ -6,11 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { COLUMN_STYLE_PRESETS, PRESET_CATEGORIES, renderPresetPreview } from '@/components/data-table/visualHelpers';
 import type { ColumnStylePreset } from '@/components/data-table/visualHelpers';
-import { IS_CE } from '@/lib/edition';
+import { useVectorFeatureLock } from '@/hooks/useVectorFeatureLock';
 import { useTranslations } from 'next-intl';
 import {
   Plus, ArrowRight, ArrowLeft, Check, Columns3,
   X, Star,
+  Lock,
 } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { ModalStepIndicator } from '@/components/ui/ModalStepIndicator';
@@ -277,6 +278,8 @@ export function AddColumnModal({
   onStyleChange,
 }: AddColumnModalProps) {
   const t = useTranslations('modals.addColumn');
+  // Asked once for the whole picker: the plan answer is the same for every tile.
+  const vectorLock = useVectorFeatureLock();
 
   const [currentStep, setCurrentStep] = useState(1);
   const [mounted, setMounted] = useState(false);
@@ -452,17 +455,23 @@ export function AddColumnModal({
                       if (!preset) return null;
                       const Icon = preset.icon;
                       const isSelected = selectedStyle.id === pid;
-                      // Vector columns are self-hosted-only: visible in cloud
-                      // (discoverability) but disabled with a "CE only" badge.
-                      // Server-authoritative - the backend rejects the type
-                      // regardless of this UI gate.
-                      const isCeOnly = pid === 'vector' && !IS_CE;
+                      // Vector columns are a paid capability on managed cloud since 2026-09-03:
+                      // visible to everyone (discoverability) but disabled, with the plan that
+                      // unlocks them named on the tile. Disabled rather than merely marked, unlike
+                      // a palette row: picking this type would carry the user through a dimension
+                      // and metric step before the server refused, and the choice creates a schema
+                      // rather than a canvas node. Server-authoritative either way - the backend
+                      // refuses the type for a plan that does not include it, whatever this does.
+                      const lockedPlan = pid === 'vector' && vectorLock.locked
+                        ? vectorLock.requiredPlan
+                        : null;
+                      const isCeOnly = Boolean(lockedPlan);
                       return (
                         <button
                           key={pid}
                           type="button"
                           disabled={isCeOnly}
-                          title={isCeOnly ? t('ceOnlyTooltip') : undefined}
+                          title={lockedPlan ? t('planOnlyTooltip', { plan: lockedPlan }) : undefined}
                           onClick={() => { if (!isCeOnly) onStyleChange(preset); }}
                           className={`group relative text-left rounded-2xl border p-4 transition-all ${
                             isCeOnly
@@ -472,9 +481,10 @@ export function AddColumnModal({
                               : 'border-slate-200 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md'
                           }`}
                         >
-                          {isCeOnly && (
-                            <span className="absolute top-2 right-2 rounded-md bg-theme-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-theme-muted">
-                              {t('ceOnlyBadge')}
+                          {lockedPlan && (
+                            <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+                              <Lock className="h-2.5 w-2.5" aria-hidden />
+                              {lockedPlan}
                             </span>
                           )}
                           {isSelected && !isCeOnly && (

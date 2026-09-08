@@ -43,6 +43,10 @@ import { cn } from '@/lib/utils';
  * are why {@code NoProviderCta} links out instead of opening one. The plans
  * page carries both answers anyway: subscribe, or buy a one-off top-up.
  *
+ * <p>It opens NO dialog of its own. The plan comparison used to be reachable
+ * from here; it belongs to the pricing page now, which this badge's link leads
+ * to, so the badge is text and a link and can sit under any host at any z.
+ *
  * <p>Neither renders unless it applies: not on CE, not on a paid plan, not for
  * a Free account that has topped up, and not while the balance is in flight.
  * Both take the verdict as a PROP, so a picker asks the question once for its

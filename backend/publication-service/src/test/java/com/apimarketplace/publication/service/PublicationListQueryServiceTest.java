@@ -115,7 +115,8 @@ class PublicationListQueryServiceTest {
                 "a-description",                // 42 public_slug
                 "john-doe",                     // 43 publisher_handle
                 false,                          // 44 ce_exclusive
-                null                            // 45 ce_exclusive_features (jsonb CAST to TEXT)
+                null,                           // 45 ce_exclusive_features (jsonb CAST to TEXT)
+                false                           // 46 studio
         };
     }
 
@@ -158,9 +159,12 @@ class PublicationListQueryServiceTest {
             // indices 16/17 - an off-by-one there would silently misalign every later column.
             assertThat(item.ownerType()).isEqualTo("ORG");
             assertThat(item.ownerId()).isEqualTo("org-1");
-            // V413 - the two public-SEO columns are the LAST entries of
-            // SELECT_COLUMNS, so a column appended without extending mapRow's
-            // index walk would silently shift these two off the end.
+            // V413 - the two public-SEO columns. They used to be the LAST entries of
+            // SELECT_COLUMNS, which is what made this assertion a position check; they are not any
+            // more (ce_exclusive, ce_exclusive_features and studio come after them), so the
+            // positional guarantee now lives in PublicationListSelectMappingInvariantTest, which
+            // compares the whole SELECT list against mapRow. What is left here is the ordinary
+            // question of whether these two fields carry their values.
             assertThat(item.publicSlug()).isEqualTo("a-description");
             assertThat(item.publisherHandle()).isEqualTo("john-doe");
             assertThat(item.toResponseMap())
@@ -306,7 +310,7 @@ class PublicationListQueryServiceTest {
         @Test
         @DisplayName("A type filter becomes a display_mode predicate instead of a client-side pass over one page")
         void typeFilterReachesSql() {
-            run(MarketplaceQueryFilter.fromRequest(null, "AGENT", null, null, null, null));
+            run(MarketplaceQueryFilter.fromRequest(null, "AGENT", null, null, null, null, null));
 
             assertThat(dataSql()).contains("AND p.display_mode = :displayMode");
             verify(dataQuery).setParameter("displayMode", "AGENT");
@@ -315,7 +319,7 @@ class PublicationListQueryServiceTest {
         @Test
         @DisplayName("sort=recent orders by published_at in SQL - the fix for a new publication being unreachable")
         void recentSortReachesSql() {
-            run(MarketplaceQueryFilter.fromRequest(null, null, "recent", null, null, null));
+            run(MarketplaceQueryFilter.fromRequest(null, null, "recent", null, null, null, null));
 
             // The reported bug: a freshly published app scores 0 on popularity
             // (no installs, favorites or reviews) so it sorted last, past the
@@ -329,7 +333,7 @@ class PublicationListQueryServiceTest {
         @Test
         @DisplayName("sort=installs orders by use_count in SQL")
         void installsSortReachesSql() {
-            run(MarketplaceQueryFilter.fromRequest(null, null, "installs", null, null, null));
+            run(MarketplaceQueryFilter.fromRequest(null, null, "installs", null, null, null, null));
 
             assertThat(dataSql()).contains("ORDER BY p.use_count DESC, p.published_at DESC");
         }
@@ -337,7 +341,7 @@ class PublicationListQueryServiceTest {
         @Test
         @DisplayName("sort=rating ranks unrated LAST rather than as a 0 average")
         void ratingSortPutsUnratedLast() {
-            run(MarketplaceQueryFilter.fromRequest(null, null, "rating", null, null, null));
+            run(MarketplaceQueryFilter.fromRequest(null, null, "rating", null, null, null, null));
 
             assertThat(dataSql())
                     .contains("CASE WHEN p.review_count > 0 THEN p.average_rating ELSE -1 END");
@@ -346,7 +350,7 @@ class PublicationListQueryServiceTest {
         @Test
         @DisplayName("An unknown sort falls back to popularity rather than failing the request")
         void unknownSortFallsBackToPopularity() {
-            run(MarketplaceQueryFilter.fromRequest(null, null, "whatever", null, null, null));
+            run(MarketplaceQueryFilter.fromRequest(null, null, "whatever", null, null, null, null));
 
             assertThat(dataSql()).contains("user_publication_favorites");
         }
@@ -354,7 +358,7 @@ class PublicationListQueryServiceTest {
         @Test
         @DisplayName("rating=min_4 requires at least one review AND binds the 4.0 floor")
         void ratingFloorReachesSql() {
-            run(MarketplaceQueryFilter.fromRequest(null, null, null, "min_4", null, null));
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, "min_4", null, null, null));
 
             assertThat(dataSql())
                     .contains("AND p.review_count > 0")
@@ -365,7 +369,7 @@ class PublicationListQueryServiceTest {
         @Test
         @DisplayName("rating=rated asks only for a review, with no average floor bound")
         void ratedOnlyBindsNoFloor() {
-            run(MarketplaceQueryFilter.fromRequest(null, null, null, "rated", null, null));
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, "rated", null, null, null));
 
             assertThat(dataSql()).contains("AND p.review_count > 0").doesNotContain(":minRating");
             verify(dataQuery, org.mockito.Mockito.never())
@@ -376,7 +380,7 @@ class PublicationListQueryServiceTest {
         @DisplayName("days=7 binds an absolute published_at floor about seven days back")
         void dateWindowReachesSql() {
             Instant before = Instant.now();
-            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, 7, null));
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, 7, null, null));
 
             assertThat(dataSql()).contains("AND p.published_at >= :publishedAfter");
             verify(dataQuery).setParameter(
@@ -393,7 +397,7 @@ class PublicationListQueryServiceTest {
         @Test
         @DisplayName("A non-positive window is no window at all, not a request for future publications")
         void nonPositiveWindowIsIgnored() {
-            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, 0, null));
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, 0, null, null));
 
             assertThat(dataSql()).doesNotContain(":publishedAfter");
         }
@@ -401,7 +405,7 @@ class PublicationListQueryServiceTest {
         @Test
         @DisplayName("price=free keeps only publications that cost nothing")
         void freePriceReachesSql() {
-            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, null, "free"));
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, null, "free", null));
 
             assertThat(dataSql()).contains("AND p.credits_per_use <= 0");
         }
@@ -409,15 +413,52 @@ class PublicationListQueryServiceTest {
         @Test
         @DisplayName("price=paid keeps only publications that charge credits")
         void paidPriceReachesSql() {
-            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, null, "paid"));
+            run(MarketplaceQueryFilter.fromRequest(null, null, null, null, null, "paid", null));
 
             assertThat(dataSql()).contains("AND p.credits_per_use > 0");
         }
 
         @Test
+        @DisplayName("The studio axis narrows the query, and COMPOSES with a category instead of replacing it")
+        void studioAxisComposesWithCategory() {
+            // The whole reason studio is a flag and not a category: a video studio is a Content app
+            // AND a studio app. Asked together, both predicates have to be in the SQL - a filter
+            // that dropped either would answer a different question than the reader asked.
+            run(MarketplaceQueryFilter.fromRequest("content", null, null, null, null, null, true));
+
+            assertThat(dataSql())
+                    .contains("AND p.category_slug = :categorySlug")
+                    .contains("AND p.studio = :studio");
+            // The COUNT companion too. Binding the parameter is not the same as referencing it: a
+            // count that lost the predicate would still bind `studio` and still page the grid
+            // against the WHOLE catalogue, offering a next page long after the shelf ran out.
+            assertThat(countSql()).contains("AND p.studio = :studio");
+            verify(dataQuery).setParameter("studio", true);
+            verify(countQuery).setParameter("studio", true);
+        }
+
+        @Test
+        @DisplayName("No studio constraint leaves the predicate out entirely")
+        void noStudioConstraintIsNotAPredicate() {
+            // Binding `false` by default would hide every studio application from the ordinary
+            // marketplace, which is the opposite of a second axis.
+            run(MarketplaceQueryFilter.unfiltered());
+
+            assertThat(dataSql()).doesNotContain("p.studio =");
+        }
+
+        @Test
+        @DisplayName("A studio constraint alone is not 'unfiltered' - it does narrow the grid")
+        void studioAloneIsARefinement() {
+            // isUnfiltered() drives a fast path that answers the whole catalogue. A refinement it
+            // does not know about would be silently discarded there.
+            assertThat(MarketplaceQueryFilter.fromRequest(null, null, null, null, null, null, true).isUnfiltered()).isFalse();
+        }
+
+        @Test
         @DisplayName("The COUNT companion carries the SAME predicates, so totalPages describes the filtered set")
         void countQueryCarriesTheSamePredicates() {
-            run(MarketplaceQueryFilter.fromRequest("ai", "APPLICATION", "recent", "min_3", 30, "free"));
+            run(MarketplaceQueryFilter.fromRequest("ai", "APPLICATION", "recent", "min_3", 30, "free", null));
 
             // Without this, "load more" would page against a total computed over
             // the WHOLE catalogue: the grid would keep offering a next page long
@@ -433,6 +474,32 @@ class PublicationListQueryServiceTest {
             // Both queries must BIND what they reference or Hibernate throws.
             verify(countQuery).setParameter("displayMode", "APPLICATION");
             verify(countQuery).setParameter("categorySlug", "ai");
+        }
+
+        @Test
+        @DisplayName("The two queries share ONE where clause, so no future refinement can reach only one")
+        void countAndDataShareTheirWhereClause() {
+            // The general form of the test above, which names its predicates one by one and so only
+            // ever protects the refinements somebody remembered to list. This compares the clauses
+            // themselves: a refinement added to the browse query and not to its count is caught
+            // whether or not anyone thinks to extend a list here. Every refinement is switched on so
+            // the comparison is made over the widest clause the builder can produce.
+            run(MarketplaceQueryFilter.fromRequest("ai", "APPLICATION", "recent", "min_3", 30, "free", true));
+
+            assertThat(whereOf(countSql()))
+                    .as("the count and the browse query must filter identically")
+                    .isEqualTo(whereOf(dataSql()));
+            // And the clause is not empty, or the assertion above would hold for two queries that
+            // filter nothing at all.
+            assertThat(whereOf(countSql())).contains("AND p.studio = :studio");
+        }
+
+        /** Everything from WHERE up to the ordering, which the count query has no reason to carry. */
+        private String whereOf(String sql) {
+            int start = sql.indexOf("WHERE");
+            assertThat(start).as("no WHERE clause in: %s", sql).isNotNegative();
+            int end = sql.indexOf("ORDER BY", start);
+            return (end < 0 ? sql.substring(start) : sql.substring(start, end)).trim();
         }
 
         @Test
@@ -462,7 +529,7 @@ class PublicationListQueryServiceTest {
         @DisplayName("Search applies the same refinements, so typing narrows the grid instead of resetting it")
         void searchSharesTheRefinements() {
             captureSql(() -> service.searchMarketplace(
-                    "invoice", MarketplaceQueryFilter.fromRequest(null, "APPLICATION", "recent", null, null, "free")));
+                    "invoice", MarketplaceQueryFilter.fromRequest(null, "APPLICATION", "recent", null, null, "free", null)));
 
             assertThat(dataSql())
                     .contains("AND p.display_mode = :displayMode")

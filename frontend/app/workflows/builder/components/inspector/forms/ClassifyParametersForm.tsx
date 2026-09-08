@@ -161,6 +161,7 @@ export function ClassifyParametersForm({
         disabled={isRunMode}
         providerLabel={t('provider')}
         modelLabel={t('model')}
+        costProfile="classifyStep"
       />
 
       {/* Prompt - Required */}

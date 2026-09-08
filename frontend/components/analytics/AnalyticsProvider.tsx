@@ -12,7 +12,7 @@
  * short-circuits on `isAnalyticsConfigured()`, a build-time constant).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/providers/smart-providers';
 import { useCurrentOrgStore } from '@/lib/stores/current-org-store';
 import { CONSENT_CHANGE_EVENT, isAnalyticsConsentGranted } from '@/lib/analytics/consent';
@@ -22,7 +22,9 @@ import {
   initAnalytics,
   isAnalyticsConfigured,
   setAnalyticsOrganization,
+  track,
 } from '@/lib/analytics/analytics';
+import { CONSENT_VERSION } from '@/lib/analytics/consent';
 
 export default function AnalyticsProvider() {
   const { isAuthenticated, isReady, numericUserId } = useAuth();
@@ -34,10 +36,19 @@ export default function AnalyticsProvider() {
     () => typeof window !== 'undefined' && isAnalyticsConsentGranted(),
   );
 
-  // Subscribe to live consent changes (Accept/Reject without a reload).
+  // Subscribe to live consent changes (Accept/Reject without a reload). A
+  // grant coming from the banner (as opposed to one read from storage at
+  // mount) is the ONE consent decision analytics can ever observe, so it is
+  // counted right after init: the accept rate is the denominator of every
+  // frontend funnel and was unmeasured before.
+  const consentJustGranted = useRef(false);
   useEffect(() => {
     if (!isAnalyticsConfigured()) return;
-    const onChange = () => setConsentGranted(isAnalyticsConsentGranted());
+    const onChange = () => {
+      const granted = isAnalyticsConsentGranted();
+      consentJustGranted.current = granted;
+      setConsentGranted(granted);
+    };
     window.addEventListener(CONSENT_CHANGE_EVENT, onChange);
     return () => window.removeEventListener(CONSENT_CHANGE_EVENT, onChange);
   }, []);
@@ -45,8 +56,15 @@ export default function AnalyticsProvider() {
   // Start analytics on consent grant; stop capturing if it is withdrawn.
   useEffect(() => {
     if (!isAnalyticsConfigured()) return;
-    if (consentGranted) initAnalytics();
-    else disableAnalytics();
+    if (consentGranted) {
+      initAnalytics();
+      if (consentJustGranted.current) {
+        consentJustGranted.current = false;
+        track('consent_accepted', { consent_version: CONSENT_VERSION });
+      }
+    } else {
+      disableAnalytics();
+    }
   }, [consentGranted]);
 
   // Identify the user once auth is ready AND consent is granted.

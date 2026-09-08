@@ -9,6 +9,7 @@ import {
   useConversationMutations,
 } from './conversation';
 import { useDeletedConversationsSync } from './conversation/useDeletedConversationsSync';
+import { onConversationMessagesCleared } from '@/lib/chat/conversationMessagesBus';
 
 export interface UseConversationHistoryOptions {
   autoLoad?: boolean;
@@ -141,6 +142,23 @@ export function useConversationHistory({
       clearMessagesRef.current();
     },
   });
+
+  // Someone wiped a conversation's history from another surface - the sidebar's
+  // row menu is the only one today. If it is the conversation THIS hook is
+  // showing, empty the transcript now: the two surfaces hold two independent
+  // message stores, so nothing else would tell this one that its copy is stale
+  // and the cleared messages would stay on screen until a reload.
+  const sharedCurrentConversationId = appState.currentConversationId;
+  useEffect(
+    () =>
+      onConversationMessagesCleared((conversationId) => {
+        const showing =
+          currentConversationRef.current?.id === conversationId
+          || sharedCurrentConversationId === conversationId;
+        if (showing) clearMessagesRef.current();
+      }),
+    [sharedCurrentConversationId],
+  );
 
   // Select a conversation (without auto-loading messages)
   const selectConversation = useCallback((conversation: Conversation | null) => {

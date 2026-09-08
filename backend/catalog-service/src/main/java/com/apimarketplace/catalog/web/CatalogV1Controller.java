@@ -57,9 +57,12 @@ public class CatalogV1Controller {
                                          @RequestHeader(value = "X-Lc-Billing-Step-Id", required = false) String billingStepId,
                                          @RequestHeader(value = "X-Lc-Generation-Model", required = false) String generationModelId,
                                          @RequestHeader(value = "X-Lc-Generation-Quantity", required = false) java.math.BigDecimal generationQuantity,
-                                         @RequestHeader(value = "X-Lc-Generation-Unit", required = false) String generationQuantityUnit) {
+                                         @RequestHeader(value = "X-Lc-Generation-Unit", required = false) String generationQuantityUnit,
+                                         @RequestHeader(value = "X-Lc-Workflow-Id", required = false) String analyticsWorkflowId,
+                                         @RequestHeader(value = "X-Lc-Node-Id", required = false) String analyticsNodeId) {
         applyBillingHeaders(request, billingScopeKind, billingScopeId, billingStepId,
                 generationModelId, generationQuantity, generationQuantityUnit);
+        applyAnalyticsHeaders(request, analyticsWorkflowId, analyticsNodeId);
         return executeToolInternal(toolId, request, userId, orgId, requestId);
     }
 
@@ -80,9 +83,12 @@ public class CatalogV1Controller {
                                                     @RequestHeader(value = "X-Lc-Billing-Step-Id", required = false) String billingStepId,
                                                     @RequestHeader(value = "X-Lc-Generation-Model", required = false) String generationModelId,
                                                     @RequestHeader(value = "X-Lc-Generation-Quantity", required = false) java.math.BigDecimal generationQuantity,
-                                         @RequestHeader(value = "X-Lc-Generation-Unit", required = false) String generationQuantityUnit) {
+                                         @RequestHeader(value = "X-Lc-Generation-Unit", required = false) String generationQuantityUnit,
+                                         @RequestHeader(value = "X-Lc-Workflow-Id", required = false) String analyticsWorkflowId,
+                                         @RequestHeader(value = "X-Lc-Node-Id", required = false) String analyticsNodeId) {
         applyBillingHeaders(request, billingScopeKind, billingScopeId, billingStepId,
                 generationModelId, generationQuantity, generationQuantityUnit);
+        applyAnalyticsHeaders(request, analyticsWorkflowId, analyticsNodeId);
         // Combine apiSlug/toolSlug - service handles this format
         String toolId = apiSlug + "/" + toolSlug;
         return executeToolInternal(toolId, request, userId, orgId, requestId);
@@ -131,6 +137,32 @@ public class CatalogV1Controller {
                             "message", "Unable to execute mock",
                             "toolId", toolId,
                             "error", e.getMessage()));
+        }
+    }
+
+    /** A workflow id is a UUID; anything else is dropped rather than stored as a property. */
+    private static final java.util.regex.Pattern WORKFLOW_ID_SHAPE =
+            java.util.regex.Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
+    /** A node id is `family:label[/tool]`; bounded so a stray header cannot become an unbounded property. */
+    private static final java.util.regex.Pattern NODE_ID_SHAPE =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9_:./-]{1,200}$");
+
+    /**
+     * Product-analytics attribution (workflow id + node id). Header-only like the
+     * billing scope: the DTO fields are {@code @JsonIgnore}, so a body value can
+     * never claim another workflow. Shape-checked because the gateway does not
+     * strip these headers: a malformed value is dropped, never forwarded. Read by
+     * {@code ApiCallAnalytics}; billing ignores them entirely.
+     */
+    static void applyAnalyticsHeaders(ToolExecutionRequest request,
+                                      String workflowId,
+                                      String nodeId) {
+        if (request == null) return;
+        if (workflowId != null && WORKFLOW_ID_SHAPE.matcher(workflowId.trim()).matches()) {
+            request.setAnalyticsWorkflowId(workflowId.trim());
+        }
+        if (nodeId != null && NODE_ID_SHAPE.matcher(nodeId.trim()).matches()) {
+            request.setAnalyticsNodeId(nodeId.trim());
         }
     }
 
@@ -258,6 +290,20 @@ public class CatalogV1Controller {
                             "error", com.apimarketplace.catalog.service.exception.InsufficientCreditsException.ERROR_CODE,
                             "message", e.getMessage(),
                             "delinquent", e.isDelinquent(),
+                            "toolId", toolId
+                    ));
+        } catch (com.apimarketplace.catalog.service.exception.PlanUpgradeRequiredException e) {
+            // Refused BEFORE any credential or billing work: this integration is not
+            // part of the account's plan. 403 and not 402 - nothing is missing from
+            // the balance, the feature is simply not sold at this tier - and the body
+            // names the plan that includes it so every surface can offer the way out.
+            log.info("Tool {} refused - plan upgrade required ({})", toolId, e.getRequiredPlan());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of(
+                            "success", false,
+                            "error", com.apimarketplace.catalog.service.exception.PlanUpgradeRequiredException.ERROR_CODE,
+                            "message", e.getMessage(),
+                            "requiredPlan", e.getRequiredPlan(),
                             "toolId", toolId
                     ));
         } catch (com.apimarketplace.catalog.service.exception.CredentialSelectionException e) {

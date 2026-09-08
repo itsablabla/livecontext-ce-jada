@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { clampMenuCenter } from '@/lib/utils/menuPlacement';
 
 /** Where the menu hangs relative to its trigger button. */
 export type PortalMenuPlacement = 'below' | 'above';
@@ -30,7 +31,16 @@ export interface UsePortalMenuResult {
  * pane handlers stop propagation, so a bubbling document listener would never
  * see a click on the canvas and the menu would stay stuck open.
  */
-export function usePortalMenu(placement: PortalMenuPlacement = 'below'): UsePortalMenuResult {
+/**
+ * @param placement which side of the trigger the menu hangs from
+ * @param menuWidth the menu's width in px. Optional: given, the centre is held
+ *   far enough from both edges for the whole menu to stay on screen; omitted,
+ *   the menu is centred on the trigger exactly as before.
+ */
+export function usePortalMenu(
+  placement: PortalMenuPlacement = 'below',
+  menuWidth?: number,
+): UsePortalMenuResult {
   const [open, setOpen] = React.useState(false);
   const [anchor, setAnchor] = React.useState<{ left: number; top: number } | null>(null);
   const [mounted, setMounted] = React.useState(false);
@@ -50,12 +60,13 @@ export function usePortalMenu(placement: PortalMenuPlacement = 'below'): UsePort
     if (!trigger) return;
     if (open) { setOpen(false); return; }
     const rect = trigger.getBoundingClientRect();
+    const center = rect.left + rect.width / 2;
     setAnchor({
-      left: rect.left + rect.width / 2,
+      left: menuWidth ? clampMenuCenter(center, menuWidth) : center,
       top: placement === 'above' ? rect.top - 6 : rect.bottom + 6,
     });
     setOpen(true);
-  }, [open, placement]);
+  }, [open, placement, menuWidth]);
 
   React.useEffect(() => {
     if (!open) return;

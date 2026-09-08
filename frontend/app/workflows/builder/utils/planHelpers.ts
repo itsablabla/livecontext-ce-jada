@@ -174,19 +174,24 @@ export function isBrowserAgentNode(node: Node<BuilderNodeData>): boolean {
  * All these nodes are stored in the agents array with a type field.
  */
 export function isAiReasoningNode(node: Node<BuilderNodeData>): boolean {
-  return isAgentNode(node) || isClassifyNode(node) || isGuardrailNode(node) || isBrowserAgentNode(node);
+  return isAgentNode(node) || isClassifyNode(node) || isGuardrailNode(node) || isBrowserAgentNode(node)
+    || isGenerateNode(node);
 }
 
 /**
  * Gets the agent type for a node.
  *
- * Order matters: browser_agent / classify / guardrail are checked before plain
- * 'agent' so the specialised nodes are not misclassified by the generic fallback.
+ * Order matters: browser_agent / classify / guardrail / generate are checked
+ * before plain 'agent' so the specialised nodes are not misclassified by the
+ * generic fallback.
  */
-export function getAgentType(node: Node<BuilderNodeData>): 'agent' | 'classify' | 'guardrail' | 'browser_agent' {
+export function getAgentType(
+  node: Node<BuilderNodeData>,
+): 'agent' | 'classify' | 'guardrail' | 'browser_agent' | 'generate' {
   if (isBrowserAgentNode(node)) return 'browser_agent';
   if (isClassifyNode(node)) return 'classify';
   if (isGuardrailNode(node)) return 'guardrail';
+  if (isGenerateNode(node)) return 'generate';
   return 'agent';
 }
 

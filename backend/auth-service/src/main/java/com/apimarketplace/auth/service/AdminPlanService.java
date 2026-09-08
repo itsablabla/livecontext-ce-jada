@@ -51,6 +51,13 @@ import java.util.Set;
 @Service
 public class AdminPlanService {
 
+    /**
+     * Product-analytics emitter (PostHog). Optional so hand-built test instances and
+     * analytics-less deployments are untouched; a null field emits nothing.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics;
+
     private static final Logger log = LoggerFactory.getLogger(AdminPlanService.class);
 
     /** The only plan codes an admin may grant from the admin-credits page. FREE = revert. */
@@ -196,6 +203,7 @@ public class AdminPlanService {
 
         log.info("Admin {} assigned comp plan {} -> {} to user {} (subId={})",
                 adminUserId, previousPlanCode, plan.getCode(), targetUserId, saved.getId());
+        if (analytics != null) analytics.planGranted(targetUserId, previousPlanCode, plan.getCode());
         return AssignPlanResult.ok(previousPlanCode, plan.getCode());
     }
 

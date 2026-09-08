@@ -73,6 +73,13 @@ public class UnifiedSignalService {
     @Autowired(required = false)
     private StringRedisTemplate redisTemplate;
 
+    /**
+     * Product-analytics emitter (PostHog). Optional so hand-built test instances
+     * and analytics-less deployments are untouched; a null field emits nothing.
+     */
+    @Autowired(required = false)
+    private com.apimarketplace.orchestrator.services.analytics.WorkflowAnalyticsEmitter workflowAnalyticsEmitter;
+
     @Value("${orchestrator.scheduled.signal-maintenance-pollers:true}")
     private boolean signalMaintenancePollersEnabled = true;
 
@@ -407,6 +414,9 @@ public class UnifiedSignalService {
         long waitDurationMs = entity.getCreatedAt() != null
                 ? Duration.between(entity.getCreatedAt(), now).toMillis()
                 : 0L;
+        if (workflowAnalyticsEmitter != null) {
+            workflowAnalyticsEmitter.signalResolved(entity, waitDurationMs);
+        }
 
         // Split context: check if OTHER ITEMS in the SAME (dag, epoch) still have pending
         // signals for this node - that's the only legit reason to keep the node in

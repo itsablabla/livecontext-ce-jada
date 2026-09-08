@@ -44,7 +44,7 @@ export default function ExpressionsPage() {
           rows={[
             [<code key="p">trigger:</code>, 'Trigger output', 'Webhook, chat, schedule, form, datasource, manual, and workflow triggers'],
             [<code key="p">mcp:</code>, 'Tool / API step output', 'Tool and API-call action nodes'],
-            [<code key="p">agent:</code>, 'AI step output', 'Agent, Guardrail, Classify'],
+            [<code key="p">agent:</code>, 'AI step output', 'Agent, Browser Agent, Guardrail, Classify, Generate'],
             [<code key="p">core:</code>, 'Control-flow node output', 'Decision, Switch, Loop, Split, Merge, Transform, Wait, Fork, and the rest of the core nodes'],
             [<code key="p">table:</code>, 'CRUD operation output', 'Table CRUD nodes (find, read, insert, update, delete rows)'],
             [<code key="p">interface:</code>, 'Interface data', 'Action data and user input captured by an interface node'],

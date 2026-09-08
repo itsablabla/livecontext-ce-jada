@@ -293,3 +293,41 @@ describe('RunSummaryBar - staying readable when there is no room', () => {
     expect(onBarClick).not.toHaveBeenCalled();
   });
 });
+describe('RunSummaryBar - what it forwards to the shared control', () => {
+  // The bar no longer draws the control itself, so the only thing keeping the
+  // canvas pill and the Run tab from looking dead while they work is this
+  // hand-off. Dropping either prop is invisible everywhere else.
+  it('forwards the action in flight, so the control spins', () => {
+    render(
+      <RunSummaryBar
+        currentRunInfo={{ runId: 'run-1', status: 'RUNNING' }}
+        onStop={vi.fn()}
+        actionPending="stop"
+      />,
+    );
+    const button = screen.getByRole('button', { name: /stopWorkflow/i });
+    expect(button.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('forwards the failure, so the control says the click did not work', () => {
+    render(
+      <RunSummaryBar
+        currentRunInfo={{ runId: 'run-1', status: 'RUNNING' }}
+        onStop={vi.fn()}
+        actionFailed
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: /runAction.failed/i }).getAttribute('data-run-action-failed'),
+    ).toBe('true');
+  });
+
+  it('forwards neither by default, so a resting control is not marked', () => {
+    render(
+      <RunSummaryBar currentRunInfo={{ runId: 'run-1', status: 'RUNNING' }} onStop={vi.fn()} />,
+    );
+    const button = screen.getByRole('button', { name: /stopWorkflow/i });
+    expect(button.getAttribute('aria-busy')).toBeNull();
+    expect(button.getAttribute('data-run-action-failed')).toBeNull();
+  });
+});

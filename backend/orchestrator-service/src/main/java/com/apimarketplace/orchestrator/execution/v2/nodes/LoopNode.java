@@ -71,7 +71,7 @@ public class LoopNode extends BaseNode {
         // Build resolved_params snapshot for inspector visibility (resolved values)
         Map<String, Object> resolvedParams = new LinkedHashMap<>();
         String resolvedCondition = loopCondition != null ? resolveTemplateString(loopCondition, context) : "(none)";
-        resolvedParams.put("condition", resolvedCondition);
+        resolvedParams.put("loopCondition", resolvedCondition);
         resolvedParams.put("maxIterations", maxIterations);
 
         // Build output

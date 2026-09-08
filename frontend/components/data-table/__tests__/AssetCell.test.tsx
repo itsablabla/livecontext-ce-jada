@@ -173,6 +173,61 @@ describe('AssetCell', () => {
     );
   });
 
+  it('leaves the link row by the back button, so picking "use a link" is not a one-way door', () => {
+    // The complaint this fixes: the three sources are replaced by the URL row, and the only way
+    // back used to be an Escape key nothing on screen mentioned.
+    renderCell({ isEditing: true });
+
+    fireEvent.click(screen.getByTitle('assetUrl'));
+    expect(screen.queryByTitle('upload')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle('assetUrlBack'));
+
+    expect(screen.getByTitle('upload')).toBeInTheDocument();
+    expect(screen.getByTitle('pickFromFiles')).toBeInTheDocument();
+    expect(screen.getByTitle('assetUrl')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('assetUrlPlaceholder')).not.toBeInTheDocument();
+  });
+
+  it('drops the rejected-URL message on the way back, so it cannot blame the upload button', () => {
+    const { onSaveAndExit } = renderCell({ isEditing: true });
+
+    fireEvent.click(screen.getByTitle('assetUrl'));
+    fireEvent.change(screen.getByPlaceholderText('assetUrlPlaceholder'), { target: { value: 'not a url' } });
+    fireEvent.click(screen.getByText('assetUrlConfirm'));
+    expect(screen.getByText('assetUrlInvalid')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle('assetUrlBack'));
+
+    expect(screen.queryByText('assetUrlInvalid')).not.toBeInTheDocument();
+    // Going back is not a write: nothing was chosen, so nothing is stored.
+    expect(onSaveAndExit).not.toHaveBeenCalled();
+  });
+
+  it('still accepts Escape as the keyboard route back', () => {
+    renderCell({ isEditing: true });
+
+    fireEvent.click(screen.getByTitle('assetUrl'));
+    fireEvent.keyDown(screen.getByPlaceholderText('assetUrlPlaceholder'), { key: 'Escape' });
+
+    expect(screen.getByTitle('upload')).toBeInTheDocument();
+  });
+
+  it('re-opens the link row on an empty draft after a round trip, never on the last typed URL', () => {
+    // Back has to CLEAR the draft, not hide it: coming back to a URL the cell already refused
+    // (or to one the user abandoned) reads as if it had been stored.
+    renderCell({ isEditing: true });
+
+    fireEvent.click(screen.getByTitle('assetUrl'));
+    fireEvent.change(screen.getByPlaceholderText('assetUrlPlaceholder'), {
+      target: { value: 'https://example.com/abandoned.png' },
+    });
+    fireEvent.click(screen.getByTitle('assetUrlBack'));
+    fireEvent.click(screen.getByTitle('assetUrl'));
+
+    expect(screen.getByPlaceholderText('assetUrlPlaceholder')).toHaveValue('');
+  });
+
   it('refuses a value that is not a usable URL, and stores nothing', () => {
     const { onSaveAndExit } = renderCell({ isEditing: true });
 

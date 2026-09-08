@@ -28,7 +28,7 @@ class MarketplaceQueryFilterTest {
         @DisplayName("Reads every refinement, case-insensitively")
         void readsEveryRefinement() {
             MarketplaceQueryFilter f =
-                    MarketplaceQueryFilter.fromRequest("ai", "agent", "Recent", "min_4", 7, "FREE");
+                    MarketplaceQueryFilter.fromRequest("ai", "agent", "Recent", "min_4", 7, "FREE", null);
 
             assertThat(f.categorySlug()).isEqualTo("ai");
             assertThat(f.displayMode()).isEqualTo("AGENT");
@@ -42,7 +42,7 @@ class MarketplaceQueryFilterTest {
         @DisplayName("An unknown sort / rating / price falls back to its neutral default")
         void unknownEnumsFallBack() {
             MarketplaceQueryFilter f =
-                    MarketplaceQueryFilter.fromRequest(null, null, "cheapest", "five_stars", null, "gratis");
+                    MarketplaceQueryFilter.fromRequest(null, null, "cheapest", "five_stars", null, "gratis", null);
 
             assertThat(f.sort()).isEqualTo(MarketplaceQueryFilter.Sort.POPULAR);
             assertThat(f.rating()).isEqualTo(MarketplaceQueryFilter.Rating.ANY);
@@ -56,14 +56,14 @@ class MarketplaceQueryFilterTest {
             // Narrowing on an unrecognised value would render an empty marketplace
             // with no way back except editing the URL - the failure mode has to be
             // "you see everything", not "you see nothing".
-            assertThat(MarketplaceQueryFilter.fromRequest(null, "APLICATION", null, null, null, null).displayMode())
+            assertThat(MarketplaceQueryFilter.fromRequest(null, "APLICATION", null, null, null, null, null).displayMode())
                     .isNull();
         }
 
         @Test
         @DisplayName("Blank strings are treated as absent, not as a value to match")
         void blanksAreAbsent() {
-            MarketplaceQueryFilter f = MarketplaceQueryFilter.fromRequest("  ", "  ", "  ", "  ", null, "  ");
+            MarketplaceQueryFilter f = MarketplaceQueryFilter.fromRequest("  ", "  ", "  ", "  ", null, "  ", null);
 
             assertThat(f.categorySlug()).isNull();
             assertThat(f.displayMode()).isNull();
@@ -73,7 +73,7 @@ class MarketplaceQueryFilterTest {
         @Test
         @DisplayName("Null enums are normalised, so no call site has to guard them")
         void nullEnumsAreNormalised() {
-            MarketplaceQueryFilter f = new MarketplaceQueryFilter("ai", null, null, null, null, null);
+            MarketplaceQueryFilter f = new MarketplaceQueryFilter("ai", null, null, null, null, null, null);
 
             assertThat(f.sort()).isEqualTo(MarketplaceQueryFilter.Sort.POPULAR);
             assertThat(f.rating()).isEqualTo(MarketplaceQueryFilter.Rating.ANY);
@@ -97,7 +97,7 @@ class MarketplaceQueryFilterTest {
         void resolvesAgainstTheGivenClock() {
             Instant now = Instant.parse("2026-08-24T12:00:00Z");
 
-            assertThat(MarketplaceQueryFilter.fromRequest(null, null, null, null, 7, null).publishedAfter(now))
+            assertThat(MarketplaceQueryFilter.fromRequest(null, null, null, null, 7, null, null).publishedAfter(now))
                     .isEqualTo(now.minus(Duration.ofDays(7)));
         }
 
@@ -112,8 +112,8 @@ class MarketplaceQueryFilterTest {
         @Test
         @DisplayName("A zero or negative window is dropped, not read as 'published in the future'")
         void nonPositiveWindowIsDropped() {
-            assertThat(MarketplaceQueryFilter.fromRequest(null, null, null, null, 0, null).windowDays()).isNull();
-            assertThat(MarketplaceQueryFilter.fromRequest(null, null, null, null, -3, null).windowDays()).isNull();
+            assertThat(MarketplaceQueryFilter.fromRequest(null, null, null, null, 0, null, null).windowDays()).isNull();
+            assertThat(MarketplaceQueryFilter.fromRequest(null, null, null, null, -3, null, null).windowDays()).isNull();
         }
     }
 
@@ -146,7 +146,7 @@ class MarketplaceQueryFilterTest {
         @Test
         @DisplayName("Emits every chosen refinement")
         void emitsChosenRefinements() {
-            assertThat(MarketplaceQueryFilter.fromRequest("ai", "AGENT", "recent", "min_4", 7, "free")
+            assertThat(MarketplaceQueryFilter.fromRequest("ai", "AGENT", "recent", "min_4", 7, "free", null)
                     .toQueryParams())
                     .containsEntry("category", "ai")
                     .containsEntry("displayMode", "AGENT")
@@ -166,7 +166,7 @@ class MarketplaceQueryFilterTest {
         @DisplayName("Re-parsing the emitted params yields the same filter")
         void roundTrips() {
             MarketplaceQueryFilter original =
-                    MarketplaceQueryFilter.fromRequest("ai", "AGENT", "installs", "min_3", 30, "paid");
+                    MarketplaceQueryFilter.fromRequest("ai", "AGENT", "installs", "min_3", 30, "paid", null);
 
             var params = original.toQueryParams();
             MarketplaceQueryFilter reparsed = MarketplaceQueryFilter.fromRequest(
@@ -175,9 +175,60 @@ class MarketplaceQueryFilterTest {
                     params.get("sort"),
                     params.get("rating"),
                     Integer.valueOf(params.get("days")),
-                    params.get("price"));
+                    params.get("price"), null);
 
             assertThat(reparsed).isEqualTo(original);
+        }
+
+        @Test
+        @DisplayName("Emits the studio axis, or a cloud-linked install asks for the WHOLE catalogue")
+        void emitsTheStudioAxis() {
+            // The defect this pins. A self-hosted install proxies its marketplace reads upstream
+            // through exactly this map: drop the axis here and a visitor who switched to Studio is
+            // served every application in the cloud catalogue, rendered under the Studio heading,
+            // with HTTP 200 and no error anywhere. The grid simply answers a narrower question with
+            // the widest possible answer.
+            assertThat(MarketplaceQueryFilter.fromRequest(null, null, null, null, null, null, true)
+                    .toQueryParams())
+                    .containsEntry("studio", "true");
+        }
+
+        @Test
+        @DisplayName("Emits an explicit studio=false rather than treating it as unset")
+        void emitsAnExplicitFalse() {
+            // The other direction, so a forwarder hardcoded to emit "true" cannot pass. `false`
+            // here means "the ordinary shelf, studio apps excluded", which is a real refinement -
+            // omitting it upstream would widen it back to "everything, studio ones included".
+            assertThat(MarketplaceQueryFilter.fromRequest(null, null, null, null, null, null, false)
+                    .toQueryParams())
+                    .containsEntry("studio", "false");
+        }
+
+        @Test
+        @DisplayName("Says nothing about the axis when the visitor did not choose one")
+        void omitsAnAbsentAxis() {
+            // Absent must stay absent: emitting a default would turn "no opinion" into a
+            // refinement the visitor never asked for on every ordinary marketplace read.
+            assertThat(MarketplaceQueryFilter.fromRequest("ai", null, null, null, null, null, null)
+                    .toQueryParams())
+                    .doesNotContainKey("studio");
+        }
+
+        @Test
+        @DisplayName("Re-parsing the emitted params preserves the studio axis")
+        void roundTripsTheStudioAxis() {
+            // toQueryParams stringifies; fromRequest takes a Boolean. The proxy performs exactly
+            // this hop, so a serialization that cannot survive it silently widens the grid.
+            MarketplaceQueryFilter original =
+                    MarketplaceQueryFilter.fromRequest("ai", null, null, null, null, null, true);
+
+            var params = original.toQueryParams();
+            MarketplaceQueryFilter reparsed = MarketplaceQueryFilter.fromRequest(
+                    params.get("category"), null, null, null, null, null,
+                    Boolean.valueOf(params.get("studio")));
+
+            assertThat(reparsed).isEqualTo(original);
+            assertThat(reparsed.studio()).isTrue();
         }
     }
 }

@@ -42,10 +42,9 @@ export interface SendError {
 
 export interface ChatPageStateV3 {
   // ============== SYNCHRONIZED STATE (from useChatSync) ==============
-  sidebarOpen: boolean;
-  setSidebarOpen: (open: boolean) => void;
-  sidebarCollapsed: boolean;
-  setSidebarCollapsed: (collapsed: boolean) => void;
+  // The sidebar's open/collapsed state is NOT here: it belongs to
+  // SidebarContext, which owns and persists it. This copy passed a second,
+  // never-persisted one through to a page that read it and did nothing with it.
   selectedModel: SelectedModel;
   setSelectedModel: (model: SelectedModel) => void;
   reasoningEffort: string;
@@ -267,10 +266,6 @@ export function useChatPageStateV3(options: UseChatPageStateOptions = {}): ChatP
   // ============== RETURN UNIFIED STATE ==============
   return {
     // Synchronized State
-    sidebarOpen: chatSync.state.sidebarOpen,
-    setSidebarOpen: chatSync.setSidebarOpen,
-    sidebarCollapsed: chatSync.state.sidebarCollapsed,
-    setSidebarCollapsed: chatSync.setSidebarCollapsed,
     selectedModel: chatSync.state.selectedModel,
     setSelectedModel: chatSync.setSelectedModel,
     reasoningEffort: chatSync.state.reasoningEffort,

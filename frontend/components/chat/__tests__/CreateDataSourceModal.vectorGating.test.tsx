@@ -7,9 +7,14 @@ import { NextIntlClientProvider } from 'next-intl';
 
 import enMessages from '@/messages/en.json';
 
-// Toggle edition per test - IS_CE is read at render time via the getter.
-let isCe = false;
-vi.mock('@/lib/edition', () => ({ get IS_CE() { return isCe; } }));
+// Toggle the PLAN verdict per test. The tile used to be gated by the build-time edition constant;
+// since 2026-09-03 it is gated by the account's plan, and this hook is the seam that answers it.
+// Mocking the hook rather than the network keeps the test about the tile.
+let vectorLock: { locked: boolean; requiredPlan: string | null } = { locked: false, requiredPlan: null };
+vi.mock('@/hooks/useVectorFeatureLock', () => ({
+  useVectorFeatureLock: () => vectorLock,
+  VECTOR_FEATURE_KEY: 'feature:vector_search',
+}));
 // The modal only needs orchestratorApi from the api barrel; stub it so nothing hits the network.
 vi.mock('@/lib/api', () => ({
   orchestratorApi: { createDataSource: vi.fn(), createColumn: vi.fn() },
@@ -44,39 +49,51 @@ function vectorTile(): HTMLButtonElement {
   return screen.getByText('Embedding vector').closest('button') as HTMLButtonElement;
 }
 
-describe('CreateDataSourceModal - vector column is self-hosted only', () => {
-  it('cloud: the Embedding vector tile is disabled and shows the "CE only" badge', () => {
-    isCe = false;
+describe('CreateDataSourceModal - the vector column is a plan capability', () => {
+  it('a plan that does not include vectors: the tile is disabled and NAMES the plan that would', () => {
+    vectorLock = { locked: true, requiredPlan: 'PRO' };
     renderModal();
     openColumnPicker();
 
     const tile = vectorTile();
     expect(tile).toBeDisabled();
-    expect(within(tile).getByText('CE only')).toBeInTheDocument();
+    // The plan code itself is the badge: "PRO" tells the reader what to do, "CE only" told a
+    // cloud customer only that they could not have it.
+    expect(within(tile).getByText('PRO')).toBeInTheDocument();
     expect(tile).toHaveAttribute(
       'title',
-      'Available on the self-hosted Community Edition only',
+      'Available from the PRO plan. Upgrade to use embedding columns.',
     );
   });
 
-  it('self-hosted (CE): the Embedding vector tile is selectable with no badge', () => {
-    isCe = true;
+  it('a plan that includes vectors: the tile is selectable with no marker', () => {
+    vectorLock = { locked: false, requiredPlan: null };
     renderModal();
     openColumnPicker();
 
     const tile = vectorTile();
     expect(tile).not.toBeDisabled();
-    expect(within(tile).queryByText('CE only')).not.toBeInTheDocument();
+    expect(within(tile).queryByText('PRO')).not.toBeInTheDocument();
   });
 
-  it('a non-gated tile (Rich text) stays selectable even in cloud', () => {
-    isCe = false;
+  it('the tile is shown either way, so the capability stays discoverable', () => {
+    // Hiding it would be tidier and would cost every locked account the knowledge that the
+    // feature exists at all, which is the reason an upsell is a marker and not a deletion.
+    vectorLock = { locked: true, requiredPlan: 'PRO' };
+    renderModal();
+    openColumnPicker();
+
+    expect(screen.getByText('Embedding vector')).toBeInTheDocument();
+  });
+
+  it('a non-gated tile (Rich text) stays selectable while vectors are locked', () => {
+    vectorLock = { locked: true, requiredPlan: 'PRO' };
     renderModal();
     openColumnPicker();
 
     const textTile = screen.getByText('Rich text').closest('button') as HTMLButtonElement;
     expect(textTile).not.toBeDisabled();
-    expect(within(textTile).queryByText('CE only')).not.toBeInTheDocument();
+    expect(within(textTile).queryByText('PRO')).not.toBeInTheDocument();
   });
 });
 
@@ -107,8 +124,8 @@ describe('CreateDataSourceModal - a vector column added at table-creation time c
     fireEvent.click(screen.getByRole('button', { name: /add column/i }));
   }
 
-  it('CE: a vector column sends display={dimension,metric,label} under "display" (NOT displayConfig) so the backend accepts it', async () => {
-    isCe = true;
+  it('a vector column sends display={dimension,metric,label} under "display" (NOT displayConfig) so the backend accepts it', async () => {
+    vectorLock = { locked: false, requiredPlan: null };
     renderModal();
     stageColumn('Embedding vector', 'embedding');
 
@@ -134,7 +151,7 @@ describe('CreateDataSourceModal - a vector column added at table-creation time c
     // Same bug class: select/multi_select require display.options; the old wrong
     // key dropped them, so a select column created at table-creation time was
     // silently discarded too. The preset defaults must reach the backend.
-    isCe = false;
+    vectorLock = { locked: true, requiredPlan: 'PRO' };
     renderModal();
     stageColumn('Select', 'status');
 

@@ -8,6 +8,7 @@ import org.springframework.http.HttpHeaders;
 import com.apimarketplace.common.web.OrgContextHeaderForwarder;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 import com.apimarketplace.auth.client.entitlement.LimitExceededError;
@@ -15,6 +16,7 @@ import com.apimarketplace.auth.client.entitlement.LimitExceededException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.time.Duration;
 import java.util.*;
 
 /**
@@ -26,6 +28,15 @@ public class PublicationClient {
     private static final Logger log = LoggerFactory.getLogger(PublicationClient.class);
 
     private final RestTemplate restTemplate;
+    /**
+     * Tight-timeout template for reads issued from a user-facing request thread.
+     * The default {@link RestTemplate} above has NO timeouts, which is tolerable
+     * for the publish / acquire paths (rare, user-initiated, large payloads) but
+     * not for a read that a page render waits on: a stalled publication-service
+     * would hold the caller's thread open indefinitely. Same idiom as
+     * {@code AuthClient.boundedRestTemplate}.
+     */
+    private final RestTemplate boundedRestTemplate = createBoundedRestTemplate();
     private final String baseUrl;
 
     public PublicationClient(String publicationServiceUrl) {
@@ -36,6 +47,13 @@ public class PublicationClient {
     public PublicationClient(RestTemplate restTemplate, String publicationServiceUrl) {
         this.restTemplate = restTemplate;
         this.baseUrl = publicationServiceUrl;
+    }
+
+    private static RestTemplate createBoundedRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(2));
+        factory.setReadTimeout(Duration.ofSeconds(5));
+        return new RestTemplate(factory);
     }
 
     // ========== Workflow-level queries ==========
@@ -449,6 +467,41 @@ public class PublicationClient {
     }
 
     /**
+     * Same read as {@link #getPublicationsByPublisher(String)} but pinned to the
+     * user's PERSONAL scope: no {@code X-Organization-ID} is sent, and the
+     * inbound request's org header is deliberately NOT forwarded.
+     *
+     * <p>Why a separate method rather than a flag: the internal endpoint switches
+     * scope on the presence of that header (org present = the whole workspace's
+     * publications, visible to every teammate). Badges are personal trophies, so
+     * evaluating one inside an org workspace must not count a colleague's
+     * publications toward the caller's badge - and the org header IS present on
+     * that path, because the evaluation runs inside the user's own request.
+     *
+     * <p>Returns an empty list on any failure; the caller treats "no data" as
+     * zero and simply does not unlock publication badges on that pass.
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getPublicationsByPublisherPersonalScope(String tenantId) {
+        String url = baseUrl + "/api/internal/publications/by-publisher/" + tenantId;
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Content-Type", "application/json");
+        if (tenantId != null) {
+            headers.set("X-User-ID", tenantId);
+        }
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        try {
+            ResponseEntity<List<Map<String, Object>>> response = boundedRestTemplate.exchange(
+                    url, HttpMethod.GET, entity, new ParameterizedTypeReference<>() {});
+            return response.getBody() != null ? response.getBody() : Collections.emptyList();
+        } catch (Exception e) {
+            log.warn("Failed to get personal-scope publications for publisher={}: {}",
+                    tenantId, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
      * Org-aware overload - sets {@code X-Organization-ID} explicitly so the
      * caller's active workspace travels with the acquire request even when
      * there is no inbound {@link org.springframework.web.context.request.RequestContextHolder}
@@ -483,6 +536,8 @@ public class PublicationClient {
         } catch (HttpClientErrorException.Forbidden e) {
             // CE-exclusive: the deployment cannot run this publication. Typed so the
             // caller reports the constraint instead of a generic acquire failure.
+            PublicationPlanUpgradeException pex = parsePlanUpgrade(e);
+            if (pex != null) throw pex;
             CeExclusiveAcquisitionException cex = parseCeExclusive(e);
             if (cex != null) throw cex;
             log.error("Failed to acquire publication={}: {}", publicationId, e.getMessage());
@@ -501,6 +556,33 @@ public class PublicationClient {
      * null for any OTHER 403 (a genuine authorization failure), which then keeps
      * its existing generic handling.
      */
+    /**
+     * Sibling of {@link #parseCeExclusive} for the refusal that an upgrade lifts. Same 403, a
+     * different {@code code}, and it must stay a different exception: the CE one is documented to
+     * agents as terminal, and reporting a plan refusal through it would tell the user to give up
+     * on something one upgrade away.
+     */
+    @SuppressWarnings("unchecked")
+    private PublicationPlanUpgradeException parsePlanUpgrade(HttpClientErrorException e) {
+        try {
+            Map<String, Object> body = LIMIT_MAPPER.readValue(e.getResponseBodyAsByteArray(), Map.class);
+            if (!"PLAN_UPGRADE_REQUIRED".equals(body.get("code"))) {
+                return null;
+            }
+            Object error = body.get("error");
+            Object plan = body.get("requiredPlan");
+            List<String> features = body.get("features") instanceof List<?> raw
+                    ? raw.stream().filter(String.class::isInstance).map(String.class::cast).toList()
+                    : List.of();
+            return new PublicationPlanUpgradeException(
+                    error instanceof String text ? text : "This app requires a higher plan.",
+                    plan instanceof String p ? p : null,
+                    features);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private CeExclusiveAcquisitionException parseCeExclusive(HttpClientErrorException e) {
         try {
@@ -690,6 +772,8 @@ public class PublicationClient {
             // Same CE-exclusive refusal the workflow path recognises - the
             // internal controller emits the identical 403 body on all three
             // acquire endpoints, so all three must decode it.
+            PublicationPlanUpgradeException pex = parsePlanUpgrade(e);
+            if (pex != null) throw pex;
             CeExclusiveAcquisitionException cex = parseCeExclusive(e);
             if (cex != null) throw cex;
             log.error("Failed to acquire agent publication {}: {}", publicationId, e.getMessage());
@@ -798,6 +882,8 @@ public class PublicationClient {
         } catch (HttpClientErrorException.Forbidden e) {
             // See acquireAgentPublication: all three internal acquire endpoints
             // emit the same CE-exclusive 403 body.
+            PublicationPlanUpgradeException pex = parsePlanUpgrade(e);
+            if (pex != null) throw pex;
             CeExclusiveAcquisitionException cex = parseCeExclusive(e);
             if (cex != null) throw cex;
             log.error("Failed to acquire resource publication {}: {}", publicationId, e.getMessage());

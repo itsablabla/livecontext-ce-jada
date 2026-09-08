@@ -2184,4 +2184,61 @@ class StateSnapshotServiceTest {
                     "no fire has happened yet");
         }
     }
+
+    @Nested
+    @DisplayName("product analytics wiring (workflow_epoch_completed)")
+    class AnalyticsWiring {
+
+        private com.apimarketplace.orchestrator.services.analytics.WorkflowAnalyticsEmitter emitter;
+
+        @BeforeEach
+        void wireEmitter() {
+            emitter = mock(com.apimarketplace.orchestrator.services.analytics.WorkflowAnalyticsEmitter.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(service, "workflowAnalyticsEmitter", emitter);
+        }
+
+        private WorkflowRunEntity openRun() throws Exception {
+            WorkflowRunEntity run = new WorkflowRunEntity();
+            run.setRunIdPublic("run-1");
+            run.setStatus(RunStatus.RUNNING);
+            run.setStateSnapshot(new ObjectMapper().registerModule(new JavaTimeModule())
+                    .writeValueAsString(StateSnapshot.empty()));
+            when(runRepository.findByRunIdPublicForUpdate("run-1")).thenReturn(Optional.of(run));
+            service.openEpoch("run-1", "trigger:t", 1);
+            return run;
+        }
+
+        @Test
+        @DisplayName("closing an open epoch at cycle end emits exactly once with close_reason=cycle_end; closing it again emits nothing")
+        void cycleEndEmitsOnce() throws Exception {
+            WorkflowRunEntity run = openRun();
+
+            service.closeEpoch("run-1", "trigger:t", 1);
+            service.closeEpoch("run-1", "trigger:t", 1);
+
+            verify(emitter, times(1)).epochCompleted(same(run), eq(1),
+                    any(EpochState.class), anyLong(), eq("cycle_end"));
+        }
+
+        @Test
+        @DisplayName("a deferred close (next fire / cancel) emits with close_reason=deferred, once per still-open epoch")
+        void deferredCloseEmits() throws Exception {
+            WorkflowRunEntity run = openRun();
+
+            service.closeAllActiveEpochs("run-1", "trigger:t");
+            service.closeAllActiveEpochs("run-1", "trigger:t");
+
+            verify(emitter, times(1)).epochCompleted(same(run), eq(1),
+                    any(EpochState.class), anyLong(), eq("deferred"));
+        }
+
+        @Test
+        @DisplayName("no emitter wired: closing still writes the epoch header")
+        void noEmitter() throws Exception {
+            org.springframework.test.util.ReflectionTestUtils.setField(service, "workflowAnalyticsEmitter", null);
+            openRun();
+            service.closeEpoch("run-1", "trigger:t", 1);
+            verify(workflowEpochService).closeEpoch(eq("run-1"), eq("trigger:t"), eq(1), any(EpochState.class), anyLong());
+        }
+    }
 }

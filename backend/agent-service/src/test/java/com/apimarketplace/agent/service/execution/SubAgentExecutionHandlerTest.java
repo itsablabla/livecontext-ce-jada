@@ -594,7 +594,8 @@ class SubAgentExecutionHandlerTest {
                 "agentAccessMode", "read",
                 "applicationAccessMode", "write",
                 "skillAccessMode", "read",
-                "fileAccessMode", "read"
+                "fileAccessMode", "read",
+                "memoryAccessMode", "read"
             ));
             when(agentService.getAgent(AGENT_ID, TENANT_ID)).thenReturn(Optional.of(entity));
             when(conversationServiceClient.findOrCreateAgentConversation(any(), any(), any(), any())).thenReturn("conv-1");
@@ -624,6 +625,10 @@ class SubAgentExecutionHandlerTest {
             assertThat(subCreds).containsEntry("applicationAccessMode", "write");
             assertThat(subCreds).containsEntry("skillAccessMode", "read");
             assertThat(subCreds).containsEntry("fileAccessMode", "read");
+            // Memory rides the same cascade. A child that inherits every other mode
+            // but not this one falls back to the permissive default on the one axis
+            // whose writes are durable and outlive the conversation that made them.
+            assertThat(subCreds).containsEntry("memoryAccessMode", "read");
         }
 
         @Test
@@ -2274,6 +2279,291 @@ class SubAgentExecutionHandlerTest {
         void timeoutClampedToRaisedCap() {
             AgentLoopContext context = runAndCaptureContext(4096, 9000);
             assertThat(context.executionTimeout()).isEqualTo(7200);
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    //  Model execution links
+    // ──────────────────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Model execution links")
+    class ExecutionLinks {
+
+        private final com.apimarketplace.agent.service.ModelExecutionLinkService.ExecutionRoute apiRoute =
+            new com.apimarketplace.agent.service.ModelExecutionLinkService.ExecutionRoute("openrouter", "openai/gpt-4o");
+        private final com.apimarketplace.agent.service.ModelExecutionLinkService.ExecutionRoute bridgeRoute =
+            new com.apimarketplace.agent.service.ModelExecutionLinkService.ExecutionRoute("claude-code", "claude-opus-4-8");
+
+        @Mock private SubAgentBridgeClient bridgeClientMock;
+
+        private ExecutionLinkRouter router;
+
+        @BeforeEach
+        void wireRouter() {
+            router = mock(ExecutionLinkRouter.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(handler, "executionLinkRouter", router);
+        }
+
+        @Test
+        @DisplayName("a linked sub-agent runs the loop on the EXECUTION pair")
+        void linkedSubAgentRunsOnExecutionPair() {
+            when(router.runnableRoute("openai", "gpt-4", "SUB_AGENT")).thenReturn(apiRoute);
+
+            AgentLoopContext context = runLinkedAndCaptureContext();
+
+            assertThat(context.provider()).isEqualTo("openrouter");
+            assertThat(context.model()).isEqualTo("openai/gpt-4o");
+        }
+
+        @Test
+        @DisplayName("an unlinked sub-agent keeps its own pair")
+        void unlinkedSubAgentIsUnchanged() {
+            when(router.runnableRoute(any(), any(), any())).thenReturn(null);
+
+            AgentLoopContext context = runLinkedAndCaptureContext();
+
+            assertThat(context.provider()).isEqualTo("openai");
+            assertThat(context.model()).isEqualTo("gpt-4");
+        }
+
+        @Test
+        @DisplayName("a bridge-linked sub-agent dispatches to the bridge in restricted API mode")
+        void bridgeLinkedSubAgentDispatchesRestricted() {
+            ReflectionTestUtils.setField(handler, "bridgeClient", bridgeClientMock);
+            when(router.runnableRoute("openai", "gpt-4", "SUB_AGENT")).thenReturn(bridgeRoute);
+            AgentEntity entity = createAgent();
+            when(agentService.getAgent(AGENT_ID, TENANT_ID)).thenReturn(Optional.of(entity));
+            when(conversationServiceClient.findOrCreateAgentConversation(any(), any(), any(), any())).thenReturn("conv-1");
+            var mockCallback = mock(ConversationRedisStreamingCallback.ConversationCallback.class);
+            when(conversationRedisStreamingCallback.forExecution(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(mockCallback);
+            when(bridgeClientMock.execute(any(AgentExecutionRequestDto.class))).thenReturn(
+                new AgentExecutionResponseDto(true, "ok", "ok", List.of(), 1, Map.of(), null, 10L,
+                    "claude-code", "claude-opus-4-8", List.of(), "COMPLETED",
+                    Map.of(), List.of(), List.of(), List.of(), List.of(), List.of(), null));
+
+            ToolCall toolCall = createToolCall(Map.of(
+                "action", "execute", "agent_id", AGENT_ID.toString(), "prompt", "hello"));
+            handler.execute(toolCall, TENANT_ID, defaultCredentials());
+
+            ArgumentCaptor<AgentExecutionRequestDto> dispatched =
+                ArgumentCaptor.forClass(AgentExecutionRequestDto.class);
+            verify(bridgeClientMock).execute(dispatched.capture());
+            verify(agentLoopService, never()).execute(any(AgentLoopContext.class), any(StreamingCallback.class));
+            assertThat(dispatched.getValue().provider()).isEqualTo("claude-code");
+            assertThat(dispatched.getValue().model()).isEqualTo("claude-opus-4-8");
+            // Without the marker the CLI would run a linked model with its native file
+            // tools and the project cwd, which the billed API model never has.
+            assertThat(dispatched.getValue().credentials())
+                .containsEntry(ExecutionLinkRouter.RESTRICTED_TOOLSET_KEY, Boolean.TRUE);
+        }
+
+        @Test
+        @DisplayName("a linked sub-agent is recorded on its billed pair even though the loop reports the execution one")
+        void linkedSubAgentRecordsTheBilledPair() {
+            when(router.runnableRoute(any(), any(), any())).thenReturn(apiRoute);
+            // The loop echoes what it actually ran on, which is what production does. If the
+            // recording ever read the RESULT instead of the agent entity, the ledger would
+            // charge the execution pair and this assertion would catch it.
+            runLinkedAndCaptureContext(AgentLoopResult.success(
+                CompletionResponse.text("OK"), List.of(), 1, null, 100, "openrouter", "openai/gpt-4o"));
+
+            ArgumentCaptor<com.apimarketplace.agent.client.dto.AgentObservabilityRequest> recorded =
+                ArgumentCaptor.forClass(com.apimarketplace.agent.client.dto.AgentObservabilityRequest.class);
+            verify(observabilityService).recordFromRequest(recorded.capture());
+            // The ledger is fed from this row: a link moves execution, never the price.
+            assertThat(recorded.getValue().getProvider()).isEqualTo("openai");
+            assertThat(recorded.getValue().getModel()).isEqualTo("gpt-4");
+        }
+
+        @Test
+        @DisplayName("an API-targeted link leaves the shared credentials map free of the restricted marker")
+        void apiLinkedSubAgentIsNotRestricted() {
+            when(router.runnableRoute(any(), any(), any())).thenReturn(apiRoute);
+
+            AgentLoopContext context = runLinkedAndCaptureContext();
+
+            // subCredentials is shared with observability and task resolution, so a stray
+            // marker would travel further than the one run that set it.
+            assertThat(context.credentials())
+                .doesNotContainKey(ExecutionLinkRouter.RESTRICTED_TOOLSET_KEY);
+        }
+
+        @Test
+        @DisplayName("an UNLINKED bridge sub-agent keeps its tools: the restriction is for linked runs only")
+        void unlinkedBridgeSubAgentIsNotRestricted() {
+            ReflectionTestUtils.setField(handler, "bridgeClient", bridgeClientMock);
+            when(router.runnableRoute(any(), any(), any())).thenReturn(null);
+            AgentEntity entity = createAgent();
+            entity.setModelProvider("claude-code");
+            entity.setModelName("claude-sonnet-4-6");
+            when(agentService.getAgent(AGENT_ID, TENANT_ID)).thenReturn(Optional.of(entity));
+            when(conversationServiceClient.findOrCreateAgentConversation(any(), any(), any(), any())).thenReturn("conv-1");
+            var mockCallback = mock(ConversationRedisStreamingCallback.ConversationCallback.class);
+            when(conversationRedisStreamingCallback.forExecution(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(mockCallback);
+            when(bridgeClientMock.execute(any(AgentExecutionRequestDto.class))).thenReturn(
+                new AgentExecutionResponseDto(true, "ok", "ok", List.of(), 1, Map.of(), null, 10L,
+                    "claude-code", "claude-sonnet-4-6", List.of(), "COMPLETED",
+                    Map.of(), List.of(), List.of(), List.of(), List.of(), List.of(), null));
+
+            ToolCall toolCall = createToolCall(Map.of(
+                "action", "execute", "agent_id", AGENT_ID.toString(), "prompt", "hello"));
+            handler.execute(toolCall, TENANT_ID, defaultCredentials());
+
+            ArgumentCaptor<AgentExecutionRequestDto> dispatched =
+                ArgumentCaptor.forClass(AgentExecutionRequestDto.class);
+            verify(bridgeClientMock).execute(dispatched.capture());
+            // A sub-agent chosen on a CLI provider is a real agent with a real toolset,
+            // unlike the single-shot classify and guardrail judges, so nothing is removed.
+            assertThat(dispatched.getValue().credentials())
+                .doesNotContainKey(ExecutionLinkRouter.RESTRICTED_TOOLSET_KEY);
+        }
+
+        @Test
+        @DisplayName("a linked sub-agent clamps output tokens and reasoning effort against the EXECUTION model")
+        void linkedSubAgentResolvesModelLimitsOnTheExecutionPair() {
+            when(router.runnableRoute(any(), any(), any())).thenReturn(apiRoute);
+            var catalog = mock(com.apimarketplace.agent.service.ModelCatalogService.class);
+            ReflectionTestUtils.setField(handler, "modelCatalog", catalog);
+            when(catalog.resolveMaxOutputTokens("openrouter", "openai/gpt-4o")).thenReturn(4096);
+            when(catalog.resolveEffortWithDefault(any(), org.mockito.ArgumentMatchers.eq("openrouter"),
+                org.mockito.ArgumentMatchers.eq("openai/gpt-4o"))).thenReturn("high");
+
+            AgentLoopContext context = runLinkedAndCaptureContext();
+
+            // Both describe the model that actually runs the turn, so they follow the
+            // execution pair - the same rule the agent path applies.
+            assertThat(context.maxTokens()).isEqualTo(4096);
+            assertThat(context.reasoningEffort()).isEqualTo("high");
+        }
+
+        @Test
+        @DisplayName("the sub-agent surface matches no scope, so only an ALL link can apply")
+        void resolvesWithTheSubAgentSource() {
+            when(router.runnableRoute(any(), any(), any())).thenReturn(null);
+
+            runLinkedAndCaptureContext();
+
+            verify(router).runnableRoute("openai", "gpt-4", "SUB_AGENT");
+        }
+
+        private AgentLoopContext runLinkedAndCaptureContext() {
+            return runLinkedAndCaptureContext(AgentLoopResult.success(
+                CompletionResponse.text("OK"), List.of(), 1, null, 100, "openai", "gpt-4"));
+        }
+
+        private AgentLoopContext runLinkedAndCaptureContext(AgentLoopResult loopResult) {
+            AgentEntity entity = createAgent();
+            when(agentService.getAgent(AGENT_ID, TENANT_ID)).thenReturn(Optional.of(entity));
+            when(conversationServiceClient.findOrCreateAgentConversation(any(), any(), any(), any())).thenReturn("conv-1");
+            var mockCallback = mock(ConversationRedisStreamingCallback.ConversationCallback.class);
+            when(conversationRedisStreamingCallback.forExecution(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(mockCallback);
+            when(agentLoopService.execute(any(AgentLoopContext.class), any(StreamingCallback.class)))
+                .thenReturn(loopResult);
+
+            ToolCall toolCall = createToolCall(Map.of(
+                "action", "execute", "agent_id", AGENT_ID.toString(), "prompt", "hello"));
+            handler.execute(toolCall, TENANT_ID, defaultCredentials());
+
+            ArgumentCaptor<AgentLoopContext> captor = ArgumentCaptor.forClass(AgentLoopContext.class);
+            verify(agentLoopService).execute(captor.capture(), any(StreamingCallback.class));
+            return captor.getValue();
+        }
+    }
+
+    @Nested
+    @DisplayName("long-term memory injection")
+    class LongTermMemoryInjection {
+
+        private void setupAgentExecution() {
+            AgentEntity entity = createAgent();
+            when(agentService.getAgent(AGENT_ID, TENANT_ID)).thenReturn(Optional.of(entity));
+            when(conversationServiceClient.findOrCreateAgentConversation(any(), any(), any(), any()))
+                .thenReturn("conv-sub");
+            var mockCallback = mock(ConversationRedisStreamingCallback.ConversationCallback.class);
+            when(conversationRedisStreamingCallback.forExecution(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(mockCallback);
+            AgentLoopResult loopResult = AgentLoopResult.success(
+                CompletionResponse.text("Done"), List.of(), 1, null, 100, "openai", "gpt-4");
+            when(agentLoopService.execute(any(AgentLoopContext.class), any(StreamingCallback.class)))
+                .thenReturn(loopResult);
+        }
+
+        @Test
+        @DisplayName("the block the renderer produced really reaches the sub-agent's prompt")
+        void theBlockReachesTheLoop() {
+            setupAgentExecution();
+            var section = mock(com.apimarketplace.agent.memory.MemoryPromptSection.class);
+            // Returns something that could only have come from the renderer, and
+            // returns it as the WHOLE prompt, so an implementation that called
+            // appendTo and threw the result away fails here. A source scan for the
+            // call site cannot tell those two apart.
+            when(section.appendTo(anyString(), any(), any())).thenReturn("PROMPT-WITH-MEMORY-BLOCK");
+            ReflectionTestUtils.setField(handler, "memoryPromptSection", section);
+
+            ToolCall toolCall = createToolCall(Map.of(
+                "action", "execute", "agent_id", AGENT_ID.toString(), "prompt", "New task"));
+            handler.execute(toolCall, TENANT_ID, defaultCredentials());
+
+            ArgumentCaptor<AgentLoopContext> contextCaptor = ArgumentCaptor.forClass(AgentLoopContext.class);
+            verify(agentLoopService).execute(contextCaptor.capture(), any(StreamingCallback.class));
+            assertThat(contextCaptor.getValue().systemPrompt()).isEqualTo("PROMPT-WITH-MEMORY-BLOCK");
+        }
+
+        @Test
+        @DisplayName("scopes the lookup to the sub-agent itself, so it cannot read a sibling's private entries")
+        void scopesTheLookupToTheSubAgent() {
+            setupAgentExecution();
+            var section = mock(com.apimarketplace.agent.memory.MemoryPromptSection.class);
+            when(section.appendTo(anyString(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
+            ReflectionTestUtils.setField(handler, "memoryPromptSection", section);
+
+            ToolCall toolCall = createToolCall(Map.of(
+                "action", "execute", "agent_id", AGENT_ID.toString(), "prompt", "New task"));
+            handler.execute(toolCall, TENANT_ID, defaultCredentials());
+
+            // Passing the PARENT's id here, or null, would hand the sub-agent either
+            // another agent's private memory or none of its own. Neither is visible
+            // in the rendered prompt, so it has to be asserted on the argument.
+            ArgumentCaptor<java.util.UUID> agentCaptor = ArgumentCaptor.forClass(java.util.UUID.class);
+            verify(section).appendTo(anyString(), any(), agentCaptor.capture());
+            assertThat(agentCaptor.getValue()).isEqualTo(AGENT_ID);
+        }
+
+        @Test
+        @DisplayName("runs WITHOUT memory when the enrichment throws, rather than losing the whole delegation")
+        void aFailedEnrichmentDoesNotFailTheDelegation() {
+            setupAgentExecution();
+            var section = mock(com.apimarketplace.agent.memory.MemoryPromptSection.class);
+            when(section.appendTo(anyString(), any(), any()))
+                .thenThrow(new IllegalStateException("memory backend is down"));
+            ReflectionTestUtils.setField(handler, "memoryPromptSection", section);
+
+            ToolCall toolCall = createToolCall(Map.of(
+                "action", "execute", "agent_id", AGENT_ID.toString(), "prompt", "New task"));
+            handler.execute(toolCall, TENANT_ID, defaultCredentials());
+
+            // "Not wired" was already covered; this is the case where it IS wired and
+            // misbehaves, which is the one that happens in production. A delegation that
+            // dies here loses the sub-agent's entire run and hands the parent an error
+            // it can do nothing about, over an enrichment.
+            verify(agentLoopService).execute(any(AgentLoopContext.class), any(StreamingCallback.class));
+        }
+
+                @Test
+        @DisplayName("runs normally when memory is not wired at all, since it is an enrichment and not a dependency")
+        void runsWithoutTheRenderer() {
+            setupAgentExecution();
+            ReflectionTestUtils.setField(handler, "memoryPromptSection", null);
+
+            ToolCall toolCall = createToolCall(Map.of(
+                "action", "execute", "agent_id", AGENT_ID.toString(), "prompt", "New task"));
+            handler.execute(toolCall, TENANT_ID, defaultCredentials());
+
+            verify(agentLoopService).execute(any(AgentLoopContext.class), any(StreamingCallback.class));
         }
     }
 }

@@ -85,6 +85,9 @@ class ApplicationToolsProviderTest {
 
             assertThat(paramNames).containsExactlyInAnyOrder(
                 "action", "workflow_id", "application_id", "query", "category", "title", "description",
+                // A SECOND axis beside category, not a replacement for it: an application keeps its
+                // category and may also sit on the Studio shelf.
+                "studio",
                 "data_inputs", "trigger_id", "run_id", "reason", "mode", "epoch", "node_id",
                 "item_index", "iteration", "spawn", "field", "max_bytes", "limit", "offset", "topics"
             );

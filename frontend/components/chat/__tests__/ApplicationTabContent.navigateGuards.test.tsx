@@ -20,6 +20,7 @@ const iframeOnActionRef = vi.hoisted(() => ({
   current: undefined as ((ref: string, data: Record<string, unknown>) => Promise<void> | void) | undefined,
 }));
 
+vi.mock('@/i18n/navigation', () => ({ usePathname: () => '/app/workflow/wf-1' }));
 vi.mock('@/lib/api/orchestrator/publication.service', () => ({
   publicationService: { getShowcaseRender: vi.fn(), resetApplicationData: vi.fn() },
 }));

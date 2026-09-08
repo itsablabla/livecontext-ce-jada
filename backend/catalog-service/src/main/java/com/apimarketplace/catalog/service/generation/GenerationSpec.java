@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -23,7 +24,7 @@ import java.util.regex.Pattern;
  *
  * <p>This is what turns an ordinary catalog endpoint into one or more
  * <em>generation models</em>: addressable by a single model id through the
- * unified {@code generation} tool and the {@code core:generate} node, priced
+ * unified {@code generation} tool and the {@code agent:generate} node, priced
  * per model, and executed through the catalog's existing credential + billing
  * path. Adding a provider or a whole new format is therefore a JSON change plus
  * a targeted re-import, with no Java to write.
@@ -162,16 +163,39 @@ public record GenerationSpec(
      *                 (Gemini's {@code inlineData}). Null when the encoding
      *                 already carries it, as a data URL does.
      */
+    /**
+     * @param itemConstants paths written BESIDE each file, moving with it.
+     *
+     *        <p>Some providers do not take a bare URL in an array: they take an OBJECT per element,
+     *        and the object needs fields the file itself does not supply - Seedance's
+     *        {@code content[n]} wants {@code type: "image_url"} and a {@code role} next to the URL.
+     *        The endpoint's own {@code constants} cannot say that: they are written once, at a
+     *        fixed path, whether or not a file was given, so an absent file would leave an element
+     *        carrying a type and a role and NO url - a malformed request the provider refuses after
+     *        the reservation.
+     *
+     *        <p>These are written only for the files actually present, and their last index shifts
+     *        exactly as {@code path}'s does, so element 2's type lands beside element 2's url.
+     */
     public record ParamBinding(String path, BigDecimal scale, AssetEncoding encoding, String mimePath,
-                                AssetRole role, int maxItems) {
+                                AssetRole role, int maxItems, Map<String, Object> itemConstants) {
+
+        public ParamBinding {
+            itemConstants = itemConstants == null ? Map.of() : Map.copyOf(itemConstants);
+        }
 
         /** A binding that only moves a value, which is every non-asset parameter. */
         public ParamBinding(String path, BigDecimal scale) {
-            this(path, scale, null, null, null, 1);
+            this(path, scale, null, null, null, 1, Map.of());
         }
 
         public ParamBinding(String path, BigDecimal scale, AssetEncoding encoding, String mimePath) {
-            this(path, scale, encoding, mimePath, null, 1);
+            this(path, scale, encoding, mimePath, null, 1, Map.of());
+        }
+
+        public ParamBinding(String path, BigDecimal scale, AssetEncoding encoding, String mimePath,
+                             AssetRole role, int maxItems) {
+            this(path, scale, encoding, mimePath, role, maxItems, Map.of());
         }
 
         /** True when this endpoint takes more than one file in this slot. */
@@ -1063,12 +1087,64 @@ public record GenerationSpec(
                 }
                 validatePath(mimePath, context, what + ".mimePath");
             }
-            return new ParamBinding(path, scale, encoding, mimePath, role, maxItems);
+            Map<String, Object> itemConstants = Map.of();
+            if (value.hasNonNull("itemConstants")) {
+                JsonNode node = value.get("itemConstants");
+                if (!node.isObject() || node.isEmpty()) {
+                    throw new IllegalArgumentException(err(context, what + ".itemConstants must be an "
+                            + "object of path -> value, and a non-empty one: an empty block says "
+                            + "nothing and hides a field somebody meant to send."));
+                }
+                if (!carriesAFile) {
+                    throw new IllegalArgumentException(err(context, what + ".itemConstants are written "
+                            + "beside a FILE, and '" + unified + "' carries a value."));
+                }
+                Map<String, Object> collected = new LinkedHashMap<>();
+                Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+                while (fields.hasNext()) {
+                    Map.Entry<String, JsonNode> field = fields.next();
+                    String itemPath = field.getKey();
+                    validatePath(itemPath, context, what + ".itemConstants['" + itemPath + "']");
+                    if (itemPath.equals(path) || itemPath.equals(mimePath)) {
+                        throw new IllegalArgumentException(err(context, what + ".itemConstants['"
+                                + itemPath + "'] writes over the file itself: a constant that "
+                                + "overwrites the value it travels with sends a type and no bytes."));
+                    }
+                    // It has to move WITH the file. A constant on a fixed path would be written once
+                    // per element to the same place, so element 2's type would land on element 1.
+                    if (!sharesIndexedPrefix(path, itemPath)) {
+                        throw new IllegalArgumentException(err(context, what + ".itemConstants['"
+                                + itemPath + "'] must sit in the same element as '" + path + "', so "
+                                + "it moves with the file. Share the indexed prefix (e.g. content[1].type "
+                                + "beside content[1].image_url.url)."));
+                    }
+                    collected.put(itemPath, literal(field.getValue()));
+                }
+                itemConstants = collected;
+            }
+            return new ParamBinding(path, scale, encoding, mimePath, role, maxItems, itemConstants);
         }
+
         throw new IllegalArgumentException(err(context, what + " must be an upstream path string, "
                 + "or an object {path, scale} when the value needs converting"
                 + (carriesAFile ? ", and a parameter carrying a file needs {path, encoding}" : "")));
     }
+
+    /**
+     * True when two paths name fields of the SAME array element.
+     *
+     * <p>Compared on the segment up to and including the last index of the file's own path: a
+     * constant that does not share it is anchored somewhere the file never moves to, so shifting
+     * it would either do nothing or land it on a neighbour's element.
+     */
+    private static boolean sharesIndexedPrefix(String filePath, String itemPath) {
+        java.util.regex.Matcher m = INDEXED_SEGMENT.matcher(filePath);
+        int end = -1;
+        while (m.find()) end = m.end();
+        if (end < 0) return false;
+        return itemPath.startsWith(filePath.substring(0, end));
+    }
+
 
     /**
      * A parameter that carries a file cannot be bound without saying what the

@@ -8,6 +8,7 @@ import com.apimarketplace.orchestrator.domain.WorkflowEntity;
 import com.apimarketplace.orchestrator.domain.WorkflowEntity.WorkflowType;
 import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
+import com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService;
 import com.apimarketplace.trigger.client.TriggerClient;
 import com.apimarketplace.trigger.client.dto.ScheduledExecutionDto;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +59,7 @@ class ActiveAutomationsServiceStandaloneScheduleTest {
     @Mock private WorkflowRunRepository runRepository;
     @Mock private TriggerClient triggerClient;
     @Mock private AgentClient agentClient;
+    @Mock private WorkflowEpochService epochService;
 
     private ActiveAutomationsService service;
 
@@ -73,7 +75,7 @@ class ActiveAutomationsServiceStandaloneScheduleTest {
     @BeforeEach
     void setUp() {
         service = new ActiveAutomationsService(workflowRepository, runRepository,
-                triggerClient, agentClient);
+                triggerClient, agentClient, epochService);
     }
 
     @Test

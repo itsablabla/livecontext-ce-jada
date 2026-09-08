@@ -99,6 +99,36 @@ public interface ConversationRepository extends JpaRepository<Conversation, Stri
     Page<Conversation> findByOrganizationIdStrictOrderByUpdatedAtDesc(
             @Param("orgId") String orgId, Pageable pageable);
 
+    // The two finders below are the SAME listing narrowed to one kind, and they exist as separate
+    // queries rather than as an optional `:kind IS NULL OR ...` predicate bolted onto the two
+    // above. The listing is the sidebar's hot path, and adding a nullable predicate to it changes
+    // the plan for every read to serve the filtered minority.
+    //
+    // Filtering here rather than over the fetched page is the whole point: a page is chosen by
+    // updated_at, so filtering it client-side returns "the studio conversations among the 20 most
+    // recent", which is empty for anyone whose recent activity is chat - a filter that reports no
+    // results for data that exists.
+
+    /** Strict-org sidebar listing of ONE kind (active only). */
+    @Query("SELECT c FROM Conversation c "
+         + "WHERE c.organizationId = :orgId AND c.active = true AND c.kind = :kind "
+         + "AND (c.workflowId IS NULL OR c.messages IS NOT EMPTY) "
+         + "ORDER BY c.updatedAt DESC")
+    Page<Conversation> findByOrganizationIdStrictAndKindAndActiveTrueOrderByUpdatedAtDesc(
+            @Param("orgId") String orgId,
+            @Param("kind") String kind,
+            Pageable pageable);
+
+    /** Strict-org sidebar listing of ONE kind (including inactive). */
+    @Query("SELECT c FROM Conversation c "
+         + "WHERE c.organizationId = :orgId AND c.kind = :kind "
+         + "AND (c.workflowId IS NULL OR c.messages IS NOT EMPTY) "
+         + "ORDER BY c.updatedAt DESC")
+    Page<Conversation> findByOrganizationIdStrictAndKindOrderByUpdatedAtDesc(
+            @Param("orgId") String orgId,
+            @Param("kind") String kind,
+            Pageable pageable);
+
     /** Strict-org title search. */
     @Query("SELECT c FROM Conversation c "
          + "WHERE c.organizationId = :orgId AND c.active = true "

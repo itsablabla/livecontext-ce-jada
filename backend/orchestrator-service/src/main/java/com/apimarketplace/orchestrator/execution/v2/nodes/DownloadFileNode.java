@@ -77,11 +77,16 @@ public class DownloadFileNode extends BaseNode {
         long startTime = System.currentTimeMillis();
         logger.info("Download file node executing: nodeId={}, itemId={}", nodeId, context.itemId());
 
-        // Build resolved_params early so every exit path can include it
+        // Build resolved_params early so every exit path can include it, under the
+        // names DownloadConfig uses. They were url_expression / filename_expression /
+        // mime_type_expression here while the SUCCESS path already reported url /
+        // filename / mimeType: one setting with two names depending on which way the
+        // node exited, and the failure path's three had no label. The value is the
+        // configured expression until it resolves, and the resolved one after.
         Map<String, Object> earlyInputData = new java.util.LinkedHashMap<>();
-        earlyInputData.put("url_expression", urlExpression);
-        earlyInputData.put("filename_expression", filenameExpression);
-        earlyInputData.put("mime_type_expression", mimeTypeExpression);
+        earlyInputData.put("url", urlExpression);
+        earlyInputData.put("filename", filenameExpression);
+        earlyInputData.put("mimeType", mimeTypeExpression);
 
         try {
             // Validate required services

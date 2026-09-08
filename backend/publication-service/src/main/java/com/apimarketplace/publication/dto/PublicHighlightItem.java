@@ -38,7 +38,17 @@ public record PublicHighlightItem(
         // surface (anonymous Home / chat row), so omitting it here would leave the
         // one place a self-hosted-only app is NOT marked.
         Boolean ceExclusive,
-        List<String> ceExclusiveFeatures
+        List<String> ceExclusiveFeatures,
+        /**
+         * True when this publication belongs in the Studio.
+         *
+         * <p>Carried because a surface can be scoped to the studio AXIS (the studio's application
+         * row is), and such a row has to narrow the reader's FAVOURITES the same way it narrows the
+         * marketplace. Without it a row headed "My studio apps" either lists every favourite the
+         * reader has, or - filtering on a field that is never sent - lists none, and the second
+         * reads as "you have none" for apps they favourited themselves.
+         */
+        Boolean studio
 ) {
     public static PublicHighlightItem from(WorkflowPublicationEntity p) {
         DisplayMode mode = p.getDisplayMode();
@@ -62,7 +72,8 @@ public record PublicHighlightItem(
                 p.getAverageRating(),
                 p.getReviewCount(),
                 p.isCeExclusive(),
-                p.getCeExclusiveFeatures()
+                p.getCeExclusiveFeatures(),
+                p.isStudio()
         );
     }
 }

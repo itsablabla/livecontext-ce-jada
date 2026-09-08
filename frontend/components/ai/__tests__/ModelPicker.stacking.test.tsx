@@ -19,6 +19,11 @@ import type { AIModel, AIProvider } from '@/hooks/useModels';
 // The picker asks once, for the whole list, whether this account's credits
 // can pay for what a model does. Stubbed: these suites are about the
 // catalog and the stacking, not about billing.
+vi.mock('@/lib/hooks/useModelCostBasis', () => ({
+  // The picker asks once for the credit-estimate basis; these tests are not
+  // about the estimate, and an unanswered basis renders no estimate at all.
+  useModelCostBasis: () => ({ basis: null, isLoading: false }),
+}));
 vi.mock('@/lib/hooks/useMonthlyCreditsCannotPay', () => ({
   useMonthlyCreditsCannotPay: () => ({ blocked: false, isLoading: false }),
 }));

@@ -42,8 +42,7 @@ class GenerateHelpMatchesTheNodeTest {
         WorkflowHelpProvider provider = new WorkflowHelpProvider(
                 mock(com.apimarketplace.orchestrator.service.NodeLibraryService.class),
                 mock(com.apimarketplace.orchestrator.service.NodeHelpFormatter.class),
-                generation,
-                mock(com.apimarketplace.common.web.AppEditionProvider.class));
+                generation);
         return provider.getHelp("generate");
     }
 

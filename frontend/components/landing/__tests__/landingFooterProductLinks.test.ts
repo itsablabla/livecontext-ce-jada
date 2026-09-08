@@ -42,8 +42,16 @@ describe('landing footer Product column', () => {
     });
   }
 
-  it('keeps the two sign-in entries it already had', () => {
-    expect(productColumn).toContain('returnTo="/app/marketplace"');
+  it('sends Marketplace to the PUBLIC listing index, not behind a sign-in', () => {
+    // There is a crawlable page behind this word (`/marketplace`, every
+    // publication). Sending it to a sign-in prompt instead cost the site a
+    // footer link into the whole listing tree from every public page, and gave
+    // a signed-out visitor a login wall where a browsable catalogue exists.
+    expect(productColumn).toContain("withBase(siteBaseUrl, '/marketplace')");
+    expect(productColumn).not.toContain('returnTo="/app/marketplace"');
+  });
+
+  it('keeps Pricing behind sign-in, which has no public page', () => {
     expect(productColumn).toContain('returnTo="/app/settings/pricing"');
   });
 

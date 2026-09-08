@@ -43,7 +43,12 @@ public class SummarizeNode extends BaseNode {
 
         // Build resolved_params early so every exit path can include it
         Map<String, Object> earlyInputData = new LinkedHashMap<>();
-        earlyInputData.put("input_expression", config.input());
+        earlyInputData.put("input", config.input());
+        // `aggregation_count` stays snake_case on purpose. The plan has no such
+        // key - it has `aggregations` - so the plan-name rule has nothing to say
+        // here, and the sibling counter `input_count` written a few lines down is
+        // snake_case too. `humanizeKey` renders both spellings identically, so a
+        // rename would buy no label and cost `{{core:x.input.aggregation_count}}`.
         earlyInputData.put("aggregation_count", config.aggregations().size());
         earlyInputData.put("aggregations", config.aggregations().stream()
                 .map(a -> Map.of(

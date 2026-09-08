@@ -94,11 +94,12 @@ public class DataSourceSchemaModule implements ToolModule {
 
         Object columnsObj = parameters.get("columns");
         if (columnsObj == null) {
-            // Advertise only the types this deployment accepts - vector is
-            // self-hosted-only and must not be suggested where it would be
-            // rejected.
+            // Every type is advertised, vector included. It used to be listed only where the
+            // deployment accepted it, which this message could answer; whether a workspace may
+            // use it is now a PLAN question this error has no business guessing, and the refusal
+            // that follows names the plan.
             String validTypes = "text, number, date, checkbox, select, multi_select, rating, sentiment, progress, file, image, email, phone, url"
-                + (vectorFeatureGate.isVectorAllowed() ? ", vector" : "");
+                + ", vector";
             return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER,
                 "columns is required. Format: columns=[{name: 'col1', type: 'text'}, {name: 'col2', type: 'number'}]. " +
                 "Valid types: " + validTypes + ". " +
@@ -113,14 +114,22 @@ public class DataSourceSchemaModule implements ToolModule {
                     "Correct format: [{name: 'col1', type: 'text'}, {name: 'col2', type: 'number'}]");
             }
 
-            // Validate: reserved names, known types, edition gate, no intra-request duplicates
-            String validationError = validateColumnDefinitions(columnsList, vectorFeatureGate.isVectorAllowed());
+            // The OWNER of the table decides whether it may carry a vector column, so read the
+            // table first and ask about its tenant, not the caller's. CrudExecutorService gates
+            // the actual write on the owner too; asking about the caller here would add a second,
+            // different bar that a member of a paying workspace could fail on their own plan.
+            Optional<DataSource> dsOpt = dataSourceService.getDataSource(datasourceId);
+            String ownerTenantId = dsOpt.map(DataSource::tenantId).orElse(tenantId);
+
+            // Validate: reserved names, known types, plan gate, no intra-request duplicates
+            String validationError = validateColumnDefinitions(columnsList,
+                    vectorFeatureGate.isVectorAllowed(ownerTenantId),
+                    () -> vectorFeatureGate.deniedMessage(ownerTenantId));
             if (validationError != null) {
                 return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR, validationError);
             }
 
             // Reject names that already exist on the table
-            Optional<DataSource> dsOpt = dataSourceService.getDataSource(datasourceId);
             Set<String> existing = collectExistingColumnNames(dsOpt);
             for (Map<String, Object> col : columnsList) {
                 String colName = sanitizeColumnName((String) col.get("name"));

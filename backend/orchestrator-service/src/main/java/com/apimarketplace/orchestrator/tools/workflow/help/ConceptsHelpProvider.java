@@ -40,8 +40,8 @@ public final class ConceptsHelpProvider {
 
         result.put("nodeCategories", Map.ofEntries(
             Map.entry("triggers", "Entry points: manual, schedule, webhook, chat, form, table, workflow, error"),
-            Map.entry("agents", "AI nodes: agent, classify, guardrail"),
-            Map.entry("cores", "Control flow: decision, switch, loop, split, fork, merge, transform, aggregate, filter, sort, code, approval, wait, exit, stop_on_error, response, http_request, data_input, download_file, public_link, media, generate, sub_workflow, respond_to_webhook, send_email, email_inbox, limit, remove_duplicates, summarize, date_time, crypto_jwt, xml, compression, rss, convert_to_file, extract_from_file, compare_datasets, set, html_extract, task, ssh, sftp, database"),
+            Map.entry("agents", "AI nodes: agent, browser_agent, classify, guardrail, generate. All keyed agent:<label> and all written into the plan's 'agents' array."),
+            Map.entry("cores", "Control flow: decision, switch, loop, split, fork, merge, transform, aggregate, filter, sort, code, approval, wait, exit, stop_on_error, response, http_request, data_input, download_file, public_link, media, sub_workflow, respond_to_webhook, send_email, email_inbox, limit, remove_duplicates, summarize, date_time, crypto_jwt, xml, compression, rss, convert_to_file, extract_from_file, compare_datasets, set, html_extract, task, ssh, sftp, database"),
             Map.entry("mcps", "External tools via catalog(action='search')"),
             Map.entry("tables", "CRUD: insert_row, find_rows, read_rows, update_row, delete_row. " +
                 "find_rows supports vector similarity search (RAG) via similarity={column, queryVector, topK?, threshold?}"),

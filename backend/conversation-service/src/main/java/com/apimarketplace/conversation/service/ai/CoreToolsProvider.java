@@ -58,11 +58,13 @@ public class CoreToolsProvider {
         "interface",         // Unified facade: CRUD
         "agent",             // Unified facade: CRUD
         "skill",             // Unified facade: CRUD
+        "memory",            // Unified facade: save, get, list, search, delete, help (long-term facts)
         "application",       // Unified facade: marketplace
         "web_search",        // Unified facade: search, fetch
         "generation",        // Unified facade: create, models, help (gated by catalog-service's generation.enabled flag)
         "files",             // Unified facade: browse & open workspace files (list, get, view, help)
-        "wait"               // Unified facade: sleep, help (blocking pause primitive)
+        "wait",              // Unified facade: sleep, help (blocking pause primitive)
+        "ask_user"           // Unified facade: ask, help (question card to the person in the chat)
     );
 
     @Value("${websearch.enabled:true}")

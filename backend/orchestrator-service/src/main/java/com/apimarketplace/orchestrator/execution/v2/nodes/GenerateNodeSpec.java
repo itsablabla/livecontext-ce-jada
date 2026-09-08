@@ -28,8 +28,16 @@ public class GenerateNodeSpec implements NodeSpec {
         return NodeDefinition.builder()
             .nodeType("GENERATE")
             .label("Generate")
-            .category("core")
-            .variablePrefix("core")
+            // "agent", not "ai", and that is not a slip. Two vocabularies name
+            // this family: the node-spec registry has four categories (core,
+            // agent, trigger, table) and the documentation table has its own set
+            // in which the family is called "ai". All five AI specs say "agent"
+            // here and all five documentation rows say "ai" there; matching the
+            // siblings on each side is what keeps either list whole. Changing
+            // this one to "ai" would file it under a category the registry does
+            // not have and drop it out of the family it just joined.
+            .category("agent")
+            .variablePrefix("agent")
             .description("Generates an asset from a prompt: image, video, audio, voice or music. "
                 + "The model chosen decides the format, the parameters accepted and the price")
             .outputs(List.of(
@@ -37,7 +45,7 @@ public class GenerateNodeSpec implements NodeSpec {
                     .key("file")
                     .type("object")
                     .description("Canonical FileRef of the generated asset, stored so it outlives the "
-                        + "provider's own link. Reference it via {{core:label.output.file}} and map the "
+                        + "provider's own link. Reference it via {{agent:label.output.file}} and map the "
                         + "WHOLE object into a downstream file param.")
                     .children(FileRefSchema.children())
                     .build(),

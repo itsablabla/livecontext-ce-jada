@@ -4,7 +4,7 @@
 // contract field names, exactly like public_link. Every param also accepts a
 // {{...}} template expression, so string values are passed through verbatim.
 
-export const MEDIA_OPERATIONS = ['probe', 'mux_audio', 'mix', 'extract_audio', 'concat', 'frame', 'overlay'] as const;
+export const MEDIA_OPERATIONS = ['probe', 'mux_audio', 'mix', 'extract_audio', 'concat', 'frame', 'overlay', 'subtitles'] as const;
 export type MediaOperation = (typeof MEDIA_OPERATIONS)[number];
 
 export function isMediaOperation(value: unknown): value is MediaOperation {
@@ -83,6 +83,30 @@ export const MEDIA_WIDTH_PERCENT_DEFAULT = 15;
 export const MEDIA_OPACITY_MIN = 0;
 export const MEDIA_OPACITY_MAX = 1;
 export const MEDIA_OPACITY_DEFAULT = 1.0;
+
+// subtitles: the look is a PRESET, never a caller-authored style block. tiktok is
+// the big uppercase block above centre, classic the smaller mixed-case line near the
+// bottom. Every size in a preset is a percent of the video HEIGHT, so one style reads
+// the same on a 720x1280 phone cut and a 1080x1920 master.
+export const MEDIA_SUBTITLE_STYLES = ['tiktok', 'classic'] as const;
+export type MediaSubtitleStyle = (typeof MEDIA_SUBTITLE_STYLES)[number];
+export const MEDIA_SUBTITLE_STYLE_DEFAULT: MediaSubtitleStyle = 'tiktok';
+
+export const MEDIA_SUBTITLE_CUES_MAX = 600;
+export const MEDIA_SUBTITLE_TEXT_MAX = 240;
+// The whole track, not one line: a per-line cap alone lets a legal 600-line track in a
+// non-Latin script overrun the renderer's request size, where it is truncated rather
+// than refused.
+export const MEDIA_SUBTITLE_TOTAL_MAX = 40000;
+
+export const MEDIA_FONT_SIZE_PERCENT_MIN = 1;
+export const MEDIA_FONT_SIZE_PERCENT_MAX = 20;
+
+export const MEDIA_POSITION_PERCENT_MIN = 0;
+export const MEDIA_POSITION_PERCENT_MAX = 100;
+
+export const MEDIA_TEXT_COLOR_DEFAULT = '#FFFFFF';
+export const MEDIA_OUTLINE_COLOR_DEFAULT = '#000000';
 
 // Sidechain ducking defaults (per track, only meaningful with duck_under set).
 export const MEDIA_DUCK_AMOUNT_DB_DEFAULT = 12;
@@ -185,6 +209,31 @@ export function clampMediaOpacity(raw: unknown): number {
   return Math.min(MEDIA_OPACITY_MAX, Math.max(MEDIA_OPACITY_MIN, parsed));
 }
 
+/**
+ * Clamp a subtitle font_size_percent input on commit. Returns undefined on junk/empty
+ * input so the param is OMITTED and the STYLE PRESET decides - a default invented here
+ * would silently override the preset with a value nobody chose. 1-20 percent of the
+ * video height.
+ */
+export function clampMediaFontSizePercent(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const parsed = typeof raw === 'number' ? raw : parseFloat(String(raw));
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.min(MEDIA_FONT_SIZE_PERCENT_MAX, Math.max(MEDIA_FONT_SIZE_PERCENT_MIN, parsed));
+}
+
+/**
+ * Clamp a subtitle position_percent input on commit (distance from the TOP of the
+ * frame). Returns undefined on junk/empty input so the param is OMITTED and the style
+ * preset decides. 0-100.
+ */
+export function clampMediaPositionPercent(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const parsed = typeof raw === 'number' ? raw : parseFloat(String(raw));
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.min(MEDIA_POSITION_PERCENT_MAX, Math.max(MEDIA_POSITION_PERCENT_MIN, parsed));
+}
+
 // Contract param keys per area (used for import filtering; unknown keys are dropped,
 // mirroring public_link which only reads its known params).
 const SCALAR_PARAM_KEYS = [
@@ -222,7 +271,16 @@ const SCALAR_PARAM_KEYS = [
   'opacity',
   'start_seconds',
   'end_seconds',
+  // subtitles
+  'style',
+  'font_family',
+  'font_size_percent',
+  'position_percent',
+  'text_color',
+  'outline_color',
 ] as const;
+
+const SUBTITLE_CUE_PARAM_KEYS = ['start_seconds', 'end_seconds', 'text'] as const;
 
 const CONCAT_INPUT_PARAM_KEYS = [
   'source',
@@ -254,6 +312,13 @@ export interface MediaConcatInput {
   trim_start_seconds?: number | string;
   trim_end_seconds?: number | string;
   speed?: number | string;
+}
+
+/** A subtitle cue as stored in builder node data AND in the plan (contract field names). */
+export interface MediaSubtitleCue {
+  start_seconds?: number | string;
+  end_seconds?: number | string;
+  text?: string;
 }
 
 /** A mix track as stored in builder node data AND in the plan (contract field names). */
@@ -308,6 +373,17 @@ function buildConcatInputPlanParams(raw: any): Record<string, any> {
   putParam(item, i, 'trim_end_seconds');
   putParam(item, i, 'speed', MEDIA_SPEED_DEFAULT);
   return item;
+}
+
+function buildSubtitleCuePlanParams(raw: any): Record<string, any> {
+  const c = (raw && typeof raw === 'object' ? raw : {}) as Record<string, any>;
+  const cue: Record<string, any> = {};
+  // All three are required per cue: always emitted (empty when unset) so validation
+  // has something to point at, rather than a cue that silently disappears.
+  cue.start_seconds = c.start_seconds ?? '';
+  cue.end_seconds = c.end_seconds ?? '';
+  cue.text = typeof c.text === 'string' ? c.text : '';
+  return cue;
 }
 
 function buildTrackPlanParams(raw: any): Record<string, any> {
@@ -430,6 +506,25 @@ export function buildMediaPlanParams(
       putParam(params, p, 'start_seconds');
       putParam(params, p, 'end_seconds');
       break;
+    case 'subtitles':
+      params.video = fileParamValue(p.video);
+      // A caption track can be an EXPRESSION (computed upstream by a code node or a
+      // transcription). Coercing it to [] here would silently wipe an agent-configured
+      // track the first time the workflow was opened and saved in the builder - the
+      // same data loss the literal-FileRef passthrough above exists to prevent.
+      params.cues = typeof p.cues === 'string'
+        ? p.cues
+        : (Array.isArray(p.cues) ? p.cues.map(buildSubtitleCuePlanParams) : []);
+      putParam(params, p, 'style', MEDIA_SUBTITLE_STYLE_DEFAULT);
+      // font_family, font_size_percent, position_percent and the colours are omitted
+      // unless set: the style preset owns the look, and the renderer owns the default
+      // font (a family it cannot find is refused, never silently substituted).
+      putParam(params, p, 'font_family');
+      putParam(params, p, 'font_size_percent');
+      putParam(params, p, 'position_percent');
+      putParam(params, p, 'text_color', MEDIA_TEXT_COLOR_DEFAULT);
+      putParam(params, p, 'outline_color', MEDIA_OUTLINE_COLOR_DEFAULT);
+      break;
     default:
       // Unset/unknown operation: emit it as-is so validation flags it; nothing else.
       break;
@@ -465,6 +560,23 @@ export function extractMediaDataFromPlanParams(
           }
         }
         return item;
+      });
+  }
+  if (typeof p.cues === 'string') {
+    // An expression survives the import verbatim, for the same reason it survives the
+    // export: the builder must not be able to destroy a computed caption track.
+    mediaParams.cues = p.cues;
+  } else if (Array.isArray(p.cues)) {
+    mediaParams.cues = p.cues
+      .filter((c: any) => c && typeof c === 'object')
+      .map((c: Record<string, any>) => {
+        const cue: Record<string, any> = {};
+        for (const key of SUBTITLE_CUE_PARAM_KEYS) {
+          if (c[key] !== undefined && c[key] !== null) {
+            cue[key] = c[key];
+          }
+        }
+        return cue;
       });
   }
   if (Array.isArray(p.tracks)) {

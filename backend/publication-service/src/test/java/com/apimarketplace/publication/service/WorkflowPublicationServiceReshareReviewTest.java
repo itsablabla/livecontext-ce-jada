@@ -154,7 +154,8 @@ class WorkflowPublicationServiceReshareReviewTest {
                 "Updated title", "Updated description",
                 null, null, null, 0,
                 PublicationVisibility.PRIVATE, DisplayMode.WORKFLOW,
-                null, false, true, Map.of());
+                null, false, true, Map.of(),
+                null);
 
         assertThat(updated.getStatus()).isEqualTo(PublicationStatus.ACTIVE);
     }
@@ -167,7 +168,8 @@ class WorkflowPublicationServiceReshareReviewTest {
                 "Updated title", "Updated description",
                 null, SHOWCASE_RUN_ID, null, 0,
                 visibility, DisplayMode.WORKFLOW,
-                null, false, true, Map.of());
+                null, false, true, Map.of(),
+                null);
     }
 
     private void stubPublicUpdate(WorkflowPublicationEntity publication) {

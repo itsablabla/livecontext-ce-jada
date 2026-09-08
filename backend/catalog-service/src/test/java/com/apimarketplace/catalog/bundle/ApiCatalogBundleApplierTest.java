@@ -7,6 +7,9 @@ import com.apimarketplace.catalog.repository.ApiCatalogBundleSyncStatusRepositor
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import com.fasterxml.jackson.core.type.TypeReference;
+import org.mockito.Mockito;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -25,9 +28,15 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -87,7 +96,14 @@ class ApiCatalogBundleApplierTest {
 
         assertThat(r.status()).isEqualTo(ApiCatalogBundleApplier.Status.ALREADY_APPLIED);
         verifyNoInteractions(mergeService);
-        verify(bundleRepo, never()).save(any());
+        // The row IS saved now, but only to capture the prices for the
+        // conditional path - never to re-record the bundle. The version and the
+        // active flag are untouched, which is what "idempotent" means here.
+        ArgumentCaptor<ApiCatalogBundleEntity> rowCap = ArgumentCaptor.forClass(ApiCatalogBundleEntity.class);
+        verify(bundleRepo).save(rowCap.capture());
+        assertThat(rowCap.getValue().getVersion()).isEqualTo(7L);
+        assertThat(rowCap.getValue().isActive()).isTrue();
+        verify(bundleRepo, never()).deactivateAll();
         ApiCatalogBundleSyncStatusEntity status = capturedStatus();
         assertThat(status.getLastFetchStatus()).isEqualTo("OK");
         assertThat(status.getLastAppliedVersion()).isEqualTo(7L);
@@ -447,5 +463,218 @@ class ApiCatalogBundleApplierTest {
                 ArgumentCaptor.forClass(ApiCatalogBundleSyncStatusEntity.class);
         verify(syncStatusRepo).save(cap.capture());
         return cap.getValue();
+    }
+
+    @Test
+    @DisplayName("Applying stores the prices the bundle carried, so a later 304 tick has something to re-offer")
+    void applyStoresGenerationPrices() {
+        when(mergeService.merge(anyList(), anyList())).thenReturn(okMerge());
+
+        applier.apply(bundle(11L),
+                gzPayload("{\"apis\":[{\"id\":\"x\"}],\"generationPrices\":[{\"toolSlug\":\"flux-generate\",\"credits\":12}]}"),
+                "https://cloud");
+
+        ArgumentCaptor<ApiCatalogBundleEntity> rowCap = ArgumentCaptor.forClass(ApiCatalogBundleEntity.class);
+        verify(bundleRepo).save(rowCap.capture());
+        assertThat(rowCap.getValue().getGenerationPrices())
+                .as("without this the 304 path has no local source for the price re-offer")
+                .contains("flux-generate");
+    }
+
+    @Test
+    @DisplayName("Applying records THIS version's prices: the row describes one signed bundle, so an empty capture is the truth for a price-less one")
+    void applyRecordsThisVersionsCapture() {
+        // The row is per version and a version is one signed payload, so there
+        // is nothing older to preserve here. The "do not overwrite" rule lives
+        // on the already-applied path instead, where the payload may be re-read
+        // for a version whose capture already exists.
+        when(mergeService.merge(anyList(), anyList())).thenReturn(okMerge());
+
+        applier.apply(bundle(12L), gzPayload("{\"apis\":[{\"id\":\"x\"}]}"), "https://cloud");
+
+        ArgumentCaptor<ApiCatalogBundleEntity> rowCap = ArgumentCaptor.forClass(ApiCatalogBundleEntity.class);
+        verify(bundleRepo).save(rowCap.capture());
+        assertThat(rowCap.getValue().getGenerationPrices()).isEqualTo("[]");
+    }
+
+    @Test
+    @DisplayName("Re-applying the same version backfills the prices, so an upgraded install can go conditional next tick")
+    void alreadyAppliedBackfillsStoredPrices() {
+        ApiCatalogBundleEntity active = new ApiCatalogBundleEntity();
+        active.setVersion(13L);
+        active.setActive(true);
+        active.setGenerationPrices(null); // applied before the column existed
+        when(bundleRepo.findByVersion(13L)).thenReturn(Optional.of(active));
+
+        applier.apply(bundle(13L),
+                gzPayload("{\"apis\":[{\"id\":\"x\"}],\"generationPrices\":[{\"toolSlug\":\"flux\"}]}"),
+                "https://cloud");
+
+        ArgumentCaptor<ApiCatalogBundleEntity> rowCap = ArgumentCaptor.forClass(ApiCatalogBundleEntity.class);
+        verify(bundleRepo).save(rowCap.capture());
+        assertThat(rowCap.getValue().getGenerationPrices()).contains("flux");
+    }
+
+    @Test
+    @DisplayName("Re-applying does not overwrite prices already stored")
+    void alreadyAppliedKeepsExistingStoredPrices() {
+        ApiCatalogBundleEntity active = new ApiCatalogBundleEntity();
+        active.setVersion(14L);
+        active.setActive(true);
+        active.setGenerationPrices("[{\"toolSlug\":\"already-there\"}]");
+        when(bundleRepo.findByVersion(14L)).thenReturn(Optional.of(active));
+
+        applier.apply(bundle(14L),
+                gzPayload("{\"apis\":[{\"id\":\"x\"}],\"generationPrices\":[{\"toolSlug\":\"flux\"}]}"),
+                "https://cloud");
+
+        verify(bundleRepo, never()).save(any());
+        assertThat(active.getGenerationPrices()).contains("already-there");
+    }
+
+    @Test
+    @DisplayName("Round trip: what apply stores is exactly what a later 304 re-offers")
+    void storedPricesRoundTripThroughReoffer() {
+        // The two halves are written independently, so pin them against each
+        // other: a serialisation change on one side would otherwise only show up
+        // as prices quietly not being applied.
+        when(mergeService.merge(anyList(), anyList())).thenReturn(okMerge());
+        applier.apply(bundle(15L),
+                gzPayload("{\"apis\":[{\"id\":\"x\"}],\"generationPrices\":"
+                        + "[{\"toolSlug\":\"flux\",\"credits\":12}]}"),
+                "https://cloud");
+        ArgumentCaptor<ApiCatalogBundleEntity> saved = ArgumentCaptor.forClass(ApiCatalogBundleEntity.class);
+        verify(bundleRepo).save(saved.capture());
+
+        // Feed exactly the captured string back through the read side.
+        String captured = saved.getValue().getGenerationPrices();
+        when(bundleRepo.findActivePrices()).thenReturn(List.of(
+                new ApiCatalogBundleRepository.ActiveBundlePrices() {
+                    @Override public Long getVersion() { return 15L; }
+                    @Override public String getGenerationPrices() { return captured; }
+                }));
+        applier.reofferStoredPrices();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, Object>>> offered = ArgumentCaptor.forClass(List.class);
+        verify(priceApplier, atLeastOnce()).apply(offered.capture(), eq(15L));
+        assertThat(offered.getAllValues().get(offered.getAllValues().size() - 1))
+                .singleElement()
+                .satisfies(m -> {
+                    assertThat(m).containsEntry("toolSlug", "flux");
+                    assertThat(String.valueOf(m.get("credits"))).isEqualTo("12");
+                });
+    }
+
+    @Test
+    @DisplayName("The already-applied path inflates the payload ONCE: it is the path the whole fleet takes while capturing prices")
+    void alreadyAppliedReadsThePayloadOnce() throws Exception {
+        // Regression on cost, not correctness. Answering "which prices?" and
+        // "was the payload readable?" with two separate gunzip+parse passes
+        // doubled the transient allocation of a 24 MB payload on exactly the
+        // path every install takes once, during the switch to conditional polls.
+        ObjectMapper spy = Mockito.spy(new ObjectMapper());
+        ApiCatalogBundleApplier withSpy = new ApiCatalogBundleApplier(
+                mergeService, priceApplier, bundleRepo, syncStatusRepo, spy, txManager);
+        ApiCatalogBundleEntity active = new ApiCatalogBundleEntity();
+        active.setVersion(20L);
+        active.setActive(true);
+        when(bundleRepo.findByVersion(20L)).thenReturn(Optional.of(active));
+
+        withSpy.apply(bundle(20L),
+                gzPayload("{\"apis\":[{\"id\":\"x\"}],\"generationPrices\":[{\"toolSlug\":\"flux\"}]}"),
+                "https://cloud");
+
+        verify(spy, times(1)).readValue(any(byte[].class), any(TypeReference.class));
+    }
+
+    @Nested
+    @DisplayName("Re-offering prices without the payload (the 304 path)")
+    class ReofferStoredPrices {
+
+        /** The payload-free projection the re-offer now reads. */
+        private ApiCatalogBundleRepository.ActiveBundlePrices activeRow(String storedPrices) {
+            return new ApiCatalogBundleRepository.ActiveBundlePrices() {
+                @Override public Long getVersion() { return 42L; }
+                @Override public String getGenerationPrices() { return storedPrices; }
+            };
+        }
+
+        @Test
+        @DisplayName("Re-offers the prices stored on the active row")
+        void reoffersStored() {
+            when(bundleRepo.findActivePrices())
+                    .thenReturn(List.of(activeRow("[{\"toolSlug\":\"flux-generate\",\"credits\":12}]")));
+
+            applier.reofferStoredPrices();
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<Map<String, Object>>> captor = ArgumentCaptor.forClass(List.class);
+            verify(priceApplier).apply(captor.capture(), eq(42L));
+            assertThat(captor.getValue()).hasSize(1);
+            assertThat(captor.getValue().get(0)).containsEntry("toolSlug", "flux-generate");
+        }
+
+        @Test
+        @DisplayName("Writes the same healthy status an already-applied tick does, so no new status value reaches the UI")
+        void writesOkStatus() {
+            when(bundleRepo.findActivePrices()).thenReturn(List.of(activeRow("[]")));
+
+            applier.reofferStoredPrices();
+
+            ArgumentCaptor<ApiCatalogBundleSyncStatusEntity> captor =
+                    ArgumentCaptor.forClass(ApiCatalogBundleSyncStatusEntity.class);
+            verify(syncStatusRepo).save(captor.capture());
+            assertThat(captor.getValue().getLastFetchStatus()).isEqualTo("OK");
+            assertThat(captor.getValue().getConsecutiveFailures()).isZero();
+            assertThat(captor.getValue().getLastAppliedVersion()).isEqualTo(42L);
+        }
+
+        @Test
+        @DisplayName("A row that stored no prices offers null, which the price applier reads as \"says nothing\", never as \"unprice everything\"")
+        void nullStoredPricesOffersNull() {
+            when(bundleRepo.findActivePrices()).thenReturn(List.of(activeRow(null)));
+
+            applier.reofferStoredPrices();
+
+            verify(priceApplier).apply(isNull(), eq(42L));
+        }
+
+        @Test
+        @DisplayName("Unreadable stored prices leave pricing untouched and still report a healthy sync")
+        void unreadableStoredPricesAreSurvivable() {
+            when(bundleRepo.findActivePrices()).thenReturn(List.of(activeRow("{ this is not json")));
+
+            applier.reofferStoredPrices();
+
+            verify(priceApplier).apply(isNull(), eq(42L));
+            verify(syncStatusRepo).save(any());
+        }
+
+        @Test
+        @DisplayName("A pricing failure never turns an up-to-date install into a failing one")
+        void pricingFailureDoesNotFailTheTick() {
+            when(bundleRepo.findActivePrices()).thenReturn(List.of(activeRow("[]")));
+            doThrow(new RuntimeException("auth-service unreachable"))
+                    .when(priceApplier).apply(any(), eq(42L));
+
+            assertThatCode(() -> applier.reofferStoredPrices()).doesNotThrowAnyException();
+
+            ArgumentCaptor<ApiCatalogBundleSyncStatusEntity> captor =
+                    ArgumentCaptor.forClass(ApiCatalogBundleSyncStatusEntity.class);
+            verify(syncStatusRepo).save(captor.capture());
+            assertThat(captor.getValue().getLastFetchStatus()).isEqualTo("OK");
+        }
+
+        @Test
+        @DisplayName("With nothing active there is nothing to re-offer and no status is invented")
+        void noActiveBundleIsANoOp() {
+            when(bundleRepo.findActivePrices()).thenReturn(List.of());
+
+            applier.reofferStoredPrices();
+
+            verifyNoInteractions(priceApplier);
+            verify(syncStatusRepo, never()).save(any());
+        }
     }
 }

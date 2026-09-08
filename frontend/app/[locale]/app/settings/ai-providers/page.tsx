@@ -19,6 +19,7 @@ import { ModelBundleSyncButton } from "./components/ModelBundleSyncButton";
 import type { LlmProviderStatus, LlmProviderDefinition } from "@/lib/api/orchestrator/types";
 import { IS_CE, IS_CLOUD } from "@/lib/edition";
 import { isProviderHiddenInCe } from "@/lib/ai-providers/providerIcons";
+import { track } from "@/lib/analytics/analytics";
 
 const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
   {
@@ -245,6 +246,7 @@ export default function AiProvidersPage() {
       apiKey,
       category: "llm_provider",
     });
+    track('ai_provider_key_saved', { integration_name: integrationName, provider_name: def.providerName });
 
     // Invalidate cache on agent-service side
     await credentialService.invalidateLlmCache(def.providerName);
@@ -258,6 +260,7 @@ export default function AiProvidersPage() {
   const handleDelete = async (integrationName: string) => {
     const def = PROVIDER_DEFINITIONS.find((d) => d.integrationName === integrationName);
     await credentialService.deletePlatformCredential(integrationName);
+    track('ai_provider_key_deleted', { integration_name: integrationName });
 
     if (def) {
       await credentialService.invalidateLlmCache(def.providerName);

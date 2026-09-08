@@ -14,6 +14,7 @@ import { WorkflowSuggestions } from '@/components/chat/WorkflowSuggestions';
 import { MessageSkeleton } from '@/components/chat/MessageSkeleton';
 import DataSourceDisplayMode from '@/components/chat/DataSourceDisplayMode';
 import { isDataSourceMessage } from '@/components/chat/DataSourceMessage';
+import { isStudioMessage } from '@/lib/generation/studioMessage';
 import { ActivityFeed, type ToolActivity } from '@/components/chat/ActivityFeed';
 import { parseToolActivitiesFromMessage } from '@/lib/chat/messageActivity';
 import { attachmentApi } from '@/lib/api/attachmentApi';
@@ -435,13 +436,18 @@ export function MessageHistory({
 
         const isWorkflow = isWorkflowMessage(displayContent);
         const isDataSource = isDataSourceMessage(displayContent);
+        // A studio turn's content is a machine envelope, and this renderer would print it verbatim.
+        // It is reachable: a studio conversation opened at a chat URL loads its messages BEFORE the
+        // redirect lands, so without this the reader sees raw JSON for a frame. Skipped rather than
+        // drawn, because the surface that can draw it is the one being navigated to.
+        const isStudioTurn = isStudioMessage(displayContent);
 
         // Parse tools + reasoning duration from this message's persisted toolCalls.
         // Shared with the Conversation Activity card so both hydrate identically.
         const { tools: deduplicatedTools, reasoningDurationMs } =
           parseToolActivitiesFromMessage(messageToolCalls, index);
 
-        const hasContent = displayContent && displayContent.trim().length > 0;
+        const hasContent = !isStudioTurn && displayContent && displayContent.trim().length > 0;
 
         // All tools are shown together in ActivityFeed (including workflow_run)
         const isToolsOnly = !hasContent && deduplicatedTools.length > 0;

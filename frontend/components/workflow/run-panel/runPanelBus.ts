@@ -54,6 +54,30 @@ export interface RunPanelActionDetail {
   action: RunPanelAction;
   workflowId?: string;
   runId?: string | null;
+  /**
+   * Set by the canvas that claimed the request, so the caller knows the action
+   * was actually taken.
+   *
+   * A CustomEvent is fire-and-forget: before this flag, a stop pressed on a
+   * surface no canvas was listening on did NOTHING, silently - no error, no
+   * status change, and a run the user could not stop. The flag lets
+   * {@link performRunAction} fall back to the REST call instead of dropping it.
+   *
+   * A canvas that claims the run sets it even when it DECLINES (preview mode),
+   * so a deliberate refusal is never re-tried behind its back. A canvas that
+   * could not carry the action out does NOT set it, so the fallback runs rather
+   * than the click dying inside a listener that swallowed it.
+   */
+  handled?: boolean;
+  /**
+   * The claiming listener's own promise, when it has one.
+   *
+   * Without it the caller only knows the request was accepted, never whether it
+   * WORKED: `pending` cleared in the next microtask and a failure surfaced
+   * nowhere but the canvas' toast, which the application page and the share link
+   * do not host.
+   */
+  result?: Promise<void>;
 }
 
 export interface OpenRunPanelDetail {
@@ -130,10 +154,20 @@ export function subscribeRunPanelData(
   return () => window.removeEventListener(RUN_PANEL_DATA_EVENT, handler);
 }
 
-/** Ask the canvas to stop / cancel / reactivate the run (panel → canvas). */
-export function requestRunAction(detail: RunPanelActionDetail): void {
-  if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent<RunPanelActionDetail>(RUN_PANEL_ACTION_EVENT, { detail }));
+/**
+ * Ask the canvas to stop / cancel / reactivate the run (panel → canvas).
+ *
+ * Returns the dispatched detail, carrying whatever the listeners wrote on it:
+ * `handled` (a canvas claimed it) and `result` (its promise). `dispatchEvent` is
+ * synchronous, so both are readable the moment it returns - which is what lets a
+ * caller fall back to the REST call when no canvas is mounted, and await the
+ * canvas when one is. Prefer {@link performRunAction}, which does both for you.
+ */
+export function requestRunAction(detail: RunPanelActionDetail): RunPanelActionDetail {
+  if (typeof window === 'undefined') return { ...detail, handled: false };
+  const payload: RunPanelActionDetail = { ...detail, handled: false };
+  window.dispatchEvent(new CustomEvent<RunPanelActionDetail>(RUN_PANEL_ACTION_EVENT, { detail: payload }));
+  return payload;
 }
 
 /**

@@ -53,6 +53,15 @@ public class ApiConfigurationConverter {
         // MCP tools
         data.put("mcpTools", convertMcpTools(request.mcpTools()));
 
+        // errorPolicy (V477) - forwarded only when the seed declared one, so an API without a
+        // policy stores NULL rather than an empty array the engine would skip on every call.
+        // This map is the SECOND whitelist between a seed file and catalog.apis: a block the
+        // importer forwards but this method drops validates, imports green, and does nothing.
+        if (request.errorPolicy() != null && request.errorPolicy().isArray()
+                && !request.errorPolicy().isEmpty()) {
+            data.put("errorPolicy", request.errorPolicy());
+        }
+
         return objectMapper.valueToTree(data);
     }
 

@@ -335,6 +335,41 @@ export interface PendingToolAuthorization {
   timestamp: number;
 }
 
+/** A question the agent put to the user (ask_user tool), awaiting their pick. */
+export interface PendingAskUserQuestion {
+  /** The ask_user call that raised the card; the card's identity. */
+  toolCallId: string;
+  questions: Array<{
+    header: string;
+    question: string;
+    options: Array<{ label: string; description?: string }>;
+    multiSelect?: boolean;
+  }>;
+  /** See PendingServiceApproval.blocking. */
+  blocking?: boolean;
+  gateKey?: string;
+  /** The stream that raised it, so a Stop drops only that turn's cards. */
+  streamId?: string | null;
+  timestamp: number;
+}
+
+/** Canonical key for a question card - mirrors the backend `"ask:" + tool_call_id`. */
+export function askUserKey(toolCallId: string): string {
+  return 'ask:' + toolCallId;
+}
+
+/**
+ * The question cards that survive a Stop. A question raised by the stopped turn is settled
+ * server-side (the park reads the Stop flag and reports it as dismissed), so its card goes.
+ * A Stop that names no stream, or a card that recorded none, cannot be matched, and an
+ * unmatched card is kept: dropping a card nobody stopped would hide a question the agent is
+ * still holding.
+ */
+export function askUserCardsAfterStop(cards: PendingAskUserQuestion[], stoppedStreamId?: string | null): PendingAskUserQuestion[] {
+  if (!stoppedStreamId) return cards;
+  return cards.filter(q => !q.streamId || q.streamId !== stoppedStreamId);
+}
+
 export interface SingleStreamState {
   status: StreamingStatus;
   streamId: string | null;
@@ -346,6 +381,7 @@ export interface SingleStreamState {
   // Deduped by their canonical key (see serviceApprovalKey / toolAuthorizationKey).
   pendingServiceApprovals: PendingServiceApproval[];
   pendingToolAuthorizations: PendingToolAuthorization[];
+  pendingAskUserQuestions: PendingAskUserQuestion[];
   // Timestamp when pending_action_cancelled was last received (for detecting when to clear conversation.pendingAction)
   lastPendingActionCancelledAt?: number;
 }
@@ -484,6 +520,7 @@ interface StreamingContextType {
   // key (optional) clears ONE card (canonical key); omit to clear them all.
   clearServiceApproval: (conversationId: string, key?: string) => void;
   clearToolAuthorization: (conversationId: string, key?: string) => void;
+  clearAskUserQuestion: (conversationId: string, key?: string) => void;
 
   // Derived
   isStreaming: boolean; // Any stream is active
@@ -493,6 +530,7 @@ interface StreamingContextType {
   getToolActivities: (conversationId: string) => ToolActivity[];
   getPendingServiceApprovals: (conversationId: string) => PendingServiceApproval[];
   getPendingToolAuthorizations: (conversationId: string) => PendingToolAuthorization[];
+  getPendingAskUserQuestions: (conversationId: string) => PendingAskUserQuestion[];
 }
 
 // ============== REDUCER ==============
@@ -511,6 +549,8 @@ type StreamingAction =
   | { type: 'CLEAR_SERVICE_APPROVAL'; conversationId: string; key?: string }
   | { type: 'TOOL_AUTHORIZATION_REQUIRED'; conversationId: string; rule: string; toolName?: string; action?: string; toolCallId?: string; argsSummary?: string; applicationId?: string; blocking?: boolean; gateKey?: string }
   | { type: 'CLEAR_TOOL_AUTHORIZATION'; conversationId: string; key?: string }
+  | { type: 'ASK_USER_REQUIRED'; conversationId: string; toolCallId: string; questions: PendingAskUserQuestion['questions']; blocking?: boolean; gateKey?: string; streamId?: string | null }
+  | { type: 'CLEAR_ASK_USER'; conversationId: string; key?: string }
   | { type: 'COMPLETED'; conversationId: string; content?: string; streamId?: string }
   | { type: 'STOPPED'; conversationId: string; streamId?: string }
   | { type: 'PENDING_ACTION_CANCELLED'; conversationId: string }
@@ -604,6 +644,7 @@ function streamingReducer(state: StreamingState, action: StreamingAction): Strea
         toolActivities: [],
         pendingServiceApprovals: action.keepPendingActions ? (currentStream?.pendingServiceApprovals ?? []) : [],
         pendingToolAuthorizations: action.keepPendingActions ? (currentStream?.pendingToolAuthorizations ?? []) : [],
+        pendingAskUserQuestions: action.keepPendingActions ? (currentStream?.pendingAskUserQuestions ?? []) : [],
       });
       // Remove from server-reported streams since we're now tracking locally
       const newServerStreams = new Set(state.serverActiveStreams);
@@ -961,6 +1002,41 @@ function streamingReducer(state: StreamingState, action: StreamingAction): Strea
       break;
     }
 
+    case 'ASK_USER_REQUIRED': {
+      if (!currentStream) return state;
+      // Identity is the tool call: a retransmit of the same card is ignored, a second
+      // question in the same turn is kept beside the first.
+      const exists = (currentStream.pendingAskUserQuestions ?? []).some(
+        q => q.toolCallId === action.toolCallId);
+      if (exists) return state;
+      newStreams.set(conversationId, {
+        ...currentStream,
+        pendingAskUserQuestions: [
+          ...(currentStream.pendingAskUserQuestions ?? []),
+          {
+            toolCallId: action.toolCallId,
+            questions: action.questions,
+            blocking: action.blocking,
+            gateKey: action.gateKey,
+            streamId: action.streamId ?? currentStream.streamId,
+            timestamp: Date.now(),
+          },
+        ],
+      });
+      break;
+    }
+
+    case 'CLEAR_ASK_USER': {
+      if (!currentStream) return state;
+      newStreams.set(conversationId, {
+        ...currentStream,
+        pendingAskUserQuestions: action.key
+          ? (currentStream.pendingAskUserQuestions ?? []).filter(q => askUserKey(q.toolCallId) !== action.key)
+          : [],
+      });
+      break;
+    }
+
     case 'COMPLETED': {
       if (!currentStream) return state;
       if (isStaleTerminal(currentStream, action.streamId)) {
@@ -1023,6 +1099,10 @@ function streamingReducer(state: StreamingState, action: StreamingAction): Strea
         ...currentStream,
         status: 'stopped',
         toolActivities: toolsWithStop,
+        // A question raised by the stopped turn is settled server-side (the park reads the
+        // Stop flag and reports it as dismissed), so its card goes too. Cards from another
+        // stream are not this turn's to drop.
+        pendingAskUserQuestions: askUserCardsAfterStop(currentStream.pendingAskUserQuestions ?? [], action.streamId),
       });
       break;
     }
@@ -1038,6 +1118,7 @@ function streamingReducer(state: StreamingState, action: StreamingAction): Strea
         ...currentStream,
         pendingServiceApprovals: [],
         pendingToolAuthorizations: [],
+        pendingAskUserQuestions: [],
         lastPendingActionCancelledAt: Date.now(), // Track when cancelled
       });
 
@@ -1476,6 +1557,21 @@ export function StreamingProvider({ children }: { children: ReactNode }) {
               applicationId: mapped.toolAuthorization.applicationId,
               blocking: mapped.toolAuthorization.blocking,
               gateKey: mapped.toolAuthorization.gateKey,
+            });
+          }
+          break;
+        }
+
+        case 'ask_user_required': {
+          if (mapped.askUser?.toolCallId) {
+            dispatch({
+              type: 'ASK_USER_REQUIRED',
+              conversationId,
+              toolCallId: mapped.askUser.toolCallId,
+              questions: mapped.askUser.questions || [],
+              blocking: mapped.askUser.blocking,
+              gateKey: mapped.askUser.gateKey,
+              streamId: mapped.streamId ?? null,
             });
           }
           break;
@@ -2032,6 +2128,17 @@ export function StreamingProvider({ children }: { children: ReactNode }) {
                 blocking: mapped.toolAuthorization.blocking,
                 gateKey: mapped.toolAuthorization.gateKey,
               });
+            } else if (mapped.type === 'ask_user_required' && mapped.askUser?.toolCallId) {
+              // A held question card outlives a reload for the same reason as the two above.
+              dispatch({
+                type: 'ASK_USER_REQUIRED',
+                conversationId,
+                toolCallId: mapped.askUser.toolCallId,
+                questions: mapped.askUser.questions || [],
+                blocking: mapped.askUser.blocking,
+                gateKey: mapped.askUser.gateKey,
+                streamId: mapped.streamId ?? null,
+              });
             }
           } catch {
             // Ignore parse errors
@@ -2130,6 +2237,15 @@ export function StreamingProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'CLEAR_TOOL_AUTHORIZATION', conversationId, key });
   }, []);
 
+  const getPendingAskUserQuestions = useCallback((conversationId: string): PendingAskUserQuestion[] => {
+    const streamState = state.streams.get(conversationId);
+    return streamState?.pendingAskUserQuestions || [];
+  }, [state.streams]);
+
+  const clearAskUserQuestion = useCallback((conversationId: string, key?: string) => {
+    dispatch({ type: 'CLEAR_ASK_USER', conversationId, key });
+  }, []);
+
   // ============== DERIVED VALUES ==============
 
   // Check if any stream is actively streaming (not completed)
@@ -2185,6 +2301,7 @@ export function StreamingProvider({ children }: { children: ReactNode }) {
     clearStream,
     clearServiceApproval,
     clearToolAuthorization,
+    clearAskUserQuestion,
     isStreaming,
     isStreamingConversation,
     serverStreamsLoaded,
@@ -2192,12 +2309,13 @@ export function StreamingProvider({ children }: { children: ReactNode }) {
     getToolActivities,
     getPendingServiceApprovals,
     getPendingToolAuthorizations,
+    getPendingAskUserQuestions,
   }), [
     getStreamState, legacyState, sendMessage, stopStream,
-    checkAndReconnect, clearStream, clearServiceApproval, clearToolAuthorization,
+    checkAndReconnect, clearStream, clearServiceApproval, clearToolAuthorization, clearAskUserQuestion,
     isStreaming, isStreamingConversation, serverStreamsLoaded,
     getStreamContent,
-    getToolActivities, getPendingServiceApprovals, getPendingToolAuthorizations,
+    getToolActivities, getPendingServiceApprovals, getPendingToolAuthorizations, getPendingAskUserQuestions,
   ]);
 
   // One declarative WS subscription per conversation that currently needs a live channel:

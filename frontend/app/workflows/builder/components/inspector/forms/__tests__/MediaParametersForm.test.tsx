@@ -200,13 +200,13 @@ function updatedInputs(onUpdate: ReturnType<typeof vi.fn>): any[] {
 }
 
 describe('MediaParametersForm - v2 operation switch renders each new form', () => {
-  it('the operation select offers all 7 operations', () => {
+  it('the operation select offers all 8 operations', () => {
     const { container } = renderForm({ mediaOperation: 'probe', mediaParams: { input: '{{f}}' } } as any);
     const opSelect = Array.from(container.querySelectorAll('select')).find((sel) =>
       Array.from(sel.options).some((o) => o.value === 'probe'),
     ) as HTMLSelectElement;
     expect(Array.from(opSelect.options).map((o) => o.value)).toEqual(
-      ['probe', 'mux_audio', 'mix', 'extract_audio', 'concat', 'frame', 'overlay'],
+      ['probe', 'mux_audio', 'mix', 'extract_audio', 'concat', 'frame', 'overlay', 'subtitles'],
     );
   });
 
@@ -453,5 +453,167 @@ describe('MediaParametersForm - literal FileRef chip', () => {
 
     expect(onUpdate).toHaveBeenCalledTimes(1);
     expect(onUpdate.mock.calls[0][0].mediaParams.image).toBe('');
+  });
+});
+
+describe('MediaParametersForm - subtitles cue editor', () => {
+  function subtitlesData(cues: any[], extraParams: Record<string, any> = {}) {
+    return { mediaOperation: 'subtitles', mediaParams: { video: '{{v}}', cues, ...extraParams } } as any;
+  }
+
+  function updatedCues(onUpdate: ReturnType<typeof vi.fn>): any[] {
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    return onUpdate.mock.calls[0][0].mediaParams.cues;
+  }
+
+  it('adding the first cue starts an empty caption (nothing to chain from yet)', () => {
+    const { onUpdate } = renderForm(subtitlesData([]));
+
+    fireEvent.click(screen.getByText('media.addCue'));
+
+    expect(updatedCues(onUpdate)).toEqual([{ start_seconds: '', end_seconds: '', text: '' }]);
+  });
+
+  it('adding a cue after a timed one starts it WHERE THE LAST ONE ENDED, so writing a track top to bottom cannot overlap', () => {
+    const { onUpdate } = renderForm(subtitlesData([
+      { start_seconds: 0, end_seconds: 2.4, text: 'First' },
+    ]));
+
+    fireEvent.click(screen.getByText('media.addCue'));
+
+    expect(updatedCues(onUpdate)).toEqual([
+      { start_seconds: 0, end_seconds: 2.4, text: 'First' },
+      { start_seconds: 2.4, end_seconds: '', text: '' },
+    ]);
+  });
+
+  it('adding a cue after an UNTIMED one leaves the new start empty rather than guessing', () => {
+    const { onUpdate } = renderForm(subtitlesData([{ text: 'No timings yet' }]));
+
+    fireEvent.click(screen.getByText('media.addCue'));
+
+    expect(updatedCues(onUpdate)[1]).toEqual({ start_seconds: '', end_seconds: '', text: '' });
+  });
+
+  it('removing a cue leaves the other captions untouched', () => {
+    const { onUpdate } = renderForm(subtitlesData([
+      { start_seconds: 0, end_seconds: 2, text: 'First' },
+      { start_seconds: 2, end_seconds: 4, text: 'Second' },
+      { start_seconds: 4, end_seconds: 6, text: 'Third' },
+    ]));
+
+    fireEvent.click(screen.getAllByLabelText('media.removeCue')[1]);
+
+    expect(updatedCues(onUpdate)).toEqual([
+      { start_seconds: 0, end_seconds: 2, text: 'First' },
+      { start_seconds: 4, end_seconds: 6, text: 'Third' },
+    ]);
+  });
+
+  it('move down swaps a cue with its successor; the arrows are disabled at the ends', () => {
+    const { onUpdate } = renderForm(subtitlesData([
+      { start_seconds: 0, end_seconds: 2, text: 'First' },
+      { start_seconds: 2, end_seconds: 4, text: 'Second' },
+    ]));
+
+    expect((screen.getAllByLabelText('media.moveCueUp')[0] as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getAllByLabelText('media.moveCueDown')[1] as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getAllByLabelText('media.moveCueDown')[0]);
+
+    // The MOVE is literal: it swaps the whole cues, timings included, which is
+    // exactly why moving one can make the track overlap - the validator says so.
+    expect(updatedCues(onUpdate)).toEqual([
+      { start_seconds: 2, end_seconds: 4, text: 'Second' },
+      { start_seconds: 0, end_seconds: 2, text: 'First' },
+    ]);
+  });
+
+  it('typing a caption line writes only that cue text', () => {
+    const { onUpdate } = renderForm(subtitlesData([
+      { start_seconds: 0, end_seconds: 2, text: '' },
+      { start_seconds: 2, end_seconds: 4, text: 'Second' },
+    ]));
+
+    const textInputs = screen.getAllByPlaceholderText('media.cueTextPlaceholder');
+    fireEvent.change(textInputs[0], { target: { value: 'First' } });
+
+    expect(updatedCues(onUpdate)).toEqual([
+      { start_seconds: 0, end_seconds: 2, text: 'First' },
+      { start_seconds: 2, end_seconds: 4, text: 'Second' },
+    ]);
+  });
+
+  it('the caption input caps typing at the contract length, so an over-long line cannot be entered at all', () => {
+    renderForm(subtitlesData([{ start_seconds: 0, end_seconds: 2, text: '' }]));
+
+    const input = screen.getByPlaceholderText('media.cueTextPlaceholder') as HTMLInputElement;
+    expect(input.maxLength).toBe(240);
+  });
+
+  it('the Add button is disabled once the caption cap is reached', () => {
+    const cues = Array.from({ length: 600 }, (_, i) => ({ start_seconds: i, end_seconds: i + 0.5, text: 'x' }));
+    renderForm(subtitlesData(cues));
+
+    expect((screen.getByText('media.addCue').closest('button') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a COMPUTED caption track is shown as-is, with no cue editor that could overwrite it', () => {
+    renderForm({
+      mediaOperation: 'subtitles',
+      mediaParams: { video: '{{v}}', cues: '{{core:build_cues.output.result.cues}}' },
+    } as any);
+
+    expect(screen.getByText('{{core:build_cues.output.result.cues}}')).toBeTruthy();
+    expect(screen.getByText('media.cuesExpressionHint')).toBeTruthy();
+    // No editor and no Add button: one click on either would replace the expression
+    // with a literal array and lose the upstream track.
+    expect(screen.queryByPlaceholderText('media.cueTextPlaceholder')).toBeNull();
+    expect(screen.queryByText('media.addCue')).toBeNull();
+  });
+
+  it('a literal FileRef video renders as a chip and removal empties the video param', () => {
+    const clip = { _type: 'file', path: '1/general/files/x_clip.mp4', name: 'clip.mp4', mimeType: 'video/mp4', size: 9 };
+    const { onUpdate } = renderForm({
+      mediaOperation: 'subtitles',
+      mediaParams: { video: clip, cues: [{ start_seconds: 0, end_seconds: 2, text: 'Hi' }] },
+    } as any);
+
+    expect(screen.getByText('clip.mp4')).toBeTruthy();
+
+    fireEvent.click(screen.getByTitle('media.removeLiteralFile'));
+
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate.mock.calls[0][0].mediaParams.video).toBe('');
+  });
+
+  it('clearing the font field REMOVES the param rather than sending an empty family the renderer would refuse', () => {
+    const { onUpdate } = renderForm(subtitlesData(
+      [{ start_seconds: 0, end_seconds: 2, text: 'Hi' }],
+      { font_family: 'DejaVu Sans' },
+    ));
+    openOptions();
+
+    const fontInput = screen.getByPlaceholderText('media.fontFamilyPlaceholder');
+    fireEvent.change(fontInput, { target: { value: '' } });
+
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect('font_family' in onUpdate.mock.calls[0][0].mediaParams).toBe(false);
+  });
+
+  it('picking the default style REMOVES it from the params, so the preset stays the single definition of the look', () => {
+    const { onUpdate } = renderForm(subtitlesData(
+      [{ start_seconds: 0, end_seconds: 2, text: 'Hi' }],
+      { style: 'classic' },
+    ));
+    openOptions();
+
+    const styleSelect = Array.from(document.querySelectorAll('select')).find((sel) =>
+      Array.from(sel.options).some((o) => o.value === 'classic'),
+    ) as HTMLSelectElement;
+    fireEvent.change(styleSelect, { target: { value: 'tiktok' } });
+
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect('style' in onUpdate.mock.calls[0][0].mediaParams).toBe(false);
   });
 });

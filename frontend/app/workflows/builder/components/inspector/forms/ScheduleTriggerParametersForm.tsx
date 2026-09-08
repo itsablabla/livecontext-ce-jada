@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { getClientLocale } from '@/lib/utils/locale';
 import * as ReactDOM from 'react-dom';
 import {
   Info, X, Play, Clock, CheckCircle, AlertCircle, ExternalLink,
@@ -26,6 +25,25 @@ import { buildStandaloneSourceNodeId } from '../../../utils/standaloneSourceNode
 import { findAdoptableSchedule } from '../../../utils/findAdoptableSchedule';
 import Link from 'next/link';
 import { formatUtcDateTime } from '@/lib/utils/dateFormatters';
+import {
+  DailyCustomPicker,
+  MonthlyCustomPicker,
+  ValidationFeedback,
+  WeeklyCustomPicker,
+  type ValidateCronResponse,
+} from '@/components/schedule/ScheduleFrequencyPickers';
+import {
+  DEFAULT_CRONS,
+  FREQUENCIES,
+  FREQUENCY_BY_VALUE,
+  GROUP_ORDER,
+  buildDailyCron,
+  buildMonthlyCron,
+  buildWeeklyCron,
+  cronToFrequencyValue,
+  type FrequencyGroup,
+  type FrequencyOption,
+} from '@/lib/schedule/cronFrequencies';
 
 // Module-level guard: prevents duplicate schedule creation across remounts.
 const pendingOrCreatedSchedules = new Map<string, string>();
@@ -33,166 +51,12 @@ const pendingOrCreatedSchedules = new Map<string, string>();
 // -----------------------------------------------------------------------------
 // Frequency catalog
 // -----------------------------------------------------------------------------
-// Each entry is either a fixed preset (immediately resolves to a cron string)
-// or an inline configurator (the user picks time / weekday / day-of-month via
-// a small sub-picker rendered below the dropdown). The "advanced" entry opens
-// a free-text cron input pre-filled with a safe default.
-//
-// Cron strings are 5-field Unix style. The backend validator and the orchestrator
-// `validate-cron` endpoint are the single source of truth for validity and
-// description - the frontend never re-parses the expression.
-
-type FrequencyKind = 'preset' | 'daily-custom' | 'weekly-custom' | 'monthly-custom' | 'advanced';
-type FrequencyGroup = 'minutes' | 'hours' | 'daily' | 'weekly' | 'monthly' | 'advanced';
-
-interface FrequencyOption {
-  value: string;          // i18n key suffix and stable identifier
-  group: FrequencyGroup;
-  kind: FrequencyKind;
-  cron?: string;          // fixed cron for preset entries
-}
-
-const FREQUENCIES: FrequencyOption[] = [
-  // Minutes
-  { value: 'every_minute',     group: 'minutes', kind: 'preset', cron: '* * * * *' },
-  { value: 'every_5_minutes',  group: 'minutes', kind: 'preset', cron: '*/5 * * * *' },
-  { value: 'every_15_minutes', group: 'minutes', kind: 'preset', cron: '*/15 * * * *' },
-  { value: 'every_30_minutes', group: 'minutes', kind: 'preset', cron: '*/30 * * * *' },
-  // Hours
-  { value: 'every_hour',       group: 'hours',   kind: 'preset', cron: '0 * * * *' },
-  { value: 'every_2_hours',    group: 'hours',   kind: 'preset', cron: '0 */2 * * *' },
-  { value: 'every_3_hours',    group: 'hours',   kind: 'preset', cron: '0 */3 * * *' },
-  { value: 'every_6_hours',    group: 'hours',   kind: 'preset', cron: '0 */6 * * *' },
-  { value: 'every_12_hours',   group: 'hours',   kind: 'preset', cron: '0 */12 * * *' },
-  // Daily
-  { value: 'every_day_midnight', group: 'daily', kind: 'preset', cron: '0 0 * * *' },
-  { value: 'every_day_9am',      group: 'daily', kind: 'preset', cron: '0 9 * * *' },
-  { value: 'every_day_noon',     group: 'daily', kind: 'preset', cron: '0 12 * * *' },
-  { value: 'every_day_6pm',      group: 'daily', kind: 'preset', cron: '0 18 * * *' },
-  { value: 'daily_custom',       group: 'daily', kind: 'daily-custom' },
-  // Weekly
-  { value: 'every_monday',  group: 'weekly', kind: 'preset', cron: '0 9 * * 1' },
-  { value: 'every_weekday', group: 'weekly', kind: 'preset', cron: '0 9 * * 1-5' },
-  { value: 'every_weekend', group: 'weekly', kind: 'preset', cron: '0 10 * * 6' },
-  { value: 'weekly_custom', group: 'weekly', kind: 'weekly-custom' },
-  // Monthly
-  { value: 'first_of_month',  group: 'monthly', kind: 'preset', cron: '0 9 1 * *' },
-  { value: 'monthly_custom',  group: 'monthly', kind: 'monthly-custom' },
-  // Advanced (free-text)
-  { value: 'advanced', group: 'advanced', kind: 'advanced', cron: '0 0 * * *' },
-];
-
-const FREQUENCY_BY_VALUE: Record<string, FrequencyOption> = Object.fromEntries(
-  FREQUENCIES.map(f => [f.value, f]),
-);
-
-const GROUP_ORDER: FrequencyGroup[] = ['minutes', 'hours', 'daily', 'weekly', 'monthly', 'advanced'];
-
-// Safe default cron applied when switching INTO a configurator entry from one
-// whose current cron doesn't match the new shape.
-const DEFAULT_CRONS: Record<FrequencyKind, string> = {
-  'preset': '0 * * * *',
-  'daily-custom': '0 9 * * *',
-  'weekly-custom': '0 9 * * 1',
-  'monthly-custom': '0 9 1 * *',
-  'advanced': '0 0 * * *',
-};
-
-const WEEKDAYS = [
-  { value: '1', labelKey: 'weekdayMon' },
-  { value: '2', labelKey: 'weekdayTue' },
-  { value: '3', labelKey: 'weekdayWed' },
-  { value: '4', labelKey: 'weekdayThu' },
-  { value: '5', labelKey: 'weekdayFri' },
-  { value: '6', labelKey: 'weekdaySat' },
-  { value: '0', labelKey: 'weekdaySun' },
-];
-
-// -----------------------------------------------------------------------------
-// Cron <-> frequency reverse mapping
-// -----------------------------------------------------------------------------
-// Derive the dropdown selection from the cron string. This is the ONLY parsing
-// the frontend does - used to restore UI state on load. The actual semantics
-// are owned by the backend; this is purely "which entry should the dropdown
-// show". If no shape matches, we fall back to 'advanced' so the free-text
-// field appears with the current cron prefilled.
-
-function cronToFrequencyValue(cron: string): string {
-  if (!cron || cron.trim() === '') return 'advanced';
-  const trimmed = cron.trim();
-
-  // 1) Exact preset match
-  for (const f of FREQUENCIES) {
-    if (f.kind === 'preset' && f.cron === trimmed) return f.value;
-  }
-
-  const parts = trimmed.split(/\s+/);
-  if (parts.length !== 5) return 'advanced';
-  const [minute, hour, dom, month, dow] = parts;
-
-  const isNum = (s: string) => /^\d+$/.test(s);
-
-  // 2) Daily: M H * * *
-  if (isNum(minute) && isNum(hour) && dom === '*' && month === '*' && dow === '*') {
-    return 'daily_custom';
-  }
-  // 3) Weekly: M H * * D[,D...] (digits + commas)
-  if (isNum(minute) && isNum(hour) && dom === '*' && month === '*' && /^[\d,]+$/.test(dow)) {
-    return 'weekly_custom';
-  }
-  // 4) Monthly: M H D * *
-  if (isNum(minute) && isNum(hour) && isNum(dom) && month === '*' && dow === '*') {
-    return 'monthly_custom';
-  }
-  return 'advanced';
-}
-
-// Pickers state extracted from a cron string. Defaults applied when the cron
-// doesn't match the expected shape.
-function parseDailyCron(cron: string): { hour: number; minute: number } {
-  const m = cron.trim().match(/^(\d+)\s+(\d+)\s+\*\s+\*\s+\*$/);
-  if (!m) return { hour: 9, minute: 0 };
-  return { hour: clamp(parseInt(m[2], 10), 0, 23), minute: clamp(parseInt(m[1], 10), 0, 59) };
-}
-
-function parseWeeklyCron(cron: string): { hour: number; minute: number; days: string[] } {
-  const m = cron.trim().match(/^(\d+)\s+(\d+)\s+\*\s+\*\s+([\d,]+)$/);
-  if (!m) return { hour: 9, minute: 0, days: ['1'] };
-  const days = m[3].split(',').map(d => d.trim()).filter(d => WEEKDAYS.some(w => w.value === d));
-  return {
-    hour: clamp(parseInt(m[2], 10), 0, 23),
-    minute: clamp(parseInt(m[1], 10), 0, 59),
-    days: days.length > 0 ? days : ['1'],
-  };
-}
-
-function parseMonthlyCron(cron: string): { hour: number; minute: number; dayOfMonth: number } {
-  const m = cron.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+\*\s+\*$/);
-  if (!m) return { hour: 9, minute: 0, dayOfMonth: 1 };
-  return {
-    hour: clamp(parseInt(m[2], 10), 0, 23),
-    minute: clamp(parseInt(m[1], 10), 0, 59),
-    dayOfMonth: clamp(parseInt(m[3], 10), 1, 31),
-  };
-}
-
-function buildDailyCron(hour: number, minute: number): string {
-  return `${minute} ${hour} * * *`;
-}
-
-function buildWeeklyCron(hour: number, minute: number, days: string[]): string {
-  const safeDays = days.length > 0 ? days : ['1'];
-  return `${minute} ${hour} * * ${safeDays.join(',')}`;
-}
-
-function buildMonthlyCron(hour: number, minute: number, dayOfMonth: number): string {
-  return `${minute} ${hour} ${dayOfMonth} * *`;
-}
-
-function clamp(n: number, min: number, max: number): number {
-  if (isNaN(n)) return min;
-  return Math.min(max, Math.max(min, n));
-}
+// The catalogue, the cron builders and the reverse mapping live in
+// `lib/schedule/cronFrequencies` because this inspector is no longer the only
+// surface that composes a schedule: the agenda creates a scheduled workflow from
+// an empty slot with the same choices. Two copies would drift into two products -
+// a preset added here and missing there, or the same cron resolving to a
+// different dropdown entry depending on where the schedule is opened.
 
 // -----------------------------------------------------------------------------
 // Types
@@ -230,12 +94,6 @@ interface ScheduleStatusListResponse {
     status: ScheduleStatus;
   }>;
   message?: string;
-}
-
-interface ValidateCronResponse {
-  valid: boolean;
-  description?: string;
-  nextExecutions?: string[];
 }
 
 interface ScheduleTriggerParametersFormProps {
@@ -293,7 +151,7 @@ export function ScheduleTriggerParametersForm({
 
   const [showOptionalParams, setShowOptionalParams] = React.useState(false);
   const [isInfoOpen, setIsInfoOpen] = React.useState(false);
-  const { buttonRef: infoButtonRef, popoverPosition } = usePopoverPosition(isInfoOpen, 320);
+  const { buttonRef: infoButtonRef, popoverStyle } = usePopoverPosition(isInfoOpen, 320);
 
   const queryClient = useQueryClient();
   const [isExecuting, setIsExecuting] = React.useState(false);
@@ -593,8 +451,8 @@ export function ScheduleTriggerParametersForm({
             <>
               <div className="fixed inset-0 z-[9998]" onClick={() => setIsInfoOpen(false)} />
               <div
-                className="fixed z-[9999] w-80 p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-lg"
-                style={{ top: popoverPosition.top, left: popoverPosition.left }}
+                className="fixed z-[9999] p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-lg"
+                style={popoverStyle}
               >
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <span className="font-medium text-sm text-slate-700 dark:text-slate-200">{t('infoTitle')}</span>
@@ -863,229 +721,4 @@ export function ScheduleTriggerParametersForm({
       )}
     </div>
   );
-}
-
-// -----------------------------------------------------------------------------
-// Sub-pickers
-// -----------------------------------------------------------------------------
-
-interface PickerProps {
-  cron: string;
-  disabled: boolean;
-  t: ReturnType<typeof useTranslations>;
-}
-
-function DailyCustomPicker({ cron, disabled, onChange, t }: PickerProps & {
-  onChange: (hour: number, minute: number) => void;
-}) {
-  const { hour, minute } = React.useMemo(() => parseDailyCron(cron), [cron]);
-  return (
-    <div className="space-y-2 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 p-3">
-      <label className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('timeLabel')}</label>
-      <TimePicker hour={hour} minute={minute} disabled={disabled} onChange={onChange} />
-    </div>
-  );
-}
-
-function WeeklyCustomPicker({ cron, disabled, onChange, t }: PickerProps & {
-  onChange: (hour: number, minute: number, days: string[]) => void;
-}) {
-  const { hour, minute, days } = React.useMemo(() => parseWeeklyCron(cron), [cron]);
-  // Refuse to deselect the last active day - otherwise the cron silently falls
-  // back to Monday (per buildWeeklyCron), which would be a confusing UX where
-  // the button looks unselected but the schedule still fires Mondays.
-  const toggleDay = (day: string) => {
-    const isSelected = days.includes(day);
-    if (isSelected && days.length === 1) return;
-    const next = isSelected ? days.filter(d => d !== day) : [...days, day];
-    onChange(hour, minute, next);
-  };
-  return (
-    <div className="space-y-3 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 p-3">
-      <div className="space-y-2">
-        <label className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('daysLabel')}</label>
-        <div className="flex flex-wrap gap-1.5">
-          {WEEKDAYS.map((wd) => {
-            const selected = days.includes(wd.value);
-            const isLastSelected = selected && days.length === 1;
-            const buttonDisabled = disabled || isLastSelected;
-            return (
-              <button
-                key={wd.value}
-                type="button"
-                disabled={buttonDisabled}
-                onClick={() => toggleDay(wd.value)}
-                title={isLastSelected ? t('atLeastOneDay') : undefined}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                  selected
-                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-300 dark:border-blue-700'
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-600'
-                } ${buttonDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                {t(wd.labelKey)}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="space-y-2">
-        <label className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('timeLabel')}</label>
-        <TimePicker
-          hour={hour}
-          minute={minute}
-          disabled={disabled}
-          onChange={(h, m) => onChange(h, m, days)}
-        />
-      </div>
-    </div>
-  );
-}
-
-function MonthlyCustomPicker({ cron, disabled, onChange, t }: PickerProps & {
-  onChange: (hour: number, minute: number, dayOfMonth: number) => void;
-}) {
-  const { hour, minute, dayOfMonth } = React.useMemo(() => parseMonthlyCron(cron), [cron]);
-  return (
-    <div className="space-y-3 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 p-3">
-      <div className="space-y-2">
-        <label className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('dayOfMonthLabel')}</label>
-        <Input
-          type="number"
-          min={1}
-          max={31}
-          value={dayOfMonth}
-          disabled={disabled}
-          onChange={(e) => {
-            const next = clamp(parseInt(e.target.value, 10), 1, 31);
-            onChange(hour, minute, next);
-          }}
-          className="w-24"
-        />
-      </div>
-      <div className="space-y-2">
-        <label className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('timeLabel')}</label>
-        <TimePicker
-          hour={hour}
-          minute={minute}
-          disabled={disabled}
-          onChange={(h, m) => onChange(h, m, dayOfMonth)}
-        />
-      </div>
-    </div>
-  );
-}
-
-function TimePicker({
-  hour, minute, disabled, onChange,
-}: { hour: number; minute: number; disabled: boolean; onChange: (h: number, m: number) => void }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <Input
-        type="number"
-        min={0}
-        max={23}
-        value={hour}
-        disabled={disabled}
-        onChange={(e) => onChange(clamp(parseInt(e.target.value, 10), 0, 23), minute)}
-        className="w-16 text-center"
-      />
-      <span className="text-slate-400 font-medium">:</span>
-      <Input
-        type="number"
-        min={0}
-        max={59}
-        value={minute.toString().padStart(2, '0')}
-        disabled={disabled}
-        onChange={(e) => onChange(hour, clamp(parseInt(e.target.value, 10), 0, 59))}
-        className="w-16 text-center"
-      />
-    </div>
-  );
-}
-
-// -----------------------------------------------------------------------------
-// Validation feedback panel (description + next-runs preview from backend)
-// -----------------------------------------------------------------------------
-
-function ValidationFeedback({
-  validation, isValidating, timezone, cronIsNonEmpty, hasPersistedSchedule, t,
-}: {
-  validation: ValidateCronResponse | null;
-  isValidating: boolean;
-  timezone: string;
-  cronIsNonEmpty: boolean;
-  hasPersistedSchedule: boolean;
-  t: ReturnType<typeof useTranslations>;
-}) {
-  if (isValidating && !validation) {
-    return (
-      <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 text-xs text-slate-400 italic">
-        {t('validating')}
-      </div>
-    );
-  }
-  if (!validation) return null;
-
-  if (!validation.valid) {
-    // Surface state divergence: a non-empty INVALID cron is silently rejected by the
-    // backend PUT, so the typed value is NOT what the schedule will fire. The previous
-    // valid cron (persisted server-side) stays active. Without this hint, the red panel
-    // alone could read as "we'll save it anyway", which would be a serious surprise the
-    // first time the schedule fires at the OLD cadence.
-    const showNotSavedHint = cronIsNonEmpty && hasPersistedSchedule;
-    return (
-      <div className="rounded-md border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-3">
-        <div className="flex items-start gap-2">
-          <AlertCircle className="h-3.5 w-3.5 text-red-500 mt-0.5 flex-shrink-0" />
-          <div className="space-y-1">
-            <p className="text-xs font-medium text-red-700 dark:text-red-300">{t('invalidCron')}</p>
-            <p className="text-xs text-red-600 dark:text-red-400">{t('invalidCronHelp')}</p>
-            {showNotSavedHint && (
-              <p className="text-xs text-red-600 dark:text-red-400 italic pt-1 border-t border-red-200 dark:border-red-900/50 mt-1">
-                {t('notSavedHint')}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 space-y-2">
-      <div className="flex items-start gap-2">
-        <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 flex-shrink-0" />
-        <p className="text-xs font-medium text-slate-700 dark:text-slate-200">
-          {validation.description || t('valid')}
-        </p>
-      </div>
-      {validation.nextExecutions && validation.nextExecutions.length > 0 && (
-        <div className="space-y-1 pl-5">
-          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-            {t('nextRunsLabel', { timezone })}
-          </p>
-          <ul className="space-y-0.5">
-            {validation.nextExecutions.map((iso, i) => (
-              <li key={i} className="text-xs text-slate-600 dark:text-slate-300 font-mono">
-                {formatNextRun(iso, timezone)}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatNextRun(iso: string, timezone: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString(getClientLocale(), {
-      timeZone: timezone,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
 }

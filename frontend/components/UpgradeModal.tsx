@@ -172,7 +172,7 @@ export default function UpgradeModal({
             <Button
               onClick={onConfirm}
               disabled={loading}
-              variant="contrast"
+              variant="default"
               className="flex-1"
             >
               {loading ? (
@@ -249,7 +249,7 @@ export default function UpgradeModal({
               </p>
               <Button
                 onClick={() => window.location.href = '/app/chat'}
-                variant="contrast"
+                variant="default"
                 className="w-full"
               >
                 <MessageSquare className="w-4 h-4" />
@@ -274,7 +274,7 @@ export default function UpgradeModal({
                 </Button>
                 <Button
                   onClick={onConfirm}
-                  variant="contrast"
+                  variant="default"
                   className="flex-1"
                 >
                   {t('retry')}

@@ -448,4 +448,39 @@ class RespondToWebhookNodeTest {
             }
         };
     }
+
+    @Test
+    @DisplayName("reports the configured headers, which the node sent on the wire but never showed the reader")
+    @SuppressWarnings("unchecked")
+    void reportsConfiguredHeaders() {
+        Core.RespondToWebhookConfig config = new Core.RespondToWebhookConfig(
+            201, "{\"ok\":true}", "application/json", Map.of("X-Trace", "abc123"));
+        RespondToWebhookNode node = new RespondToWebhookNode("core:respond", config);
+
+        NodeExecutionResult result = node.execute(context);
+
+        Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+        // RespondToWebhookConfig has `headers` and the node applied them to the
+        // response, but never reported them - while input-label-registry already
+        // declared a `headers` label, waiting on a key that never came.
+        assertEquals(Map.of("X-Trace", "abc123"), params.get("headers"));
+        assertEquals(201, params.get("statusCode"));
+        assertEquals("application/json", params.get("contentType"));
+    }
+
+    @Test
+    @DisplayName("omits headers entirely when none are configured, rather than showing an empty map")
+    @SuppressWarnings("unchecked")
+    void omitsHeadersWhenNoneConfigured() {
+        Core.RespondToWebhookConfig config = new Core.RespondToWebhookConfig(
+            200, "{}", "application/json", Map.of());
+        RespondToWebhookNode node = new RespondToWebhookNode("core:respond", config);
+
+        NodeExecutionResult result = node.execute(context);
+
+        Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+        // An empty map in the column reads as "I configured headers", which is the
+        // same lie as a null-valued key.
+        assertFalse(params.containsKey("headers"));
+    }
 }

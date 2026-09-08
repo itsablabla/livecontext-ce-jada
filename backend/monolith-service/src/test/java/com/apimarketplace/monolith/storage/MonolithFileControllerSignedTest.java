@@ -54,7 +54,9 @@ class MonolithFileControllerSignedTest {
     @BeforeEach
     void setUp() {
         controller = new MonolithFileController(fileStorageService, publicFileUrlBuilder,
-                storageService, orgAccessGuard, signer, mimeTypeRegistry);
+                storageService, orgAccessGuard, signer, mimeTypeRegistry,
+                new com.apimarketplace.storage.service.file.StorageStreamingMetrics(
+                        new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         lenient().when(mimeTypeRegistry.resolve(anyString())).thenReturn("video/mp4");
     }
 
@@ -113,7 +115,9 @@ class MonolithFileControllerSignedTest {
     void blankSecretRejectsEverything() {
         MonolithFileController disabled = new MonolithFileController(fileStorageService,
                 publicFileUrlBuilder, storageService, orgAccessGuard,
-                new ShowcaseUrlSigner(""), mimeTypeRegistry);
+                new ShowcaseUrlSigner(""), mimeTypeRegistry,
+                new com.apimarketplace.storage.service.file.StorageStreamingMetrics(
+                        new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         long exp = Instant.now().getEpochSecond() + 900;
         String sig = signer.sign(KEY, exp, "inline");
 

@@ -52,7 +52,9 @@ class MonolithFileControllerTest {
         // the signed-proxy branches live in MonolithFileControllerSignedTest.
         return new MonolithFileController(fileStorageService, publicFileUrlBuilder, storageService, orgAccessGuard,
                 new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner(""),
-                new com.apimarketplace.storage.util.MimeTypeRegistry());
+                new com.apimarketplace.storage.util.MimeTypeRegistry(),
+                new com.apimarketplace.storage.service.file.StorageStreamingMetrics(
+                        new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
     }
 
     private MultipartFile fileOf(long size, byte[] content) throws IOException {

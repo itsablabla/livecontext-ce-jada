@@ -7,6 +7,7 @@ import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.
 import type { BuilderNodeData } from '../types';
 import { orchestratorApi, type TriggerTypeValue } from '@/lib/api';
 import { is402Error, is413StorageError } from '@/lib/api/error-utils';
+import { track } from '@/lib/analytics/analytics';
 import { showInsufficientCreditsModal } from '@/components/billing/InsufficientCreditsModal';
 import { showInsufficientStorageModal } from '@/components/billing/InsufficientStorageModal';
 import { handleCeRelayError } from '@/lib/billing/ceRelayErrorModals';
@@ -19,6 +20,19 @@ import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 import { useEnterRunMode } from '@/hooks/useEnterRunMode';
+
+/**
+ * Bounded analytics reason for a failed run launch: error kind or HTTP status
+ * only, never the message (which can carry user content).
+ */
+function executionFailureReason(error: any): string {
+  if (is402Error(error)) return 'insufficient_credits';
+  if (is413StorageError(error)) return 'insufficient_storage';
+  const status = typeof error?.status === 'number' ? error.status : undefined;
+  if (status === 400) return 'validation';
+  if (status) return `http_${status}`;
+  return 'network';
+}
 
 export interface ValidationError {
   elementKey?: string;
@@ -225,6 +239,10 @@ export function useWorkflowExecution(config: UseWorkflowExecutionConfig): UseWor
    */
   const handleExecutionError = (error: any, context: string) => {
     console.error(`${context}:`, error);
+    track('workflow_run_trigger_failed', {
+      workflow_id: workflowId ?? null,
+      reason: executionFailureReason(error),
+    });
 
     // CE cloud-relay errors (insufficient cloud credit / unmanaged model) pop their own
     // actionable modal; routed before the generic 402 path (no-op in the Cloud edition).
@@ -287,6 +305,12 @@ export function useWorkflowExecution(config: UseWorkflowExecutionConfig): UseWor
       // Update backend errors - ValidationContext will automatically
       // re-validate with these errors and dispatch events
       setBackendValidationErrors(backendErrors);
+      track('workflow_validated', {
+        node_count: nodes.length,
+        edge_count: edges.length,
+        error_count: backendErrors.length,
+        is_valid: backendErrors.length === 0,
+      });
     } catch (error) {
       console.error(`[Validation] Network error during validation: ${String(error)}`);
       // Set network error as backend error - the hook will handle the rest
@@ -341,6 +365,15 @@ export function useWorkflowExecution(config: UseWorkflowExecutionConfig): UseWor
           const isWaitingTrigger = backendStatus === 'waiting_trigger';
 
           navigateToRunMode(data.runId);
+          track('workflow_run_triggered', {
+            workflow_id: workflowId,
+            run_id: data.runId,
+            status: backendStatus,
+            has_schedule: Boolean(schedule),
+            started_from_node: Boolean(startFromNode),
+            node_count: nodes.length,
+            mode: 'automatic',
+          });
 
           if (isWaitingTrigger) {
             // Dispatch readySteps so triggers show shimmer buttons immediately
@@ -452,6 +485,15 @@ export function useWorkflowExecution(config: UseWorkflowExecutionConfig): UseWor
           setWorkflowStatus('running');
           pauseResumeActionsRef.current.setMode('step_by_step');
           navigateToRunMode(data.runId);
+          track('workflow_run_triggered', {
+            workflow_id: workflowId,
+            run_id: data.runId,
+            status: (data.status || '').toLowerCase(),
+            has_schedule: false,
+            started_from_node: Boolean(startFromNode),
+            node_count: nodes.length,
+            mode: 'step_by_step',
+          });
 
           // Determine initial readySteps for the new run
           let finalReadySteps = (data as any).readySteps as string[] | undefined;

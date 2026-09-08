@@ -84,6 +84,25 @@ class InternalPublicationControllerCeExclusiveTest {
     }
 
     @Test
+    @DisplayName("a VECTOR app carries the feature list WITHOUT the blocking flag")
+    void vectorPublicationCarriesTheListOnly() {
+        // The two fields answer different questions since 2026-09-03, so they are emitted
+        // independently. Tying the list to the boolean would hide the one fact the agent needs to
+        // see a plan refusal coming, while its help promises the field is there.
+        UUID projectId = UUID.randomUUID();
+        WorkflowPublicationEntity vectorApp = pub(UUID.randomUUID(), false);
+        vectorApp.setCeExclusiveFeatures(List.of("VECTOR_SEARCH"));
+        when(publicationRepository.findByProjectId(projectId)).thenReturn(List.of(vectorApp));
+
+        ResponseEntity<List<Map<String, Object>>> response =
+                controller.findByProjectId(projectId, null, null);
+
+        assertThat(response.getBody().get(0))
+                .doesNotContainKey("ceExclusive")
+                .containsEntry("ceExclusiveFeatures", List.of("VECTOR_SEARCH"));
+    }
+
+    @Test
     @DisplayName("a normal publication OMITS the keys - absent is the agent's 'installable' signal")
     void normalPublicationOmitsTheKeys() {
         UUID projectId = UUID.randomUUID();

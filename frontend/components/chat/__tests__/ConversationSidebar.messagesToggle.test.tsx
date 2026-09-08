@@ -17,18 +17,30 @@ let pathname = '/app/chat';
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 vi.mock('@/i18n/navigation', () => ({ usePathname: () => pathname, useRouter: () => ({ push }) }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => ({ get: () => null }) }));
-vi.mock('@/hooks/useConversationHistory', () => ({
-  useConversationHistory: () => ({
+// The sidebar reads its own list hook, which is `useConversationList` +
+// `useConversationMutations` and nothing else - no message store. Mocking those
+// two rather than the sidebar hook itself keeps the real merge (shared cache +
+// server rows, de-duplicated and ordered) under test.
+vi.mock('@/hooks/conversation/useConversationList', () => ({
+  useConversationList: () => ({
     conversations: [],
     loading: false,
     error: null,
     hasMore: false,
-    selectConversation: vi.fn(),
-    loadMessages: vi.fn(),
-    deleteConversation: vi.fn(),
     loadMoreConversations: vi.fn(),
     loadConversationById: vi.fn(),
-    clearMessages: vi.fn(),
+    forceRefreshConversations: vi.fn(),
+    setConversations: vi.fn(),
+  }),
+}));
+vi.mock('@/hooks/conversation/useConversationMutations', () => ({
+  useConversationMutations: () => ({
+    loading: false,
+    error: null,
+    createConversation: vi.fn(),
+    updateConversation: vi.fn(),
+    deleteConversation: vi.fn(),
+    clearError: vi.fn(),
   }),
 }));
 vi.mock('@/contexts/UnifiedAppContext', () => ({
@@ -82,7 +94,7 @@ describe('ConversationSidebar - Messages toggle is a pure view', () => {
     // Entering Messages mode swaps the sidebar list to the DM list.
     expect(screen.getByTestId('dm-sidebar-list')).toBeInTheDocument();
     // Home stays focused in Messages mode - the main panel is still Home (/app/chat).
-    expect(screen.getByText('sidebar.home').closest('button')).toHaveClass('bg-surface-hover');
+    expect(screen.getByText('nav.newChat').closest('button')).toHaveClass('bg-surface-hover');
   });
 
   it('leaving from a thread page: flips back to Chats via onNewChat, still no /app/messages navigation', () => {
@@ -95,7 +107,7 @@ describe('ConversationSidebar - Messages toggle is a pure view', () => {
     // Pinned to Messages on mount (the DM list is shown).
     expect(screen.getByTestId('dm-sidebar-list')).toBeInTheDocument();
     // On a real DM thread route the main panel is NOT Home, so Home is un-highlighted.
-    expect(screen.getByText('sidebar.home').closest('button')).not.toHaveClass('bg-surface-hover');
+    expect(screen.getByText('nav.newChat').closest('button')).not.toHaveClass('bg-surface-hover');
 
     fireEvent.click(screen.getByTestId('dm-mode-toggle'));
 

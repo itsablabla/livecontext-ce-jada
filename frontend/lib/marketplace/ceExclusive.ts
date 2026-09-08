@@ -3,10 +3,14 @@ import { IS_MANAGED_CLOUD } from '@/lib/edition';
 /**
  * CE-exclusive publications: the client side of the backend rule.
  *
- * A publication is flagged `ceExclusive` by the backend when its snapshot uses
- * a feature that only exists on a self-hosted install (a local-CLI agent, a
- * vector/embedding column). Managed cloud cannot run it, so the acquire
- * endpoints refuse it there with HTTP 403 `code: 'CE_EXCLUSIVE'`.
+ * A publication is flagged `ceExclusive` by the backend when its snapshot uses something
+ * managed cloud cannot run AT ANY PLAN, today a local-CLI agent, so the acquire endpoints refuse
+ * it there with HTTP 403 `code: 'CE_EXCLUSIVE'`.
+ *
+ * A vector/embedding column is NOT one of these since 2026-09-03: it appears in
+ * `ceExclusiveFeatures` without setting the boolean, and the acquire endpoints gate it on the
+ * workspace's plan instead (403 `code: 'PLAN_UPGRADE_REQUIRED'`). Nothing in this file decides
+ * that, which is why it only ever reads the boolean.
  *
  * This module is the SINGLE place the UI decides "is this install blocked for
  * me", so the card, the preview panel and the acquire modal can never disagree.

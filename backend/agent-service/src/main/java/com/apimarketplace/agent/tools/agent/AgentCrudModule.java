@@ -229,6 +229,7 @@ public class AgentCrudModule implements ToolModule {
         String applicationAccessModeParam = getStringParam(p, "application_access_mode");
         String skillAccessModeParam = getStringParam(p, "skill_access_mode");
         String fileAccessModeParam = getStringParam(p, "file_access_mode");
+        String memoryAccessModeParam = getStringParam(p, "memory_access_mode");
         // Explicit GRANT scope (none/all/custom). Authoritative when provided - the only way to
         // express grant='all' (the list params can only express none/custom). Omitted = derive from list.
         String workflowsGrantParam = getStringParam(p, "workflows_grant");
@@ -335,7 +336,7 @@ public class AgentCrudModule implements ToolModule {
         }
 
         try {
-            Map<String, Object> toolsConfig = buildToolsConfig(toolsMode, toolsList, workflowsList, applicationsList, tablesList, interfacesList, agentsList, webSearch, generation, maxIterations, tableAccessModeParam, workflowAccessModeParam, interfaceAccessModeParam, agentAccessModeParam, applicationAccessModeParam, skillAccessModeParam, workflowsGrantParam, applicationsGrantParam, tablesGrantParam, interfacesGrantParam, agentsGrantParam, fileAccessModeParam);
+            Map<String, Object> toolsConfig = buildToolsConfig(toolsMode, toolsList, workflowsList, applicationsList, tablesList, interfacesList, agentsList, webSearch, generation, maxIterations, tableAccessModeParam, workflowAccessModeParam, interfaceAccessModeParam, agentAccessModeParam, applicationAccessModeParam, skillAccessModeParam, workflowsGrantParam, applicationsGrantParam, tablesGrantParam, interfacesGrantParam, agentsGrantParam, fileAccessModeParam, memoryAccessModeParam);
             Map<String, Object> config = buildConfig(maxIterations);
             String orgId = context != null ? context.orgId() : null;
 
@@ -813,6 +814,7 @@ public class AgentCrudModule implements ToolModule {
         String applicationAccessModeParam = getStringParam(p, "application_access_mode");
         String skillAccessModeParam = getStringParam(p, "skill_access_mode");
         String fileAccessModeParam = getStringParam(p, "file_access_mode");
+        String memoryAccessModeParam = getStringParam(p, "memory_access_mode");
         // Explicit GRANT scope (none/all/custom). Authoritative when provided - the only way to
         // express grant='all' (the list params can only express none/custom). Omitted = derive from list.
         String workflowsGrantParam = getStringParam(p, "workflows_grant");
@@ -880,7 +882,7 @@ public class AgentCrudModule implements ToolModule {
         }
 
         try {
-            Map<String, Object> toolsConfigPatch = buildToolsConfig(toolsMode, toolsList, workflowsList, applicationsList, tablesList, interfacesList, agentsList, webSearch, generation, maxIterations, tableAccessModeParam, workflowAccessModeParam, interfaceAccessModeParam, agentAccessModeParam, applicationAccessModeParam, skillAccessModeParam, workflowsGrantParam, applicationsGrantParam, tablesGrantParam, interfacesGrantParam, agentsGrantParam, fileAccessModeParam);
+            Map<String, Object> toolsConfigPatch = buildToolsConfig(toolsMode, toolsList, workflowsList, applicationsList, tablesList, interfacesList, agentsList, webSearch, generation, maxIterations, tableAccessModeParam, workflowAccessModeParam, interfaceAccessModeParam, agentAccessModeParam, applicationAccessModeParam, skillAccessModeParam, workflowsGrantParam, applicationsGrantParam, tablesGrantParam, interfacesGrantParam, agentsGrantParam, fileAccessModeParam, memoryAccessModeParam);
             Map<String, Object> config = buildConfig(maxIterations);
 
             // Patch is forwarded as-is to AgentService.updateAgent - the service does
@@ -1176,7 +1178,7 @@ public class AgentCrudModule implements ToolModule {
             Integer maxIterations,
             String tableAM, String workflowAM, String interfaceAM, String agentAM, String applicationAM, String skillAM,
             String workflowsGrant, String applicationsGrant, String tablesGrant, String interfacesGrant, String agentsGrant,
-            String fileAM) {
+            String fileAM, String memoryAM) {
         Map<String, Object> toolsConfig = new LinkedHashMap<>();
         // tools_mode controls MCP/catalog tool access (all/none/custom) - separate from resource access
         if (toolsMode != null) toolsConfig.put("mode", toolsMode);
@@ -1213,6 +1215,10 @@ public class AgentCrudModule implements ToolModule {
         if (skillAM != null) toolsConfig.put("skillAccessMode", skillAM);
         // Files read/write axis (no grant). 'read' blocks create_folder/move_to_folder.
         if (fileAM != null) toolsConfig.put("fileAccessMode", fileAM);
+        // Memory read/write axis (no grant - memory is workspace-wide, not an id list).
+        // 'read' leaves recall and search working and blocks save/delete, so a narrowly
+        // scoped agent cannot write into every other agent's system prompt.
+        if (memoryAM != null) toolsConfig.put("memoryAccessMode", memoryAM);
         // Explicit GRANT sentinels - authoritative when a VALID value (none/all/custom) is provided.
         // AgentService.normalizeToolsConfig preserves them ('all'/'none' reset the id list to [],
         // 'custom' keeps it); an absent/invalid grant is dropped here so normalize derives it from

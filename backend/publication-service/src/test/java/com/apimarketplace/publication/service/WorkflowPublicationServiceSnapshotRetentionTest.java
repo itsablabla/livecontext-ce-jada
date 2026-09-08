@@ -176,7 +176,7 @@ class WorkflowPublicationServiceSnapshotRetentionTest {
     private void publish() {
         service.publishWorkflow(
                 WORKFLOW_ID, TENANT, null, "Title", "Desc", INTERFACE_ID, "run-1",
-                null, 0, PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                null, 0, PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
     }
 
     /** Stubs the publish path; pass {@code existing=null} for a first publish. */

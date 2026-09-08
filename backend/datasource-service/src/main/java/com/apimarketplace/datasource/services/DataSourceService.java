@@ -134,15 +134,14 @@ public class DataSourceService {
         if (dataFields.isEmpty() && !finalMappingSpec.isEmpty()) {
             dataFields = new LinkedHashSet<>(finalMappingSpec.keySet());
         }
-        // Edition gate: a caller-supplied mappingSpec can carry vector columns
-        // wholesale, bypassing the per-column validation chokepoint (the
-        // column-definition validators only run on the columns[]/add_columns
-        // shapes). Vector columns are self-hosted-only - reject here so the
-        // REST create, the internal create, and the agent table-create all
-        // fail closed on managed cloud.
+        // Plan gate: a caller-supplied mappingSpec can carry vector columns wholesale,
+        // bypassing the per-column validation chokepoint (the column-definition validators only
+        // run on the columns[]/add_columns shapes). Reject here so the REST create, the internal
+        // create, and the agent table-create all ask the same question. The creator IS the owner
+        // at this point, since the table does not exist yet.
         String vectorColumn = VectorFeatureGate.findVectorColumn(finalMappingSpec);
-        if (vectorColumn != null && !vectorFeatureGate.isVectorAllowed()) {
-            throw new IllegalArgumentException(VectorFeatureGate.DISABLED_MESSAGE);
+        if (vectorColumn != null && !vectorFeatureGate.isVectorAllowed(tenantId)) {
+            throw new IllegalArgumentException(vectorFeatureGate.deniedMessage(tenantId));
         }
 
         List<Map<String, Object>> columnOrder = DataSourceDefaults.generateColumnOrder(dataFields);
@@ -170,17 +169,9 @@ public class DataSourceService {
         // column's dimension wins, mirroring the partial-index design.
         if (vectorColumn != null) {
             ColumnMappingSpec spec = finalMappingSpec.get(vectorColumn);
-            Map<String, Object> display = spec != null && spec.display() != null ? spec.display() : Map.of();
-            Object dimRaw = display.get("dimension");
-            int dimension = dimRaw instanceof Number n ? n.intValue() : 0;
-            if (dimension <= 0 && dimRaw instanceof String s) {
-                try { dimension = Integer.parseInt(s.trim()); } catch (NumberFormatException ignored) { }
-            }
-            if (dimension > 0) {
-                String metric = display.get("metric") instanceof String m ? m : "cosine";
-                eventPublisher.publishEvent(new com.apimarketplace.datasource.events.VectorColumnCreatedEvent(
-                        savedDataSource.id(), dimension, metric));
-            }
+            com.apimarketplace.datasource.events.VectorColumnCreatedEvent
+                    .forColumn(savedDataSource.id(), spec != null ? spec.display() : null)
+                    .ifPresent(eventPublisher::publishEvent);
         }
 
         return savedDataSource;
@@ -664,6 +655,13 @@ public class DataSourceService {
             // Track storage: decrement items (size corrected by reconciliation)
             if (itemCount > 0) {
                 breakdownService.increment(dataSource.tenantId(), "DATATABLES", 0, -itemCount);
+            }
+
+            // The vector ROWS cascaded away with the datasource; the per-datasource
+            // HNSW index is a separate catalog object and did not. Drop it after
+            // commit, on the bounded index executor.
+            if (VectorFeatureGate.findVectorColumn(dataSource.mappingSpec()) != null) {
+                eventPublisher.publishEvent(new com.apimarketplace.datasource.events.VectorDataSourceDeletedEvent(id));
             }
         });
     }

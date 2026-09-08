@@ -42,7 +42,7 @@ class DataSourceEnhancedServiceRenameValidationTest {
 
     @BeforeEach
     void setUp() {
-        service = new DataSourceEnhancedService(repositories, vectorRepository, dataSourceService, rowEventPublisher, ceVectorGate(), org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class));
+        service = new DataSourceEnhancedService(repositories, vectorRepository, dataSourceService, rowEventPublisher, new com.apimarketplace.datasource.crud.service.MediaCellHydrator(new com.apimarketplace.datasource.crud.service.ColumnValueCoercer()), ceVectorGate(), org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class));
     }
 
     @Test
@@ -203,6 +203,6 @@ class DataSourceEnhancedServiceRenameValidationTest {
     private static com.apimarketplace.datasource.services.VectorFeatureGate ceVectorGate() {
         org.springframework.mock.env.MockEnvironment env = new org.springframework.mock.env.MockEnvironment();
         env.setProperty("app.edition", "ce");
-        return new com.apimarketplace.datasource.services.VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env));
+        return new com.apimarketplace.datasource.services.VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env), null);
     }
 }

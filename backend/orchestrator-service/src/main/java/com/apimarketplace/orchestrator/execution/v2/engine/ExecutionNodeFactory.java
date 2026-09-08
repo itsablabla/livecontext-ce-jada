@@ -184,7 +184,19 @@ public class ExecutionNodeFactory {
             // BrowserAgentModule, raises BROWSER_USER_TAKEOVER on pause). All
             // other types (agent / classify / guardrail) share AgentNode.
             ExecutionNode agentNode;
-            if ("browser_agent".equalsIgnoreCase(resolvedAgent.type())) {
+            if ("generate".equalsIgnoreCase(resolvedAgent.type())) {
+                // Generate is an AI node that never runs an LLM: it calls a
+                // generation model through the catalog, so its whole config is
+                // the params map and none of the Agent record's LLM fields
+                // apply. It is here rather than in CoreNodeBuilder because the
+                // node is addressed as `agent:<label>` like every other AI node.
+                agentNode = new com.apimarketplace.orchestrator.execution.v2.nodes.GenerateNode(
+                    agentKey,
+                    resolvedAgent.params() != null ? resolvedAgent.params() : java.util.Map.of());
+                logger.info("✨ Added generate: key={}, model={}",
+                    agentKey,
+                    resolvedAgent.params() != null ? resolvedAgent.params().get("model") : null);
+            } else if ("browser_agent".equalsIgnoreCase(resolvedAgent.type())) {
                 java.util.Map<String, Object> nodeConfig = new java.util.HashMap<>();
                 nodeConfig.put("agent", resolvedAgent);
                 if (resolvedAgent.params() != null) {

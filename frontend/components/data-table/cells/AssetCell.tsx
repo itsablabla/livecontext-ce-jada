@@ -3,7 +3,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import {
-  Upload, Loader2, Download, Eye, Trash2, Link2, FolderOpen, AlertTriangle,
+  Upload, Loader2, Download, Eye, Trash2, Link2, FolderOpen, AlertTriangle, ArrowLeft,
   FileText, Image as ImageIcon, Video, Music, File,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -119,6 +119,20 @@ export function AssetCell({ value, displayConfig, isEditing, onSaveAndExit, read
     onSaveAndExit(next ? toStoredAsset(next) : '');
   }, [onSaveAndExit]);
 
+  /**
+   * Into and back out of the link row. Both directions drop whatever error is showing: it belongs
+   * to the source the user just left, and leaving it up blames the one they land on.
+   */
+  const enterUrlMode = useCallback(() => {
+    setUrlDraft('');
+    setError(null);
+  }, []);
+
+  const leaveUrlMode = useCallback(() => {
+    setUrlDraft(null);
+    setError(null);
+  }, []);
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -202,13 +216,26 @@ export function AssetCell({ value, displayConfig, isEditing, onSaveAndExit, read
           </div>
         ) : urlDraft !== null ? (
           <div className="flex items-center gap-1">
+            {/* The way out. Picking "use a link" swaps the three sources for this row, and until
+                this button existed the only way back to upload/Files was the Escape key - which
+                nothing on screen mentioned, so the choice read as final. */}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0 flex-shrink-0"
+              onClick={leaveUrlMode}
+              title={t('assetUrlBack')}
+              aria-label={t('assetUrlBack')}
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+            </Button>
             <Input
               autoFocus
               value={urlDraft}
               onChange={(e) => setUrlDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleUrlConfirm();
-                if (e.key === 'Escape') setUrlDraft(null);
+                if (e.key === 'Escape') leaveUrlMode();
               }}
               placeholder={t('assetUrlPlaceholder')}
               className="h-7 text-sm"
@@ -225,7 +252,7 @@ export function AssetCell({ value, displayConfig, isEditing, onSaveAndExit, read
               <FolderOpen className="h-3.5 w-3.5" />
               {t('pickFromFiles')}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setUrlDraft('')} title={t('assetUrl')}>
+            <Button variant="outline" size="sm" onClick={enterUrlMode} title={t('assetUrl')}>
               <Link2 className="h-3.5 w-3.5" />
             </Button>
             <input

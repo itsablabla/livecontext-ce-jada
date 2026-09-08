@@ -34,6 +34,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useValidationOptional } from '../contexts/ValidationContext';
 import { useTheme } from '@/components/ThemeProvider';
 import { EdgeActionsProvider } from './EdgeActionsContext';
+import { ARROW_MARKERS } from './edgeStatusVisuals';
 import { FileStripExpansionProvider } from '@/contexts/FileStripExpansionContext';
 import { nodeTypes, edgeTypes } from '../constants/graphTypes';
 import type { BuilderNodeData, PaletteDragItem } from '../types';
@@ -44,6 +45,14 @@ import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { isFlowBackward } from './nodes/handleGeometry';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
+import { useInspectorDockSafe } from '@/contexts/InspectorDockContext';
+import {
+  getInspectorDockHost,
+  openInspectorPanel,
+  publishInspectorDockState,
+  subscribeInspectorDockHost,
+  type InspectorDockSurface,
+} from '@/lib/workflow/inspectorDockBus';
 import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 import { isEmbeddedWorkflowCanvas } from '@/lib/workflow/canvasEmbedding';
 import { useSvgSafeId } from '@/hooks/useSvgSafeId';
@@ -52,6 +61,7 @@ import { useCanvasViewport } from '../hooks/useCanvasViewport';
 import { useInspectorDrag } from '../hooks/useInspectorDrag';
 import { HoverEdgeManager } from './HoverEdgeManager';
 import { DirectionHandleSync } from './DirectionHandleSync';
+import { MeasuredLayoutSync } from './MeasuredLayoutSync';
 import { SimpleToast, useSimpleToast } from '@/components/chat/SimpleToast';
 import { applyDagreLayout, layoutConfigForDirection } from '../services/LayoutService';
 
@@ -364,7 +374,8 @@ export function BuilderCanvas({
   // `isForward`, not `isOpen`: the gate exists so this composer does not duplicate
   // the panel's own AI Chat tab, and a panel collapsed to a strip shows no chat -
   // leaving an empty canvas with no way to start and nothing explaining why.
-  const isSidePanelOpen = useSidePanelSafe()?.isForward ?? false;
+  const sidePanel = useSidePanelSafe();
+  const isSidePanelOpen = sidePanel?.isForward ?? false;
   // ReactFlow's <Background> builds its SVG <pattern> id from the store rfId,
   // which is "1" for every <ReactFlow> mounted without an explicit id. With
   // several canvases mounted at once (keepMounted SidePanel tabs), every
@@ -608,8 +619,84 @@ export function BuilderCanvas({
     return () => window.removeEventListener('workflowFocusNode', handleFocusNode as EventListener);
   }, [nodes, instance, onSelectionChange]);
 
-  // Dispatch InspectorPanel open/close state change
+  // ── Inspector dock: floating over the canvas, or a side-panel sub-tab ──
+  // The preference only says where the user WANTS it. Docking is offered solely
+  // where a side panel exists to dock into: the standalone builder route and the
+  // marketplace preview mount this canvas outside the app layout, and honoring
+  // the preference there would leave the inspector nowhere to render, i.e.
+  // unreachable. Below lg the panel is itself a full-screen overlay, so docking
+  // would only put a tab bar between the user and the node they just tapped.
+  const { dock: inspectorDockPreference } = useInspectorDockSafe();
+  // Which composition this canvas belongs to, so it pairs with the RIGHT panel
+  // slot. A canvas that owns its page docks into the panel beside it; a canvas
+  // mounted inside a panel (the Application panel, a sub-workflow tab) docks into
+  // that same panel, as a sibling sub-tab of itself. Both are supported, and the
+  // surface is what keeps a workflow open in both places at once from having its
+  // two canvases overwrite each other's dock state.
+  const inspectorDockSurface: InspectorDockSurface = isEmbedded ? 'embedded' : 'page';
+  const ownsInspectorDock = !!sidePanel && !!workflowId && !isPreviewOnly;
+  const wantsInspectorDock = ownsInspectorDock
+    && !isMobileOrTablet
+    && inspectorDockPreference === 'panel';
+
+  // The host element the panel offers, if any. Read once on subscribe so a canvas
+  // that mounts AFTER the panel (navigating back to a workflow with the panel
+  // already open) does not wait for the next publish to find its slot.
+  const [inspectorDockHost, setInspectorDockHostEl] = React.useState<HTMLElement | null>(null);
+  React.useEffect(() => {
+    if (!wantsInspectorDock || !workflowId) {
+      setInspectorDockHostEl(null);
+      return;
+    }
+    setInspectorDockHostEl(getInspectorDockHost(workflowId, inspectorDockSurface));
+    return subscribeInspectorDockHost(workflowId, inspectorDockSurface, setInspectorDockHostEl);
+  }, [wantsInspectorDock, workflowId, inspectorDockSurface]);
+
+  // Caption for the panel's Inspector sub-tab. Derived from the nodes array, which
+  // changes identity on every streamed step of a live run - the publish effect
+  // below depends on the resulting STRING, so it only fires on a real change.
+  const selectedNodeLabel = React.useMemo(() => {
+    if (!hasSelectedNodes) return undefined;
+    const selected = nodes.find((n: Node<BuilderNodeData>) => n.selected);
+    return selected?.data?.label ?? undefined;
+  }, [nodes, hasSelectedNodes]);
+
   const hasInspectorPanel = !!inspectorPanel;
+  const wantsInspectorInPanel = wantsInspectorDock && hasInspectorPanel && !!hasSelectedNodes;
+
+  // Tell the panel to show (or drop) its Inspector sub-tab, and ask the page to
+  // focus it. The open request has to go through the page: the panel body is
+  // unmounted while the side panel is closed, which is exactly the case a first
+  // node selection has to handle.
+  React.useEffect(() => {
+    if (!workflowId || !ownsInspectorDock) return;
+    publishInspectorDockState({
+      workflowId,
+      surface: inspectorDockSurface,
+      docked: wantsInspectorInPanel,
+      label: selectedNodeLabel,
+    });
+    if (wantsInspectorInPanel) openInspectorPanel({ workflowId, surface: inspectorDockSurface });
+  }, [workflowId, inspectorDockSurface, ownsInspectorDock, wantsInspectorInPanel, selectedNodeLabel]);
+
+  // Withdraw the request when this canvas goes away (or stops being the one that
+  // speaks for this workflow), or the panel would keep an Inspector tab alive for
+  // a canvas that no longer exists.
+  React.useEffect(() => () => {
+    if (workflowId && ownsInspectorDock) {
+      publishInspectorDockState({ workflowId, surface: inspectorDockSurface, docked: false });
+    }
+  }, [workflowId, inspectorDockSurface, ownsInspectorDock]);
+
+  // Re-clicking the node that is ALREADY selected changes no state, so the effect
+  // above stays silent - yet it is the natural way to come back to the inspector
+  // after switching the panel to another sub-tab. Handled from the click itself.
+  const wantsInspectorDockRef = React.useRef(false);
+  React.useEffect(() => {
+    wantsInspectorDockRef.current = wantsInspectorDock;
+  }, [wantsInspectorDock]);
+
+  // Dispatch InspectorPanel open/close state change
   React.useEffect(() => {
     const isInspectorOpen = hasInspectorPanel && !!hasSelectedNodes;
     window.dispatchEvent(new CustomEvent('inspectorPanelStateChange', {
@@ -617,9 +704,14 @@ export function BuilderCanvas({
     }));
   }, [hasInspectorPanel, hasSelectedNodes, isAdvancedMode, isFullscreen]);
 
-  // Close inspector when clicking anywhere outside it (global listener)
+  // Close inspector when clicking anywhere outside it (global listener).
+  // Disabled while it is docked: "outside" then includes the side panel's own tab
+  // bar and chrome, so switching to the AI Chat sub-tab - or just resizing the
+  // panel - would deselect the node and take the Inspector tab away. Docked, the
+  // ways out are the panel's close button and a click on the canvas pane (which
+  // deselects through ReactFlow's own pane handler, not this listener).
   React.useEffect(() => {
-    if (!hasSelectedNodes) return;
+    if (!hasSelectedNodes || wantsInspectorDock) return;
 
     const handleGlobalMouseDown = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -639,7 +731,7 @@ export function BuilderCanvas({
 
     document.addEventListener('mousedown', handleGlobalMouseDown);
     return () => document.removeEventListener('mousedown', handleGlobalMouseDown);
-  }, [hasSelectedNodes, onSelectionChange]);
+  }, [hasSelectedNodes, onSelectionChange, wantsInspectorDock]);
 
   // Keyboard shortcuts for undo/redo
   React.useEffect(() => {
@@ -831,11 +923,14 @@ export function BuilderCanvas({
     }
 
     onSelectionChange([node.id]);
+    if (wantsInspectorDockRef.current && workflowId) {
+      openInspectorPanel({ workflowId, surface: inspectorDockSurface });
+    }
     const selectedEdges = edges.filter((edge) => edge.selected);
     if (selectedEdges.length > 0) {
       onEdgesChange(selectedEdges.map((edge) => ({ type: 'select' as const, id: edge.id, selected: false })));
     }
-  }, [onSelectionChange, onEdgesChange, edges, onConnect, pendingHoverConnectionRef]);
+  }, [onSelectionChange, onEdgesChange, edges, onConnect, pendingHoverConnectionRef, workflowId, inspectorDockSurface]);
 
   const handleEdgeClick = React.useCallback((_: React.MouseEvent, edge: Edge) => {
     onEdgesChange([{ type: 'select' as const, id: edge.id, selected: true }]);
@@ -1167,6 +1262,17 @@ export function BuilderCanvas({
               nodeIds={React.useMemo(() => nodes.map((n) => n.id), [nodes])}
             />
 
+            {/* Replays the layout on the sizes the nodes actually painted, so an
+                agent-built graph lands on its axis instead of on its label estimates,
+                and nothing sits inside the node above it. */}
+            <MeasuredLayoutSync
+              direction={layoutDirection}
+              workflowId={workflowId}
+              isLocked={isLocked}
+              instance={instance}
+              onNodesChange={guardedOnNodesChange}
+            />
+
             {/* Custom selection box */}
             {isSelecting && selectionStart && selectionEnd && instance && (() => {
               const minX = Math.min(selectionStart.x, selectionEnd.x);
@@ -1239,8 +1345,24 @@ export function BuilderCanvas({
               </>
             )}
 
+            {/* Inspector docked into the side panel - portalled into the slot the
+                panel offers, so it keeps the builder's contexts (run state,
+                step-by-step, validation, selection) while living in the panel's DOM.
+                While the preference asks for the dock and no slot is registered yet
+                (the panel is still opening), we render NOTHING rather than flashing
+                the floating window for a frame. */}
+            {inspectorPanel && hasSelectedNodes && !(isPreviewOnly && isRunMode)
+              && wantsInspectorDock && inspectorDockHost && createPortal(
+              <div className="h-full w-full min-h-0 flex flex-col" data-inspector-dock-slot>
+                {React.cloneElement(inspectorPanel as React.ReactElement<{ dockMode?: 'floating' | 'panel' }>, {
+                  dockMode: 'panel',
+                })}
+              </div>,
+              inspectorDockHost
+            )}
+
             {/* Inspector panel - rendered via portal to escape canvas z-10 stacking context */}
-            {inspectorPanel && hasSelectedNodes && !(isPreviewOnly && isRunMode) && createPortal(
+            {inspectorPanel && hasSelectedNodes && !(isPreviewOnly && isRunMode) && !wantsInspectorDock && createPortal(
               <div
                 className="fixed z-[150] pointer-events-none"
                 style={{ left: containerOffset.x + inspectorPanelPosition.x, top: containerOffset.y + inspectorPanelPosition.y }}
@@ -1384,14 +1506,3 @@ const CANVAS_STYLES = `
   .lc-selection-mode .react-flow__pane { cursor: crosshair !important; }
   `;
 
-// Arrow marker definitions (uses CSS vars via style={{ fill }} - no isDark needed)
-const ARROW_MARKERS = [
-  { id: 'arrow-default', color: 'var(--border-color)' },
-  { id: 'arrow-running', color: '#3b82f6' },
-  { id: 'arrow-completed', color: '#10b981' },
-  { id: 'arrow-failed', color: '#ef4444' },
-  { id: 'arrow-skipped', color: '#94a3b8' },
-  { id: 'arrow-selected', color: 'var(--accent-primary)' },
-  { id: 'arrow-partial_success', color: '#f59e0b' },
-  { id: 'arrow-while-body', color: '#f97316' },
-];

@@ -14,7 +14,21 @@ import { routing } from '@/i18n/routing';
 // on the pages this whole effort exists to get indexed.
 // `/u` is the public author page reached from a listing. It is server-rendered
 // for the same reason and would hit the same spinner problem.
-const PUBLIC_MARKETING_PREFIXES = ['/compare', '/about', '/contact', '/legal', '/changelog', '/docs', '/blog', '/marketplace', '/u'];
+// `/status` belongs here for a stronger reason than SEO: it is the page someone
+// opens BECAUSE the product is not working for them. Gating it behind the auth
+// spinner means the one page that must answer during an incident answers with a
+// spinner, and (since `oidc.isLoading` is always true during SSR) ships
+// spinner-only HTML to anyone whose JavaScript or session is the problem.
+// `/integrations` and `/models` are the two public catalogues (every integration,
+// every model the platform runs). Both shipped WITHOUT being listed here and both
+// served spinner-only HTML, measured on a production build: 49 KB and 67 KB of
+// markup with not one integration or model in it. Nothing failed, which is the
+// trap. The page renders perfectly once JavaScript runs, so a browser, a
+// screenshot and a Playwright test that waits for hydration all agree it works,
+// and only a crawler (or a `curl`) sees the spinner. `publicMarketingPathCoverage`
+// in the tests now enumerates the pages that use the public chrome and fails when
+// one is missing from this list, so the next public page cannot repeat it.
+const PUBLIC_MARKETING_PREFIXES = ['/compare', '/about', '/contact', '/legal', '/changelog', '/docs', '/blog', '/marketplace', '/u', '/status', '/integrations', '/models'];
 
 export function isPublicMarketingPath(pathname: string | null): boolean {
   if (!pathname) return false;

@@ -362,6 +362,50 @@ public class WorkflowEpochService {
     }
 
     /**
+     * The outcome of the MOST RECENTLY FIRED epoch of each given run, for surfaces that show
+     * "how did the last fire end" next to a last-run time (the notification bell's Triggers
+     * tab).
+     *
+     * <p>One query for the whole batch, and one {@link EpochState} deserialization per run -
+     * NOT per epoch, which is what {@link #listEpochTimestamps} costs. That matters here: the
+     * caller asks about many runs at once, and a long-lived reusable-trigger run accumulates
+     * epochs without bound (a once-a-minute schedule reaches ~10k a week).
+     *
+     * <p>The returned {@code active} flag is the other half of the answer: an epoch that is
+     * still open has NO outcome (its stored state is the one written when it opened), and only
+     * the RUN status can say whether that means "executing" or "abandoned mid-flight". Callers
+     * combine the two - this service deliberately does not read run rows.
+     *
+     * <p>Runs that never fired an epoch are absent from the map.
+     */
+    public Map<String, LatestEpochOutcome> getLatestEpochOutcomeByRunIds(List<String> runIds) {
+        Map<String, WorkflowEpochRepository.LatestEpochHeaderRow> headers =
+                repository.getLatestEpochHeaderByRunIds(runIds);
+        Map<String, LatestEpochOutcome> outcomes = new HashMap<>(headers.size());
+        headers.forEach((runId, header) -> outcomes.put(runId, new LatestEpochOutcome(
+                deriveEpochOutcome(deserializeEpochState(header.epochStateJson()), header.isActive()),
+                header.isActive(),
+                header.startedAt(),
+                header.triggerId())));
+        return outcomes;
+    }
+
+    /**
+     * What the last fire of a run achieved, plus what is needed to interpret a silent answer.
+     *
+     * @param outcome   {@code COMPLETED} / {@code FAILED}, or null when the epoch cannot be
+     *                  spoken for (still active, or nothing but its trigger ran)
+     * @param active    whether that epoch is still open - a null {@code outcome} on an active
+     *                  epoch means "ask the run status", on a closed one it means "nothing ran"
+     * @param startedAt when that epoch fired
+     * @param triggerId WHICH trigger fired it - a run is shared by every trigger of its
+     *                  workflow, so a caller that shows one row per trigger needs this to tell
+     *                  whether the fire was that row's own
+     */
+    public record LatestEpochOutcome(String outcome, boolean active, java.time.Instant startedAt,
+                                     String triggerId) {}
+
+    /**
      * What an epoch ACHIEVED: {@code COMPLETED}, {@code FAILED}, or null when there is
      * nothing to claim yet.
      *

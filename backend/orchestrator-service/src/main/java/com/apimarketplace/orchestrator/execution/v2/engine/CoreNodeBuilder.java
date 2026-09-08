@@ -42,6 +42,8 @@ public class CoreNodeBuilder {
             WorkflowPlan plan,
             Map<String, List<String>> mergeSourceNodes) {
 
+        refuseGenerateCore(plan);
+
         createDecisionNodes(nodeMap, plan);
         createSwitchNodes(nodeMap, plan);
         createForkNodes(nodeMap, plan);
@@ -52,7 +54,6 @@ public class CoreNodeBuilder {
         createDownloadFileNodes(nodeMap, plan);
         createPublicLinkNodes(nodeMap, plan);
         createMediaNodes(nodeMap, plan);
-        createGenerateNodes(nodeMap, plan);
         createExitNodes(nodeMap, plan);
         createEndNodes(nodeMap, plan);
         createResponseNodes(nodeMap, plan);
@@ -297,6 +298,47 @@ public class CoreNodeBuilder {
             nodeMap.put(key, node);
             logger.info("Created database node: {} (operation={})",
                 key, config != null ? config.operation() : "select");
+        }
+    }
+
+    /**
+     * A generate node left in the plan's {@code cores[]} stops the run, loudly.
+     *
+     * <p>Generate is an AI node now: the factory builds it from {@code agents[]}
+     * and keys it {@code agent:<label>}. Its type is deliberately still accepted
+     * by {@code Core}, because rejecting it there makes the whole plan unparseable
+     * and the workflow impossible to OPEN, which is worse than one broken node.
+     *
+     * <p>But then nothing here builds it, and that silence is the real hazard. No
+     * node means no key, so every edge touching it is dropped, so everything
+     * downstream of it becomes unreachable, and the run reports COMPLETED having
+     * executed a fraction of the workflow. Failing here trades a green run that did
+     * almost nothing for a red one that says exactly what to change.
+     */
+    private void refuseGenerateCore(WorkflowPlan plan) {
+        if (plan.getCores() == null) return;
+        for (Core core : plan.getCores()) {
+            if (!"generate".equals(core.type())) continue;
+            // Not getNormalizedKey(): with no label it falls back to the id, and
+            // an id is routinely ALREADY prefixed ("core:make_clip"), which yields
+            // core:core_make_clip and a message naming agent:core_make_clip. The
+            // new key is the one thing this message exists to hand the reader, so
+            // getting it wrong makes the failure worse than the silence it
+            // replaces.
+            String base = core.label() != null && !core.label().isBlank()
+                    ? core.label()
+                    : String.valueOf(core.id());
+            if (base.startsWith("core:")) base = base.substring("core:".length());
+            String normalized = LabelNormalizer.normalizeLabel(base);
+            String label = normalized != null && !normalized.isBlank()
+                    ? normalized
+                    : base.toLowerCase(java.util.Locale.ROOT);
+            throw new IllegalStateException(
+                "Node 'core:" + label + "' is a generate node stored as a core. Generate is an "
+                + "AI node: move it to the plan's agents array (same object, same params). It is "
+                + "then keyed agent:" + label + " and read as {{agent:" + label + ".output.file}}. "
+                + "Refusing to run: built from cores it produces no node at all, its edges are "
+                + "dropped with it, and everything after it would be skipped without a word.");
         }
     }
 
@@ -677,7 +719,8 @@ public class CoreNodeBuilder {
      * Creates media nodes from Core definitions.
      * Media nodes process audio/video files on the optional renderer component:
      * probe (metadata), mux_audio (one audio onto one video), mix (1-8 tracks,
-     * optional video), extract_audio. Config comes from the generic {@code params}
+     * optional video), extract_audio, concat, frame, overlay and subtitles (burn
+     * timed captions into the picture). Config comes from the generic {@code params}
      * map and is validated at execute() time (params accept runtime templates).
      */
     public void createMediaNodes(Map<String, ExecutionNode> nodeMap, WorkflowPlan plan) {
@@ -702,38 +745,6 @@ public class CoreNodeBuilder {
             MediaNode mediaNode = new MediaNode(mediaKey, params);
             nodeMap.put(mediaKey, mediaNode);
             logger.info("🎬 Created media node: {} (operation={})", mediaKey, params.get("operation"));
-        }
-    }
-
-    /**
-     * Creates generate nodes from Core definitions.
-     * Generate nodes produce an asset from a prompt (image, video, audio, voice,
-     * music); the chosen model decides the format, the accepted parameters and the
-     * price. Config comes from the generic {@code params} map and is validated
-     * against the model at execute() time (params accept runtime templates).
-     */
-    public void createGenerateNodes(Map<String, ExecutionNode> nodeMap, WorkflowPlan plan) {
-        if (plan.getCores() == null) {
-            return;
-        }
-
-        for (Core coreNode : plan.getCores()) {
-            if (!"generate".equals(coreNode.type())) {
-                continue;
-            }
-
-            String label = coreNode.label() != null ? coreNode.label() : coreNode.id();
-            String normalizedLabel = LabelNormalizer.normalizeLabel(label);
-            String generateKey = "core:" + normalizedLabel;
-
-            if (nodeMap.containsKey(generateKey)) {
-                continue; // Already created
-            }
-
-            Map<String, Object> params = coreNode.params() != null ? coreNode.params() : Map.of();
-            GenerateNode generateNode = new GenerateNode(generateKey, params);
-            nodeMap.put(generateKey, generateNode);
-            logger.info("✨ Created generate node: {} (model={})", generateKey, params.get("model"));
         }
     }
 

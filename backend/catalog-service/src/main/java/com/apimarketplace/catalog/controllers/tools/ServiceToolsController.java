@@ -128,7 +128,8 @@ public class ServiceToolsController {
         copyIfPresent(request, "enabledModules", credentials,
                 com.apimarketplace.agent.config.AgentModuleResolver.ENABLED_MODULES_CREDENTIAL_KEY);
         for (String am : List.of("tableAccessMode", "workflowAccessMode", "interfaceAccessMode",
-                "agentAccessMode", "applicationAccessMode", "skillAccessMode", "fileAccessMode")) {
+                "agentAccessMode", "applicationAccessMode", "skillAccessMode", "fileAccessMode",
+                "memoryAccessMode")) {
             copyIfPresent(request, am, credentials, am);
         }
 

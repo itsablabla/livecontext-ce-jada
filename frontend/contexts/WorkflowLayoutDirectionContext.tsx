@@ -13,10 +13,11 @@
  *     round-trip, scoped per workspace (mirroring `SidePanelLayoutContext`). Written
  *     by `setDirection` (the account Settings preference).
  *   - The ACTIVE direction of the workflow currently open, which is that workflow's
- *     identity: it is persisted in the workflow PLAN (`plan.layoutDirection`), seeded
- *     back onto the canvas on load, and overridable live by the in-canvas toggle.
- *     Written IN MEMORY ONLY by `setWorkflowDirection` (never localStorage), so a
- *     per-workflow choice never overwrites the account default.
+ *     identity: it is persisted in the workflow PLAN (`plan.layoutDirection`) and seeded
+ *     back onto the canvas on load by `setWorkflowDirection`, IN MEMORY ONLY (never
+ *     localStorage), so LOADING a workflow never overwrites the account default.
+ *     Changing the direction live from the canvas is a different act: it is the user
+ *     stating a preference, and it writes both layers.
  *
  * The direction drives THREE things, and they must stay in agreement or the canvas
  * contradicts itself:
@@ -45,15 +46,30 @@ interface WorkflowLayoutDirectionContextValue {
   /** The ACTIVE direction the canvas renders in. */
   direction: WorkflowLayoutDirection;
   /**
+   * The stored per-workspace DEFAULT, unaffected by whatever workflow is open.
+   *
+   * <p>Separate from `direction` because the two answer different questions and had been
+   * conflated: the account preference in Settings was reading the ACTIVE value, so once a
+   * workflow whose plan stamps a direction had been opened in the session, that page
+   * displayed the workflow's direction as if it were the user's default - and, being a
+   * controlled select, could not be used to re-pick the value it was already showing.
+   * Surfaces that describe the DEFAULT read this; the canvas reads `direction`.
+   */
+  defaultDirection: WorkflowLayoutDirection;
+  /**
    * Set the direction as the user's GLOBAL default (persisted to localStorage). Used
    * by the account Settings preference: it is the default for NEW workflows.
    */
   setDirection: (direction: WorkflowLayoutDirection) => void;
   /**
    * Set the active direction for THIS workflow only, in memory, WITHOUT touching the
-   * global preference. Used by (a) the loader, seeding from the plan's stored
-   * direction, and (b) the in-canvas toggle, whose choice is saved into the plan on
-   * save rather than into the user's global preference.
+   * global preference. Its callers are the loader's two seeding paths: the initial read of
+   * a plan's stored direction, and a version restore.
+   *
+   * <p>The in-canvas toggle used to be a third caller and deliberately is not any more. A
+   * memory-only write meant choosing a reading direction from the workflow in front of you
+   * left the account default untouched, so every other workflow still opened the other way
+   * round: a control that looked general and was not. It calls `setDirection` now.
    */
   setWorkflowDirection: (direction: WorkflowLayoutDirection) => void;
 }
@@ -102,22 +118,47 @@ export function WorkflowLayoutDirectionProvider({
   const [direction, setDirectionState] = useState<WorkflowLayoutDirection>(
     forcedDirection ?? DEFAULT_WORKFLOW_LAYOUT_DIRECTION,
   );
+  // The stored default, tracked alongside the active value. It follows storage and the
+  // account setter, and is deliberately deaf to `setWorkflowDirection`: opening a workflow
+  // must not restate what the user's default is.
+  const [defaultDirection, setDefaultDirectionState] = useState<WorkflowLayoutDirection>(
+    forcedDirection ?? DEFAULT_WORKFLOW_LAYOUT_DIRECTION,
+  );
 
   // Re-read on mount AND whenever the workspace changes: the preference is per-org.
   // Skipped when the direction is forced (the fleet), which owns its own value.
   useEffect(() => {
     if (forcedDirection) return;
     const stored = readStoredDirection(currentOrgId);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing from an
-    // external store (localStorage) on mount/org-switch; cannot run during render
-    // without breaking hydration.
+    // Syncing from an external store (localStorage) on mount and on org switch; it cannot
+    // run during render without breaking hydration, which is the case the rule allows for.
+    // The directives below are ONE line each and sit immediately above their statement: a
+    // `disable-next-line` written across three comment lines targets the next COMMENT, so
+    // it suppresses nothing and the statement warns anyway.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDirectionState(stored ?? DEFAULT_WORKFLOW_LAYOUT_DIRECTION);
+    // No second directive: the rule reports once per effect, so one covers both writes and
+    // a second is itself reported as unused.
+    setDefaultDirectionState(stored ?? DEFAULT_WORKFLOW_LAYOUT_DIRECTION);
   }, [currentOrgId, forcedDirection]);
 
   const setDirection = useCallback(
     (next: WorkflowLayoutDirection) => {
       if (forcedDirection) return; // pinned: ignore writes
+      // BOTH layers, from either surface, and that is deliberate. From the canvas it is
+      // obvious (the user is changing the canvas in front of them). From Settings it is a
+      // choice: a workflow may be mounted behind that page with a direction seeded from
+      // its plan, and stating a default while the thing you can see keeps contradicting it
+      // is the more confusing of the two. The workflow's own direction is not lost - it is
+      // in its plan and re-seeds on the next load.
+      //
+      // With ONE edge, worth knowing before relying on that: the builder writes the ACTIVE
+      // direction into the plan it saves (BuilderCanvas keeps a ref in step with it), so a
+      // workflow left mounted behind Settings is re-oriented here and then stamps that
+      // direction into its own plan on its next save. "Re-seeds on the next load" holds
+      // until such a save overwrites what would have been re-seeded.
       setDirectionState(next);
+      setDefaultDirectionState(next);
       try {
         window.localStorage.setItem(storageKey(currentOrgId), next);
       } catch {
@@ -138,9 +179,19 @@ export function WorkflowLayoutDirectionProvider({
   );
 
   const effective = forcedDirection ?? direction;
+  // A pin overrides BOTH, mirroring `effective` above: a surface that fixes its own
+  // reading direction is not describing anyone's stored default either. No consumer
+  // observes this today (the only reader of `defaultDirection` is the account settings
+  // page, which is never under a pinned provider), so it is consistency, not behaviour.
+  const effectiveDefault = forcedDirection ?? defaultDirection;
   const value = useMemo(
-    () => ({ direction: effective, setDirection, setWorkflowDirection }),
-    [effective, setDirection, setWorkflowDirection],
+    () => ({
+      direction: effective,
+      defaultDirection: effectiveDefault,
+      setDirection,
+      setWorkflowDirection,
+    }),
+    [effective, effectiveDefault, setDirection, setWorkflowDirection],
   );
 
   return (
@@ -168,6 +219,7 @@ export function useWorkflowLayoutDirectionSafe(): WorkflowLayoutDirectionContext
   return (
     ctx ?? {
       direction: DEFAULT_WORKFLOW_LAYOUT_DIRECTION,
+      defaultDirection: DEFAULT_WORKFLOW_LAYOUT_DIRECTION,
       setDirection: () => {},
       setWorkflowDirection: () => {},
     }

@@ -66,6 +66,14 @@ spring:
     default-schema: orchestrator
     table: flyway_schema_history_orchestrator
 
+# Extra databases that must carry the SAME history as the primary, comma separated JDBC
+# URLs, same credentials as spring.datasource. Empty = one database. Used when a schema
+# has been moved to its own instance (docs/ops/SCHEMA_MOVE_RUNBOOK.md); every database
+# then holds every schema (the moved ones populated, the others empty) and the one
+# linear history runs on each, in order, failing fast.
+migration:
+  extra-target-urls: ${DB_TARGET_URLS:}
+
 logging:
   level:
     org.flywaydb: INFO

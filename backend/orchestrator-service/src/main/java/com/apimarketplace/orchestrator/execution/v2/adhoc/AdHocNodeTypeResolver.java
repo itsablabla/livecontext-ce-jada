@@ -84,6 +84,22 @@ public final class AdHocNodeTypeResolver {
      */
     private static final Set<String> PERSISTING_TYPES = Set.of("sub_workflow");
 
+    /**
+     * Types the plan files under {@code agents} rather than {@code cores}.
+     *
+     * <p>Only {@code generate} is here, and only because it is the one AI node
+     * that computes something on its own: it takes a model and a prompt and
+     * hands back a file, with no conversation, no tools and no entity to
+     * resolve. The other AI nodes are refused for their own reasons elsewhere.
+     *
+     * <p>What it is FOR: the synthetic plan has to put the node in the list its
+     * builder reads. Filed among the cores, {@code generate} parses (the type is
+     * still accepted there so a plan saved before the move still opens) but no
+     * builder produces a node for it, and the caller is told it cannot run
+     * standalone, which is false.
+     */
+    public static final Set<String> AGENT_TYPES = Set.of("generate");
+
     private AdHocNodeTypeResolver() {
     }
 

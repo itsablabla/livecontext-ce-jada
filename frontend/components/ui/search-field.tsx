@@ -1,6 +1,7 @@
 import * as React from "react"
 import { Search, X } from "lucide-react"
 
+import { Kbd } from "@/components/ui/kbd"
 import { cn } from "@/lib/utils"
 
 export interface SearchFieldProps
@@ -48,9 +49,9 @@ const SearchField = React.forwardRef<HTMLInputElement, SearchFieldProps>(
             <X className="h-3.5 w-3.5" />
           </button>
         ) : shortcutHint ? (
-          <kbd className="pointer-events-none absolute right-2.5 hidden rounded-md border border-theme bg-[var(--bg-secondary)] px-1.5 py-0.5 font-sans text-xs font-medium text-[var(--text-secondary)] sm:inline-block">
+          <Kbd className="absolute right-2.5 hidden sm:inline-block">
             {shortcutHint}
-          </kbd>
+          </Kbd>
         ) : null}
       </div>
     )

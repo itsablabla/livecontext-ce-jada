@@ -337,10 +337,19 @@ public class SplitNode extends BaseNode {
 
     /** Builds a snapshot of the split's resolved configuration for inspector visibility. */
     private Map<String, Object> buildInputSnapshot(List<Object> items) {
+        // Same keys AND the same presence rules as SplitNodeExecutor.createSuccessResult:
+        // an unset maxItems (0) or an absent strategy is not a configured value, and
+        // rendering it would tell the reader they set something they did not.
         Map<String, Object> resolvedParams = new LinkedHashMap<>();
-        resolvedParams.put("list_expression", list);
-        resolvedParams.put("maxItems", maxItems);
-        resolvedParams.put("splitStrategy", splitStrategy);
+        if (list != null) {
+            resolvedParams.put("list", list);
+        }
+        if (maxItems > 0) {
+            resolvedParams.put("maxItems", maxItems);
+        }
+        if (splitStrategy != null) {
+            resolvedParams.put("splitStrategy", splitStrategy);
+        }
         if (items != null) {
             resolvedParams.put("itemCount", items.size());
         }
@@ -409,6 +418,11 @@ public class SplitNode extends BaseNode {
         return maxItems;
     }
 
+    /**
+     * The split's failure strategy, read polymorphically by the executor so the
+     * run reports the node's full configuration.
+     */
+    @Override
     public String getSplitStrategy() {
         return splitStrategy;
     }

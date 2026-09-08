@@ -6,12 +6,20 @@ import LandingLanguageSelect from '@/components/landing/LandingLanguageSelect';
 import LandingThemeProvider from '@/components/landing/LandingThemeProvider';
 import LandingThemeToggle from '@/components/landing/LandingThemeToggle';
 import { docsHref } from '@/lib/docs/docsHostRewrite';
+import { IS_CE } from '@/lib/edition/edition';
+import FooterIntegrations from '@/components/landing/FooterIntegrations';
+import { WELL_KNOWN_MODELS } from '@/lib/models/wellKnownModels';
+// The /models page owns its URL contract; the footer is a consumer of it, so the
+// param name lives in one place. This is a server component, so pulling the
+// catalogue in with it costs nothing in the browser bundle.
+import { providerHref } from '@/app/models/_components/modelsQuery';
 
 // Shared chrome (header + footer + base CSS vars) used by the landing page
 // (`app/[locale]/page.tsx`) and the public sub-pages (`/about`, `/contact`,
-// `/legal/*`, `/changelog`, `/docs`). Header anchors target `/#marketplace`
-// and `/#pricing` so they scroll on the landing page AND navigate-then-scroll
-// from any other public page.
+// `/legal/*`, `/changelog`, `/docs`). The remaining header anchor targets
+// `/#pricing` so it scrolls on the landing page AND navigates-then-scrolls from
+// any other public page. Marketplace is NOT an anchor: it is a real page
+// (`/marketplace`) listing every publication, so the header links to it.
 //
 // IMPORTANT: most of those sub-pages render at the app root, OUTSIDE the
 // `[locale]` tree, so they have NO `NextIntlClientProvider`. Any component
@@ -155,10 +163,22 @@ export function LandingHeader({ extra, siteBaseUrl }: { extra?: React.ReactNode;
             LiveContext
           </span>
         </Link>
-        <nav className="hidden md:flex items-center gap-8 text-sm" style={{ color: 'var(--text-secondary)' }}>
-          <LandingNavAnchor targetId="marketplace" baseUrl={siteBaseUrl} className="hover:opacity-80 transition-opacity cursor-pointer">Marketplace</LandingNavAnchor>
+        {/* gap-5 at md: the logo, the nav and the right-hand cluster do not fit at 768px
+            with gap-8. Back to five entries since Integrations moved to the footer, which
+            was already tight at that count, so the smaller gap stays. */}
+        <nav className="hidden md:flex items-center gap-5 lg:gap-8 text-sm" style={{ color: 'var(--text-secondary)' }}>
+          {/* A real destination, not an in-page anchor. The public marketplace
+              (`/marketplace`) is the crawlable index of every published listing,
+              so linking it from the chrome of every public page is what puts
+              each listing one click from anywhere on the site. As an anchor
+              this was a scroll on the landing and a bounce back to the landing
+              from everywhere else, and it linked to no listing at all. */}
+          {/* /integrations is NOT in the header. It stays one click away from every public
+              page through the footer column and the landing's own section, which is what
+              keeps the connector tree crawlable; in the header it was the sixth entry and
+              pushed the nav to gap-5 to fit at 768px. */}
+          <Link href={withBase(siteBaseUrl, '/marketplace')} className="hover:opacity-80 transition-opacity">Marketplace</Link>
           <LandingNavAnchor targetId="pricing" baseUrl={siteBaseUrl} className="hover:opacity-80 transition-opacity cursor-pointer">Pricing</LandingNavAnchor>
-          <Link href={withBase(siteBaseUrl, '/blog')} className="hover:opacity-80 transition-opacity">Blog</Link>
           <Link href={withBase(siteBaseUrl, '/changelog')} className="hover:opacity-80 transition-opacity">Changelog</Link>
           <Link href={docsHref(siteBaseUrl)} prefetch={false} className="hover:opacity-80 transition-opacity">Docs</Link>
           <a
@@ -271,7 +291,9 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
             </a>
           </div>
         </div>
-        <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-8 gap-y-10">
+        {/* Seven columns at lg since Models joined: gap-8 still fits them in the footer's
+            width, and below lg they wrap two or three at a time as before. */}
+        <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-8 gap-y-10">
         <div>
           <p className="text-[11px] uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>Product</p>
           {/* The capability entries point at the docs page that explains each one:
@@ -284,11 +306,11 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
             <li><Link href={docsHref(siteBaseUrl, 'interfaces')} prefetch={false}>Interfaces &amp; apps</Link></li>
             <li><Link href={docsHref(siteBaseUrl, 'tables')} prefetch={false}>Tables &amp; data</Link></li>
             <li><Link href={docsHref(siteBaseUrl, 'integrations')} prefetch={false}>Integrations</Link></li>
-            <li>
-              <SignInButton variant="link" returnTo="/app/marketplace" baseUrl={siteBaseUrl} className="cursor-pointer">
-                Marketplace
-              </SignInButton>
-            </li>
+            {/* The PUBLIC marketplace, not a sign-in prompt: there is a
+                crawlable page behind this word now, and a footer link from
+                every public page is one of the cheapest ways to keep the whole
+                listing tree reachable. */}
+            <li><Link href={withBase(siteBaseUrl, '/marketplace')}>Marketplace</Link></li>
             <li>
               <SignInButton variant="link" returnTo="/app/settings/pricing" baseUrl={siteBaseUrl} className="cursor-pointer">
                 Pricing
@@ -296,13 +318,42 @@ export function LandingFooter({ siteBaseUrl }: { siteBaseUrl?: string } = {}) {
             </li>
           </ul>
         </div>
+        {/* Ranked by the node-usage ledger, not curated: see FooterIntegrations.
+            Each name is a crawlable page, so the footer puts every public page one
+            click from an integration page and vice versa. */}
+        <FooterIntegrations siteBaseUrl={siteBaseUrl} />
+        {/* The families the platform runs on. Named rather than counted: "275 models" tells
+            a visitor nothing, "Claude, GPT, Gemini, Grok" answers the question they came
+            with. Each is checked against the catalogue seed by wellKnownModels.test.ts.
+            The destination is /models, not the docs: the column pointed at the docs because
+            no public page listed the models, which stopped being true when /models shipped.
+            A visitor clicking "Claude" wants the list and its prices, not the BYOK setup
+            guide, and /models links on to the docs for the setup half. Each family carries
+            its OWN provider filter, so the eight are eight destinations rather than one URL
+            printed eight times, and "Grok" lands on Grok. */}
+        <div>
+          <p className="text-[11px] uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>Models</p>
+          <ul className="space-y-2" style={{ color: 'var(--text-secondary)' }}>
+            {WELL_KNOWN_MODELS.map((model) => (
+              <li key={model.provider}>
+                <Link href={withBase(siteBaseUrl, providerHref(model.provider))}>{model.label}</Link>
+              </li>
+            ))}
+          </ul>
+        </div>
         {/* Everything the header nav links to, mirrored here (sim.ai-style
-            Resources column) so the footer is a full site map on its own. */}
+            Resources column) so the footer is a full site map on its own. It is a
+            superset, not a copy: /models and /status live here only. A sixth header
+            item overflows the bar by 44px at 768px, the width where `md:flex` first
+            shows the nav, so /models is reached from the Models column beside this
+            one, from the sitemap, and not from the header. */}
         <div>
           <p className="text-[11px] uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>Resources</p>
           <ul className="space-y-2" style={{ color: 'var(--text-secondary)' }}>
-            <li><Link href={withBase(siteBaseUrl, '/blog')}>Blog</Link></li>
             <li><Link href={withBase(siteBaseUrl, '/changelog')}>Changelog</Link></li>
+            {/* Cloud only: /status reports the LiveContext cloud and 404s in a
+                self-hosted build, so linking it there would be a dead entry. */}
+            {!IS_CE && <li><Link href={withBase(siteBaseUrl, '/status')}>Status</Link></li>}
             <li><Link href={docsHref(siteBaseUrl)} prefetch={false}>Docs</Link></li>
             <li>
               <a href="https://github.com/livecontext-ai" target="_blank" rel="noopener noreferrer">

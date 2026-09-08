@@ -59,10 +59,8 @@ class InternalDataSourceControllerReplaceItemsTest {
     void setUp() {
         org.springframework.mock.env.MockEnvironment env = new org.springframework.mock.env.MockEnvironment();
         env.setProperty("app.edition", "ce");
-        controller = new InternalDataSourceController(dataSourceService, dataSourceRepository,
-                dataSourceItemRepository, crudExecutorService, new ObjectMapper(),
-                new com.apimarketplace.datasource.services.VectorFeatureGate(
-                        new com.apimarketplace.common.web.AppEditionProvider(env)));
+        controller = new InternalDataSourceController(dataSourceService, dataSourceRepository, dataSourceItemRepository, crudExecutorService, new com.apimarketplace.datasource.crud.service.MediaCellHydrator(new com.apimarketplace.datasource.crud.service.ColumnValueCoercer()), new ObjectMapper(), new com.apimarketplace.datasource.services.VectorFeatureGate(
+                        new com.apimarketplace.common.web.AppEditionProvider(env), null), org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class));
     }
 
     private DataSource dataSourceOwnedBy(String ownerTenant, String org) {

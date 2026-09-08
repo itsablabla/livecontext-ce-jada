@@ -7,7 +7,7 @@ import { SelectionActionBar, BulkBarButton } from '@/components/ui/SelectionActi
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Download, FileJson, FileSpreadsheet, FileText, Filter, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
+import { Copy, Download, FileJson, FileSpreadsheet, FileText, Filter, Loader2, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
 
 interface DataTableToolbarProps {
   controller: DataTableController;
@@ -43,6 +43,8 @@ export function DataTableToolbar({
     setShowAddColumnModal,
     setShowCreateDataSourceModal,
     deleteSelectedRows,
+    duplicateSelectedRows,
+    isDuplicatingRows,
     deleteSelectedColumns,
     confirmDeleteColumns,
     showDeleteColumnsModal,
@@ -181,6 +183,18 @@ export function DataTableToolbar({
             >
               <Sparkles className="h-3.5 w-3.5" />
               {t('analyzeData')}
+            </BulkBarButton>
+          )}
+
+          {/* Duplicating is only offered on real table rows. In a nested view (`jsonPath`) a "row"
+              is one element inside a JSON array, so a copy is a patch on its parent rather than a
+              new row, and in a workflow view the rows are step output nobody owns. */}
+          {selectedRows.size > 0 && !readOnly && !jsonPath && !workflowContext && (
+            <BulkBarButton onClick={duplicateSelectedRows} disabled={isDuplicatingRows}>
+              {isDuplicatingRows
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <Copy className="h-3.5 w-3.5" />}
+              {t('duplicateRows')}
             </BulkBarButton>
           )}
 

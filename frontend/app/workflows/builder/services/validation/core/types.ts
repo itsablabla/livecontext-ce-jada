@@ -124,6 +124,21 @@ export interface ValidationContext {
    * must then emit NO availability warning rather than a possibly-false one.
    */
   featureCapabilities?: FeatureCapabilities;
+  /**
+   * Which nodes and endpoints this account's plan includes, and which plan it is
+   * on. Absent = unknown (loading, request failed, CE build): rules must then
+   * emit NO plan issue rather than a possibly-false one, exactly like
+   * {@link featureCapabilities}.
+   */
+  planGate?: PlanGateContext;
+}
+
+/** The plan gate as the builder sees it. Mirrors `GET /api/plan-features`. */
+export interface PlanGateContext {
+  /** featureKey -> minimum plan. Holds only the exceptions. */
+  requirements: Record<string, string>;
+  /** The account's effective plan, or null when it could not be resolved. */
+  planCode: string | null;
 }
 
 // ============================================
@@ -168,6 +183,7 @@ export type ValidationRuleName =
   | 'MockConfiguration'
   | 'CrudValidation'
   | 'CredentialValidation'
+  | 'PlanAvailability'
   | 'InterfaceValidation'
   | 'CycleDetection'
   | 'BackEdge'

@@ -146,7 +146,7 @@ export function EmptyCanvasChat({
                       <div className="flex items-center gap-2" style={{ gridArea: 'trailing' }}>
                         <Button
                           type="button"
-                          variant={isStreaming ? 'destructive' : 'contrast'}
+                          variant={isStreaming ? 'destructive' : 'default'}
                           size="icon"
                           onClick={isStreaming ? onStopStream : onSendMessage}
                           disabled={!isStreaming && !chatInput.trim()}

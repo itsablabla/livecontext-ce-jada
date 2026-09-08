@@ -76,11 +76,27 @@ export function formatCostOrDash(value: number | null | undefined, decimals = 1)
  * Examples: {@code 1234567 → "1.2M"}, {@code 5000 → "5.0K"},
  * {@code 12.3 → "12.3"}, {@code null → "-"}.
  */
-export function formatCreditsCompact(value: number | null | undefined): string {
+export function formatCreditsCompact(value: number | null | undefined, locale?: string): string {
   if (value === null || value === undefined) return '-';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return value.toFixed(1);
+  // The mantissa is a DECIMAL NUMBER and must be spelled for the app locale.
+  // `toFixed` always emits a dot, so a German reader saw "9.8K" - which in
+  // German reads as nine thousand eight hundred - beside a panel row spelling
+  // the same wallet "9.779". The K/M suffix itself is left alone: it is a unit
+  // this app uses in every locale, and swapping it per language would break the
+  // fixed-width budget these badges exist for.
+  const one = (n: number) =>
+    n.toLocaleString(locale ?? getClientLocale(), {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+      // No thousands separator INSIDE an abbreviation. The mantissa is under
+      // 1000 by construction except in the rounding edge (999,999 rounds to
+      // 1000.0K), and grouping it there produced "1,000.0K" - a separator in a
+      // form whose entire purpose is to not need one.
+      useGrouping: false,
+    });
+  if (value >= 1_000_000) return `${one(value / 1_000_000)}M`;
+  if (value >= 1_000) return `${one(value / 1_000)}K`;
+  return one(value);
 }
 
 /**

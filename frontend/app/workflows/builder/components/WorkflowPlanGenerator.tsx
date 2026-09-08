@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { useTranslations } from 'next-intl';
 import { createPortal } from 'react-dom';
@@ -26,6 +27,9 @@ export function WorkflowPlanGenerator({ nodes, edges, readOnly = false, onNodesC
   // A generated plan carries no positions, so dagre lays it out: it must use the
   // reading direction the canvas is wired for.
   const { direction: layoutDirection } = useWorkflowLayoutDirectionSafe();
+  // Handed to the import so a pasted plan's pages resolve their format through the same
+  // cache entry the interface nodes use (see InterfaceFormatService).
+  const queryClient = useQueryClient();
   const t = useTranslations('workflowBuilder.canvas');
   const tenantId = 'google-oauth2|109706784165946220967';
   const [isOpen, setIsOpen] = React.useState(false);
@@ -146,7 +150,11 @@ export function WorkflowPlanGenerator({ nodes, edges, readOnly = false, onNodesC
     });
 
     try {
-      const result = await WorkflowPlanImporter.importPlan(importJson, nodes, layoutDirection);
+      // No isRunMode: this import is only reachable from the paste dialog, which the
+      // toolbar hides on a locked (run / read-only) canvas.
+      const result = await WorkflowPlanImporter.importPlan(
+        importJson, nodes, layoutDirection, { queryClient },
+      );
       
       if (result.success) {
         // Merge with existing nodes, avoiding duplicates by ID

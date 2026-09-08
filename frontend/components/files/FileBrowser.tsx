@@ -5,10 +5,9 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Folder, FolderOpen, FolderPlus, FolderInput, History, Upload, Download, Trash2, Pencil, ArrowLeft, ChevronRight } from 'lucide-react';
 
-// The dialog and the control that opens it are stated once, for every surface
-// that offers a way in. The dialog stays behind React.lazy, so its chunk is
-// fetched on hover or on the click, never as part of this page's first load.
-import { CreateGenerationModal } from '@/components/chat/generationModalEntry';
+// Generating from the FILES page happens in place: the reader is already looking at the list the
+// asset will land in, and sending them to the studio for it would swap that list for a thread and
+// leave them to navigate back for the one thing they came to see.
 import { GenerateEntryButton } from '@/components/chat/GenerateEntryButton';
 // What this workspace has generated, and the recipe behind each asset. The SAME list the generation
 // dialog shows, so a past generation is one thing wherever it is looked at.
@@ -80,9 +79,20 @@ import {
 } from '@/lib/files/filesViewPreferences';
 import { formatUtcDate } from '@/lib/utils/dateFormatters';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import { track } from '@/lib/analytics/analytics';
 
 /** Default page size - must be one of the offered options (50 | 100). */
 const PAGE_SIZE = 50;
+
+/**
+ * The generation dialog, kept out of this page's first load.
+ *
+ * <p>It is a large component with a catalogue, a form per model and a file picker, and most visits
+ * to Files never open it, so its chunk is fetched on the click that needs it rather than by every
+ * reader who came to look at a list.
+ */
+const CreateGenerationModal = React.lazy(() =>
+  import('@/components/chat/CreateGenerationModal').then((m) => ({ default: m.CreateGenerationModal })));
 
 /**
  * Full-page file browser. Lists every real file in the active workspace
@@ -430,6 +440,7 @@ export function FileBrowser() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      track('file_downloaded', { file_count: selectedRealIds.length, method: 'zip' });
     } catch (err) {
       console.error('Bulk download failed:', err);
       addToast({ type: 'error', title: t('downloadFailedTitle'), message: t('downloadFailedMessage') });
@@ -444,6 +455,7 @@ export function FileBrowser() {
         { id: entry.id, path: entry.s3Key ?? undefined, name: entry.fileName ?? undefined },
         entry.fileName ?? undefined,
       );
+      track('file_downloaded', { file_id: entry.id, mime_type: entry.mimeType ?? null, method: 'single' });
     } catch (err) {
       console.error('Download failed:', err);
       addToast({ type: 'error', title: t('downloadFailedTitle'), message: t('downloadFailedMessage') });
@@ -663,6 +675,8 @@ export function FileBrowser() {
    * changes a word, and runs it again - instead of retyping from memory and hoping.
    */
   const regenerate = React.useCallback((provenance: GenerationProvenance) => {
+    // Handed straight to the dialog, with no storage hop and no navigation: the recipe never leaves
+    // the page it was read on, so nothing can be truncated, stale or picked up by a later mount.
     setRegenerateRecipe(provenance);
     setGenerationOpen(true);
   }, []);
@@ -717,6 +731,13 @@ export function FileBrowser() {
       }
     }
     setUploading(false);
+    track('file_uploaded', {
+      file_count: arr.length,
+      success_count: ok,
+      failed_count: failed,
+      in_folder: Boolean(currentManualFolderId),
+      total_bytes: arr.reduce((sum, f) => sum + f.size, 0),
+    });
     if (ok > 0) {
       refresh();
       addToast({ type: 'success', title: t('uploadedTitle'), message: t('uploadedMessage', { count: ok }) });
@@ -761,6 +782,7 @@ export function FileBrowser() {
         { id: detailEntry.id, path: detailEntry.s3Key ?? undefined, name: detailEntry.fileName ?? undefined },
         detailEntry.fileName ?? undefined,
       );
+      track('file_downloaded', { file_id: detailEntry.id, mime_type: detailEntry.mimeType ?? null, method: 'detail' });
     } catch (err) {
       console.error('Download failed:', err);
       addToast({ type: 'error', title: t('downloadFailedTitle'), message: t('downloadFailedMessage') });
@@ -1295,8 +1317,8 @@ export function FileBrowser() {
         }}
       />
 
-      {/* Mounted only while open: the modal reads its translations at the top
-          of its body, before it can decide it is closed. */}
+      {/* Mounted only while open: the dialog reads its translations at the top of its body, before
+          it can decide it is closed. */}
       {generationOpen && (
         <React.Suspense fallback={null}>
           <CreateGenerationModal
@@ -1310,8 +1332,8 @@ export function FileBrowser() {
             // Set only when the dialog was opened to run something again: the form then opens
             // filled in with what produced the asset being looked at.
             initialRecipe={regenerateRecipe}
-            // The asset lands in this workspace, so the list it landed in
-            // refreshes rather than making the reader wonder where it went.
+            // The asset lands in this workspace, so the list it landed in refreshes rather than
+            // making the reader wonder where it went.
             onGenerated={() => refresh()}
           />
         </React.Suspense>

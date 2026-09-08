@@ -136,6 +136,20 @@ public class MockOutputSuggester {
         if (LabelNormalizer.isAgentKey(nodeId)) {
             if ("classify".equalsIgnoreCase(rawType)) return "CLASSIFY";
             if ("guardrail".equalsIgnoreCase(rawType)) return "GUARDRAIL";
+            // Generate joined this family and runs no LLM. Without this line it
+            // fell to AGENT and the suggested mock was the conversational
+            // skeleton (response / tokens_used / iterations / tool_calls), none
+            // of which is in the GENERATE schema - and fields outside the
+            // declared schema are dropped when the mock is saved, so the mock
+            // silently did nothing.
+            if ("generate".equalsIgnoreCase(rawType)) return "GENERATE";
+            // The same defect, one row up. browser_agent has its own schema
+            // (BrowserAgentNodeSpec) and its own outputs, and answering AGENT for
+            // it suggests the conversational skeleton just as wrongly. It was
+            // already corrected in the icon extractors and the session visual
+            // builder; leaving it here would have made this the last copy still
+            // saying the old thing.
+            if ("browser_agent".equalsIgnoreCase(rawType)) return "BROWSER_AGENT";
             return "AGENT";
         }
         if (LabelNormalizer.isInterfaceKey(nodeId)) {

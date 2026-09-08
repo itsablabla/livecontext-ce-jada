@@ -98,6 +98,65 @@ describe('WorkflowRunManager - runCost / runBudgetBlocked', () => {
     expect(s.costByEpoch['2']).toBe(0.4);
   });
 
+  it('runCost carries the period spend, which is the figure the cap is compared against', async () => {
+    // A pinned workflow keeps ONE run for months, so its lifetime cost passes
+    // the cap long before the period spend does. Storing only the total would
+    // make the panel announce a stop that has not happened.
+    await manager.initialize();
+    const store = (manager as any).store;
+
+    manager.handleEvent('runCost', {
+      runId: 'run-cost',
+      epoch: 2,
+      epochCostCredits: 0.4,
+      totalCostCredits: 120,
+      periodSpentCredits: 3.5,
+      budgetCredits: 10,
+    });
+
+    const s = store.getState();
+    expect(s.costCredits).toBe(120);
+    expect(s.periodSpentCredits).toBe(3.5);
+  });
+
+  it('an EXPLICIT null period spend means "this run does not count against the cap"', async () => {
+    // A builder test fire costs real credits and is recorded on the run, but it
+    // never eats the allowance, so the backend sends null (the key is always
+    // present) and the panel must show no gauge rather than a stale figure.
+    await manager.initialize();
+    const store = (manager as any).store;
+
+    manager.handleEvent('runCost', {
+      runId: 'run-cost',
+      epoch: 1,
+      epochCostCredits: 0.2,
+      totalCostCredits: 0.2,
+      periodSpentCredits: null,
+      budgetCredits: 10,
+    });
+
+    expect(store.getState().periodSpentCredits).toBeNull();
+  });
+
+  it('an ABSENT period spend keeps the last known figure instead of blanking the gauge', async () => {
+    // "No news" and "nothing counted" are different things. Coercing an absent
+    // field to null erased a live figure on any event that did not carry it,
+    // which reads to the user as their spend vanishing while they watch it.
+    await manager.initialize();
+    const store = (manager as any).store;
+
+    manager.handleEvent('runCost', {
+      runId: 'run-cost', epoch: 1, epochCostCredits: 1, totalCostCredits: 1,
+      periodSpentCredits: 4, budgetCredits: 10,
+    });
+    manager.handleEvent('runCost', {
+      runId: 'run-cost', epoch: 2, epochCostCredits: 1, totalCostCredits: 2,
+      budgetCredits: 10,
+    });
+
+    expect(store.getState().periodSpentCredits).toBe(4);
+  });
+
   it('runCost honors a null budget (budget cleared)', async () => {
     await manager.initialize();
     const store = (manager as any).store;

@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator.tools.workflow.builder.viewer;
 
+import com.apimarketplace.orchestrator.execution.v2.nodes.MediaNode;
 import com.apimarketplace.orchestrator.tools.workflow.builder.ToolSchemaFetcher;
 import com.apimarketplace.orchestrator.tools.workflow.builder.ToolSchemaFetcher.ToolInputSchema;
 import com.apimarketplace.orchestrator.tools.workflow.builder.ToolSchemaFetcher.ToolParameter;
@@ -195,6 +196,8 @@ public class WorkflowErrorChecker {
 
         // Check core nodes for required fields (input, conditions, etc.)
         checkCoreNodeRequiredFields(session, errors);
+        checkGenerateNodeRequiredFields(session, errors);
+        checkNoGenerateAmongTheCores(session, errors);
 
         // Warn when a value-producing expression leaves SpEL operators OUTSIDE {{...}} (F15/F21)
         checkExpressionBoundaryWarnings(session, warnings);
@@ -403,6 +406,107 @@ public class WorkflowErrorChecker {
         return bodyNodes;
     }
 
+
+    /**
+     * A generate node left among the cores is reported, not passed over.
+     *
+     * <p>Almost unreachable, and worth a line anyway. The load adoption moves
+     * such a node into the AI nodes, except when it has no label to build a key
+     * from; a session opened before that adoption existed still holds one; and a
+     * plan written by hand can put one there. In all three the check below walks
+     * the AI nodes and sees nothing, so validate answers clean, finish saves the
+     * node where it is, and the ENGINE refuses the run. Being told at build time
+     * what the engine will refuse is the whole point of this class.
+     */
+    private void checkNoGenerateAmongTheCores(WorkflowBuilderSession session,
+                                              List<Map<String, Object>> errors) {
+        for (Map<String, Object> core : session.getCores()) {
+            if (!"generate".equals(core.get("type"))) continue;
+            Object labelValue = core.get("label");
+            String label = labelValue instanceof String text && !text.isBlank() ? text : null;
+            // The KEY, like every sibling check in this payload. Reporting a raw
+            // human label from one check and a normalized key from the next gives
+            // an agent two shapes for one field, and the literal "generate" that
+            // stood here for a blank label addressed nothing at all.
+            String ref = label != null
+                    ? "core:" + LabelNormalizer.normalizeLabel(label)
+                    : String.valueOf(core.get("id"));
+            String name = label != null ? label : ref;
+            errors.add(Map.of("type", "INVALID_VALUE", "node", ref,
+                "message", "Generate '" + name + "' is stored as a core. Generate is an AI node: it "
+                    + "belongs in the plan's agents array, is keyed agent:<label> and is read as "
+                    + "{{agent:<label>.output.file}}. Built from cores it produces no node at all, its "
+                    + "edges are dropped with it, and the run would skip everything after it",
+                "fix", "workflow(action='remove_node', node='" + name + "') then "
+                    + "workflow(action='add_node', type='generate', label='" + name + "', "
+                    + "params={model: '<a-model-id>'})"));
+        }
+    }
+
+    /**
+     * Checks the generate node, which lives among the AI nodes.
+     *
+     * <p>Only the model and the two credential fields are checked. Which
+     * parameters the chosen model accepts, and their limits, are decided by the
+     * generation catalog and checked there before the provider is called, so a
+     * bad value costs nothing and one question has one answer.
+     */
+    @SuppressWarnings("unchecked")
+    private void checkGenerateNodeRequiredFields(WorkflowBuilderSession session, List<Map<String, Object>> errors) {
+        for (Map<String, Object> node : session.getMcps()) {
+            if (!"generate".equals(node.get("type"))) continue;
+            String label = (String) node.get("label");
+            if (label == null) continue;
+            String ref = "agent:" + LabelNormalizer.normalizeLabel(label);
+
+            if (!hasConfigField(node, "params", "model")) {
+                errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
+                    "message", "Generate '" + label + "' requires a model. The model decides the format "
+                        + "produced (image, video, audio, voice, music), the parameters accepted and the price",
+                    "fix", "workflow(action='help', topics=['generate']) to list the model ids, then "
+                        + "workflow(action='modify', node='" + label + "', params={model: '<a-model-id>'})"));
+            }
+            String source = configString(node, "params", "credential_source");
+            String pinnedKey = configString(node, "params", "credential_id");
+            boolean hasPin = pinnedKey != null && !pinnedKey.isBlank();
+            // A pin beside the PLATFORM pool. The executor discards it there, so
+            // the plan would name a key no run uses. Checked here because this is
+            // the path a `modify` goes through: that tool merges the value without
+            // judging it, and add_node/set_plan both refuse the pairing. Unstated
+            // counts as platform, which is what the executor substitutes.
+            if (hasPin && !"user".equals(source)) {
+                errors.add(Map.of("type", "INVALID_VALUE", "node", ref,
+                    "message", "Generate '" + label + "' pins credential_id while credential_source "
+                        + "is 'platform' (which is also what leaving it unstated means). The platform "
+                        + "pool uses the platform's own key, so the pin is never read.",
+                    "fix", "workflow(action='modify', node='" + label + "', "
+                        + "params={credential_source: 'user'}) to use that key, or remove credential_id"));
+            }
+            if (source != null && !source.isBlank()
+                    && !"user".equals(source) && !"platform".equals(source)) {
+                errors.add(Map.of("type", "INVALID_VALUE", "node", ref,
+                    "message", "Generate '" + label + "' has credential_source '" + source
+                        + "'; it must be 'platform' or 'user'",
+                    "fix", "workflow(action='modify', node='" + label + "', params={credential_source: 'platform'})"));
+            }
+            // The pinned key, checked HERE and not only in set_plan: a node
+            // built with add_node reaches finish through this check and
+            // never through that one. An unusable value is read at run time
+            // as "no pin" and the node quietly runs on the owner's default
+            // key instead of the one the plan names, with nothing in the
+            // result saying so.
+            if (hasPin && !isPositiveWholeNumberId(pinnedKey)) {
+                errors.add(Map.of("type", "INVALID_VALUE", "node", ref,
+                    "message", "Generate '" + label + "' has credential_id '" + pinnedKey
+                        + "'; it must be a positive whole number identifying one of the workflow "
+                        + "owner's own provider keys. You cannot look one up, so keep the value a "
+                        + "node already has, or leave it out and the node runs on the owner's "
+                        + "default key",
+                    "fix", "workflow(action='modify', node='" + label + "', params={credential_id: null})"));
+            }
+        }
+    }
+
     /**
      * Checks core nodes for required fields based on node type.
      * This ensures the agent builder validate action catches missing fields
@@ -500,50 +604,13 @@ public class WorkflowErrorChecker {
                     "fix", "workflow(action='modify', node='" + label + "', params={file: '{{core:dl.output.file}}'})"));
             }
 
-            // Generate: a model is required. Which parameters that model accepts,
-            // and their limits, are checked by the generation catalog before the
-            // provider is called, so they are deliberately not re-checked here.
-            if ("generate".equals(type)) {
-                if (!hasConfigField(cn, "params", "model")) {
-                    errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
-                        "message", "Generate '" + label + "' requires a model. The model decides the format "
-                            + "produced (image, video, audio, voice, music), the parameters accepted and the price",
-                        "fix", "workflow(action='help', topics=['generate']) to list the model ids, then "
-                            + "workflow(action='modify', node='" + label + "', params={model: '<a-model-id>'})"));
-                }
-                String source = configString(cn, "params", "credential_source");
-                if (source != null && !source.isBlank()
-                        && !"user".equals(source) && !"platform".equals(source)) {
-                    errors.add(Map.of("type", "INVALID_VALUE", "node", ref,
-                        "message", "Generate '" + label + "' has credential_source '" + source
-                            + "'; it must be 'platform' or 'user'",
-                        "fix", "workflow(action='modify', node='" + label + "', params={credential_source: 'platform'})"));
-                }
-                // The pinned key, checked HERE and not only in set_plan: a node
-                // built with add_node reaches finish through this check and
-                // never through that one. An unusable value is read at run time
-                // as "no pin" and the node quietly runs on the owner's default
-                // key instead of the one the plan names, with nothing in the
-                // result saying so.
-                String pinnedKey = configString(cn, "params", "credential_id");
-                if (pinnedKey != null && !pinnedKey.isBlank() && !isPositiveWholeNumberId(pinnedKey)) {
-                    errors.add(Map.of("type", "INVALID_VALUE", "node", ref,
-                        "message", "Generate '" + label + "' has credential_id '" + pinnedKey
-                            + "'; it must be a positive whole number identifying one of the workflow "
-                            + "owner's own provider keys. You cannot look one up, so keep the value a "
-                            + "node already has, or leave it out and the node runs on the owner's "
-                            + "default key",
-                        "fix", "workflow(action='modify', node='" + label + "', params={credential_id: null})"));
-                }
-            }
-
-            // Media: operation required (one of 4) + per-operation required file params
+            // Media: operation required + per-operation required file params
             if ("media".equals(type)) {
                 String mediaOp = configString(cn, "params", "operation");
                 if (mediaOp != null) mediaOp = mediaOp.trim().toLowerCase(java.util.Locale.ROOT);
                 if (mediaOp == null || mediaOp.isBlank()) {
                     errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
-                        "message", "Media '" + label + "' requires an operation (probe, mux_audio, mix, extract_audio, concat, frame, overlay)",
+                        "message", "Media '" + label + "' requires an operation (probe, mux_audio, mix, extract_audio, concat, frame, overlay, subtitles)",
                         "fix", "workflow(action='modify', node='" + label + "', params={operation: 'mux_audio'})"));
                 } else switch (mediaOp) {
                     case "probe", "extract_audio" -> {
@@ -568,6 +635,7 @@ public class WorkflowErrorChecker {
                     }
                     case "concat" -> checkConcatConfig(cn, ref, label, errors);
                     case "overlay" -> checkOverlayConfig(cn, ref, label, errors);
+                    case "subtitles" -> checkSubtitlesConfig(cn, ref, label, errors);
                     case "mux_audio" -> {
                         if (!hasConfigField(cn, "params", "video"))
                             errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
@@ -589,7 +657,7 @@ public class WorkflowErrorChecker {
                         if (!hasConfigField(cn, "params", "tracks"))
                             errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
                                 "message", "Media '" + label + "' mix requires tracks (1-8 entries, each with a source FileRef reference)",
-                                "fix", "workflow(action='modify', node='" + label + "', params={tracks: [{source: '{{core:voice.output.file}}'}]})"));
+                                "fix", "workflow(action='modify', node='" + label + "', params={tracks: [{source: '{{agent:voice.output.file}}'}]})"));
                         Map<String, Object> mixParams = configMap(cn, "params");
                         if (mixParams != null && mixParams.get("tracks") instanceof List<?> mixTracks && !mixTracks.isEmpty()) {
                             boolean allLoop = true;
@@ -621,7 +689,7 @@ public class WorkflowErrorChecker {
                         }
                     }
                     default -> errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
-                        "message", "Media '" + label + "' has unknown operation '" + mediaOp + "' (expected: probe, mux_audio, mix, extract_audio, concat, frame, overlay)",
+                        "message", "Media '" + label + "' has unknown operation '" + mediaOp + "' (expected: probe, mux_audio, mix, extract_audio, concat, frame, overlay, subtitles)",
                         "fix", "workflow(action='modify', node='" + label + "', params={operation: 'mux_audio'})"));
                 }
             }
@@ -1003,6 +1071,185 @@ public class WorkflowErrorChecker {
             errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
                 "message", "Media '" + label + "' has opacity " + fmtNum(opacity) + " - it must be between 0 and 1",
                 "fix", "workflow(action='modify', node='" + label + "', params={opacity: 1})"));
+        }
+    }
+
+    /**
+     * media subtitles config checks: video + cues presence (MISSING_INPUT), plus the
+     * INVALID_CONFIG contract bounds: at most 600 cues, each with end_seconds greater
+     * than start_seconds, and the track running forward without two cues covering the
+     * same instant (they would be drawn on top of each other). Bounds only fire on
+     * LITERAL numbers (templates resolve at run time).
+     */
+    private void checkSubtitlesConfig(Map<String, Object> cn, String ref, String label,
+                                      List<Map<String, Object>> errors) {
+        if (!hasConfigField(cn, "params", "video"))
+            errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
+                "message", "Media '" + label + "' subtitles requires a video (whole FileRef reference) - "
+                    + "the video the captions are burned into",
+                "fix", "workflow(action='modify', node='" + label + "', params={video: '{{core:clip.output.file}}'})"));
+        Map<String, Object> subtitleParams = configMap(cn, "params");
+        Object cuesValue = subtitleParams != null ? subtitleParams.get("cues") : null;
+        // A caption track is DATA and is commonly computed upstream (a transcription, a
+        // code node), so an expression is a legitimate value here. Only a literal array
+        // can have its contents judged now; an expression resolves at run time.
+        if (cuesValue instanceof String cuesExpr && !cuesExpr.isBlank()) {
+            checkSubtitleLookBounds(subtitleParams, ref, label, errors);
+            return;
+        }
+        if (!(cuesValue instanceof List<?> cues) || cues.isEmpty()) {
+            errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
+                "message", "Media '" + label + "' subtitles requires cues - when each caption appears, when it "
+                    + "disappears, and what it says",
+                "fix", "workflow(action='modify', node='" + label
+                    + "', params={cues: [{start_seconds: 0, end_seconds: 2.4, text: 'It starts here'}]})"));
+            return;
+        }
+        if (cues.size() > MediaNode.MAX_SUBTITLE_CUES) {
+            errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
+                "message", "Media '" + label + "' subtitles accepts at most " + MediaNode.MAX_SUBTITLE_CUES
+                    + " cues (got " + cues.size()
+                    + ") - caption a shorter section, or split the video and caption each part",
+                "fix", "workflow(action='modify', node='" + label + "', params={cues: [...]}) with "
+                    + MediaNode.MAX_SUBTITLE_CUES + " cues or fewer"));
+        }
+        Double previousEnd = null;
+        int totalChars = 0;
+        for (int ci = 0; ci < cues.size(); ci++) {
+            if (!(cues.get(ci) instanceof Map<?, ?> cueRaw)) {
+                errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
+                    "message", "Media '" + label + "' subtitles cues[" + ci
+                        + "] must be an object with start_seconds, end_seconds and text",
+                    "fix", "workflow(action='modify', node='" + label
+                        + "', params={cues: [{start_seconds: 0, end_seconds: 2.4, text: 'It starts here'}]})"));
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> cue = (Map<String, Object>) cueRaw;
+            Object text = cue.get("text");
+            if (!(text instanceof String textStr) || textStr.isBlank()) {
+                errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
+                    "message", "Media '" + label + "' subtitles cues[" + ci + "] requires a text - the line shown "
+                        + "between its start_seconds and end_seconds",
+                    "fix", "workflow(action='modify', node='" + label + "', params={cues: [...]}) with a text on that cue"));
+            } else if (textStr.trim().length() > MediaNode.MAX_SUBTITLE_TEXT_CHARS) {
+                // Measured trimmed, exactly like the run does: the two must agree or a
+                // build-time green turns into a run-time refusal (or the reverse).
+                errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
+                    "message", "Media '" + label + "' subtitles cues[" + ci + "] is "
+                        + textStr.trim().length() + " characters, over the "
+                        + MediaNode.MAX_SUBTITLE_TEXT_CHARS + " character limit - split it across consecutive cues",
+                    "fix", "workflow(action='modify', node='" + label + "', params={cues: [...]}) with that line split in two"));
+            }
+            // A cue with no timings is not a caption yet. Without this the plan saved
+            // clean and only the RUN refused it, which is the asymmetry every other
+            // check here exists to prevent. A {{...}} template counts as present:
+            // it resolves at run time and cannot be judged now.
+            if (!isPresentValue(cue.get("start_seconds")) || !isPresentValue(cue.get("end_seconds"))) {
+                errors.add(Map.of("type", "MISSING_INPUT", "node", ref,
+                    "message", "Media '" + label + "' subtitles cues[" + ci + "] needs both start_seconds and "
+                        + "end_seconds - when the caption appears and when it disappears, in seconds from the "
+                        + "start of the video",
+                    "fix", "workflow(action='modify', node='" + label
+                        + "', params={cues: [...]}) with start_seconds and end_seconds on that cue"));
+            }
+            Double start = asLiteralNumber(cue.get("start_seconds"));
+            Double end = asLiteralNumber(cue.get("end_seconds"));
+            if ((start != null && start < 0) || (end != null && end < 0)) {
+                errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
+                    "message", "Media '" + label + "' subtitles cues[" + ci + "] has a negative timing - "
+                        + "start_seconds and end_seconds are counted from the start of the video, so both must be 0 or greater",
+                    "fix", "workflow(action='modify', node='" + label
+                        + "', params={cues: [...]}) with timings of 0 or greater on that cue"));
+            }
+            if (start != null && end != null && end <= start) {
+                errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
+                    "message", "Media '" + label + "' subtitles cues[" + ci + "] has end_seconds " + fmtNum(end)
+                        + " <= start_seconds " + fmtNum(start) + " - end_seconds must be greater",
+                    "fix", "workflow(action='modify', node='" + label
+                        + "', params={cues: [...]}) with end_seconds > start_seconds on that cue"));
+            }
+            if (start != null && previousEnd != null && start < previousEnd) {
+                errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
+                    "message", "Media '" + label + "' subtitles cues[" + ci + "] starts at " + fmtNum(start)
+                        + " but the previous cue runs until " + fmtNum(previousEnd)
+                        + " - two cues over the same instant are drawn on top of each other, so they must be "
+                        + "given in ascending, non-overlapping order",
+                    "fix", "workflow(action='modify', node='" + label
+                        + "', params={cues: [...]}) with that cue starting at or after " + fmtNum(previousEnd)));
+            }
+            if (end != null && (start == null || end > start)) previousEnd = end;
+            if (text instanceof String cueText) totalChars += cueText.trim().length();
+        }
+        if (totalChars > MediaNode.MAX_SUBTITLE_TOTAL_CHARS) {
+            // The run refuses this, so the build has to as well: a 600-cue track in a
+            // non-Latin script is legal line by line and far past what the renderer can
+            // receive, and finding that out at run time is the asymmetry this whole
+            // class exists to prevent.
+            errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
+                "message", "Media '" + label + "' subtitles has " + totalChars + " characters of caption in total, "
+                    + "over the " + MediaNode.MAX_SUBTITLE_TOTAL_CHARS + " character limit - caption a shorter "
+                    + "section, or split the video and caption each part",
+                "fix", "workflow(action='modify', node='" + label + "', params={cues: [...]}) with fewer or shorter lines"));
+        }
+        checkSubtitleLookBounds(subtitleParams, ref, label, errors);
+    }
+
+    /**
+     * The subtitles look bounds, mirroring what checkOverlayConfig does for its own
+     * numbers. Without them validate() reported green and the run refused the value,
+     * which is the asymmetry every check in this class exists to prevent. Bounds only
+     * fire on LITERAL numbers (a template resolves at run time).
+     */
+    private void checkSubtitleLookBounds(Map<String, Object> params, String ref, String label,
+                                         List<Map<String, Object>> errors) {
+        if (params == null) return;
+        Double fontSize = asLiteralNumber(params.get("font_size_percent"));
+        if (fontSize != null && (fontSize < 1 || fontSize > 20)) {
+            errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
+                "message", "Media '" + label + "' has font_size_percent " + fmtNum(fontSize)
+                    + " - it must be between 1 and 20 (percent of the video height)",
+                "fix", "workflow(action='modify', node='" + label + "', params={font_size_percent: 4.4}) "
+                    + "or remove it to keep the style's size"));
+        }
+        Double position = asLiteralNumber(params.get("position_percent"));
+        if (position != null && (position < 0 || position > 100)) {
+            errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
+                "message", "Media '" + label + "' has position_percent " + fmtNum(position)
+                    + " - it must be between 0 and 100 (percent from the top of the video)",
+                "fix", "workflow(action='modify', node='" + label + "', params={position_percent: 72}) "
+                    + "or remove it to keep the style's position"));
+        }
+        // The three remaining look options. Numbers are not the only thing a run can
+        // refuse: an unknown style or a colour that is not a hex value fails just as
+        // hard, and left unchecked they saved clean and validated green.
+        Object style = params.get("style");
+        if (style instanceof String styleStr && !styleStr.isBlank() && !styleStr.contains("{{")
+                && !MediaNode.SUBTITLE_STYLES.contains(styleStr.trim().toLowerCase(java.util.Locale.ROOT))) {
+            errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
+                "message", "Media '" + label + "' has style '" + styleStr
+                    + "' - it must be tiktok (big, uppercase, above the middle) or classic "
+                    + "(smaller, mixed case, near the bottom)",
+                "fix", "workflow(action='modify', node='" + label + "', params={style: 'tiktok'})"));
+        }
+        for (String colourKey : List.of("text_color", "outline_color")) {
+            Object colour = params.get(colourKey);
+            if (colour instanceof String colourStr && !colourStr.isBlank() && !colourStr.contains("{{")
+                    && !MediaNode.SUBTITLE_COLOUR_PATTERN.matcher(colourStr.trim()).matches()) {
+                errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
+                    "message", "Media '" + label + "' has " + colourKey + " '" + colourStr
+                        + "' - it must be a hex colour like '#FFFFFF'",
+                    "fix", "workflow(action='modify', node='" + label + "', params={" + colourKey + ": '#FFFFFF'})"));
+            }
+        }
+        Object font = params.get("font_family");
+        if (font instanceof String fontStr && !fontStr.isBlank() && !fontStr.contains("{{")
+                && !MediaNode.SUBTITLE_FONT_PATTERN.matcher(fontStr.trim()).matches()) {
+            errors.add(Map.of("type", "INVALID_CONFIG", "node", ref,
+                "message", "Media '" + label + "' has font_family '" + fontStr
+                    + "' - a font family name is letters, digits, spaces, dot, underscore or dash",
+                "fix", "workflow(action='modify', node='" + label + "', params={font_family: null}) "
+                    + "to use the default family"));
         }
     }
 

@@ -1,15 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback, type ReactNode } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
-import { Play, Square, StepForward, Calendar, ChevronLeft, ChevronRight, History, Pin, XCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { StepForward, Calendar, ChevronLeft, ChevronRight, History, Pin } from 'lucide-react';
 import { canvasChromeChipRadiusClass } from '@/components/ui/canvas-chrome';
 import { formatRelativeDateI18n } from '@/lib/utils/dateFormatters';
 import { getRunDisplayStatus, getStatusClasses, getRunStatusLabel } from '@/lib/utils/runStatusUtils';
 import { useHorizontalScrollHint } from '@/hooks/useHorizontalScrollHint';
-import { TERMINAL_RUN_STATUSES } from './runFormatting';
+import { RunActionButton } from './RunActionButton';
+import type { RunPanelAction } from './runPanelBus';
 
 export interface RunSummaryRunInfo {
   runId?: string;
@@ -59,6 +58,10 @@ export interface RunSummaryBarProps {
    * read as noticeably smaller than the list underneath it.
    */
   size?: 'compact' | 'panel';
+  /** Action currently in flight, so the control can spin instead of looking dead. */
+  actionPending?: RunPanelAction | null;
+  /** Whether the last action failed, surfaced on the control's title. */
+  actionFailed?: boolean;
   className?: string;
 }
 
@@ -88,6 +91,8 @@ export function RunSummaryBar({
   onVersionClick,
   leading,
   size = 'compact',
+  actionPending = null,
+  actionFailed = false,
   className = '',
 }: RunSummaryBarProps) {
   const t = useTranslations();
@@ -98,19 +103,12 @@ export function RunSummaryBar({
     [t, locale],
   );
 
-  const [cancelConfirm, setCancelConfirm] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); return () => setMounted(false); }, []);
-
-  const rawStatus = currentRunInfo.status?.toUpperCase();
   const displayStatus = getRunDisplayStatus(currentRunInfo.status, currentRunInfo.metadata as any);
   // One switch for the whole bar so the chips, their icons and the separators
   // scale together instead of drifting apart.
   const isPanel = size === 'panel';
   const textCls = isPanel ? 'text-sm' : 'text-xs';
   const iconCls = isPanel ? 'w-3.5 h-3.5' : 'w-3 h-3';
-  const actionBtnCls = isPanel ? 'w-6 h-6' : 'w-5 h-5';
-  const actionIconCls = isPanel ? 'w-3 h-3' : 'w-2.5 h-2.5';
   const arrowBtnCls = isPanel ? 'w-6 h-6' : 'w-5 h-5';
   const arrowIconCls = isPanel ? 'w-3.5 h-3.5' : 'w-3 h-3';
 
@@ -284,105 +282,22 @@ export function RunSummaryBar({
 
         {/* Stop / Cancel / Reactivate button - FAR RIGHT, never scrolled away:
             the one destructive control of the bar must sit in a fixed place, and
-            it must stay reachable when the chips overflow. */}
-        {(() => {
-          const isStoppable = rawStatus === 'RUNNING' || rawStatus === 'PAUSED';
-          const isCancellable = rawStatus === 'WAITING_TRIGGER';
-          // Every terminal status is reactivatable: the dispatcher rejects firing
-          // into a terminal run, so the user must explicitly re-arm it.
-          const isReactivatable = !!rawStatus && TERMINAL_RUN_STATUSES.has(rawStatus) && !!onReactivate;
-          if (!(isStoppable && onStop) && !(isCancellable && onCancel) && !isReactivatable) return null;
-
-          if (isReactivatable) {
-            return (
-              <span className="flex items-center gap-2 flex-shrink-0">
-                <span className={`${textCls} text-gray-400 dark:text-gray-500`}>·</span>
-                <button
-                  type="button"
-                  data-run-action="reactivate"
-                  onClick={(e) => { e.stopPropagation(); onReactivate?.(); }}
-                  className={`flex items-center justify-center ${actionBtnCls} ${canvasChromeChipRadiusClass} bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors`}
-                  title={t('workflow.reactivateRun.title')}
-                >
-                  <Play className={actionIconCls} />
-                </button>
-              </span>
-            );
-          }
-
-          return (
-            <span className="flex items-center gap-2 flex-shrink-0">
-              <span className={`${textCls} text-gray-400 dark:text-gray-500`}>·</span>
-              <button
-                type="button"
-                data-run-action={isCancellable ? 'cancel' : 'stop'}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (isCancellable) setCancelConfirm(true);
-                  else onStop?.();
-                }}
-                className={`flex items-center justify-center ${actionBtnCls} ${canvasChromeChipRadiusClass} bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors`}
-                title={isCancellable ? t('workflow.cancelRun.title') : t('workflow.mode.stopWorkflow')}
-              >
-                <Square className={actionIconCls} />
-              </button>
-            </span>
-          );
-        })()}
+            it must stay reachable when the chips overflow. The control itself is
+            shared with every other surface that shows a live run, so they all
+            offer the same affordance. */}
+        <RunActionButton
+          status={currentRunInfo.status}
+          pinnedVersion={pinnedVersion}
+          onStop={onStop}
+          onCancel={onCancel}
+          onReactivate={onReactivate}
+          pendingAction={actionPending}
+          failed={actionFailed}
+          size={size}
+          separator={<span className={`${textCls} text-gray-400 dark:text-gray-500`}>·</span>}
+        />
       </div>
 
-      {/* Cancel confirmation modal (WAITING_TRIGGER → terminal CANCELLED).
-          stopPropagation on the backdrop even though this is a portal: React
-          bubbles synthetic events through the REACT tree, not the DOM one, so a
-          dismissing click here would still reach the canvas bar wrapping this
-          component and open the run panel behind the modal. */}
-      {mounted && cancelConfirm && createPortal(
-        <div
-          data-run-cancel-backdrop
-          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[9999] flex items-center justify-center p-4"
-          onClick={(e) => { e.stopPropagation(); setCancelConfirm(false); }}
-        >
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="cancel-run-dialog-title"
-            aria-describedby="cancel-run-dialog-description"
-            className="max-w-sm w-full bg-theme-primary rounded-3xl shadow-2xl p-8 animate-in fade-in-0 zoom-in-95 duration-300 border border-theme max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="text-center mb-6">
-              <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 rounded-xl flex items-center justify-center mx-auto mb-4">
-                <XCircle className="w-7 h-7 text-red-600 dark:text-red-400" />
-              </div>
-              <h3 id="cancel-run-dialog-title" className="text-lg font-semibold text-theme-primary">
-                {t('workflow.cancelRun.title')}
-              </h3>
-              <p id="cancel-run-dialog-description" className="text-sm text-theme-secondary mt-2">
-                {t('workflow.cancelRun.description')}
-              </p>
-              {pinnedVersion != null && (
-                <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
-                  <p className="text-xs text-red-600 dark:text-red-400">
-                    {t('workflow.cancelRun.warning')}
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-3">
-              <Button variant="outline" onClick={() => setCancelConfirm(false)} className="flex-1">
-                {t('workflow.cancelRun.keep')}
-              </Button>
-              <Button
-                onClick={() => { setCancelConfirm(false); onCancel?.(); }}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white"
-              >
-                {t('workflow.cancelRun.confirm')}
-              </Button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
     </>
   );
 }

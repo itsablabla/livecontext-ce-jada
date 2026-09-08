@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback, useId } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useId, useReducer } from 'react';
 import { useTranslations } from 'next-intl';
-import { X, GripVertical, Pin, MoreVertical, ExternalLink, Trash2, PanelRightOpen, PanelRight, PanelBottom, PictureInPicture2, ChevronsUpDown, ChevronsDownUp } from 'lucide-react';
+import { X, GripVertical, Pin, MoreVertical, ExternalLink, Trash2, PanelRightOpen, PanelRight, PanelBottom, PictureInPicture2, ChevronsUpDown, ChevronsDownUp, Maximize2, Minimize2 } from 'lucide-react';
 import { BulkDeleteModal } from '@/components/ui/BulkDeleteModal';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -38,6 +38,28 @@ const COLLAPSED_HEIGHT = 36;
  *  which is what the tooltip and the expanded window are for. */
 const COLLAPSED_WIDTH = 180;
 const COLLAPSED_RENDER_SIZE = { width: COLLAPSED_WIDTH, height: COLLAPSED_HEIGHT };
+
+/**
+ * The roles the app's overlay primitives render, i.e. the layers that own the
+ * Escape key while they are open: modals and Popover content (`dialog` /
+ * `alertdialog`), Select (`listbox`) and DropdownMenu (`menu`).
+ */
+const OVERLAY_ROLES = '[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]';
+
+/**
+ * The element's own top-level ancestor under `document.body`, i.e. the app tree.
+ *
+ * Anything the app renders in place sits inside it; anything portalled (every
+ * Radix overlay) is a sibling of it. That is the only line that separates "on
+ * top of the panel" from "hidden behind it" without measuring pixels.
+ */
+function appRootOf(el: HTMLElement | null): HTMLElement | null {
+  let node: HTMLElement | null = el;
+  while (node?.parentElement && node.parentElement !== document.body) {
+    node = node.parentElement;
+  }
+  return node;
+}
 
 /**
  * SidePanel - the unified right panel for the entire app.
@@ -93,7 +115,43 @@ export function SidePanel() {
    */
   const collapsed = ctx?.collapsed ?? false;
   const setCollapsed = ctx?.setCollapsed ?? noop;
-  const isCollapsed = isFloating && collapsed;
+  /**
+   * Full screen = the panel painted over the whole viewport, dock and all.
+   *
+   * A pure RENDER mode on top of whatever position the panel already has, exactly
+   * like `isCollapsed` below it: the dock, the dragged width and the detached
+   * rect are all left alone, so restoring gives back the panel the user had
+   * rather than a default one. Above all, the panel is NOT re-mounted anywhere
+   * else in the tree, which is the one thing that would take a running canvas, an
+   * SSE stream or an interface iframe with it (see AppShell's per-dock branches).
+   *
+   * Gated on `!isMobile` like `isBottom` and `isFloating`: below the breakpoint
+   * the panel is already a full-screen overlay, so there is nothing to maximise.
+   * Gated on shared mode too, where every other panel control is hidden.
+   *
+   * NOT a modal, deliberately, and the app behind it is NOT made `inert`. The
+   * mode is "this pane takes the whole window", the way an editor maximises a
+   * pane, not "answer this before continuing" - and the mechanical reason
+   * matters more: the overlays this panel opens (menus, pickers, Selects) are
+   * portalled to `document.body` as SIBLINGS of the app root, so inerting the
+   * covered tree by walking the panel's ancestors would either miss them or
+   * disable them along with everything else. The way out is a visible control in
+   * the tab bar plus Escape, both of which a keyboard reaches without one.
+   */
+  const maximized = ctx?.maximized ?? false;
+  const setMaximized = ctx?.setMaximized ?? noop;
+  /* `isOpen` is part of the RENDER condition, not only of the context's reset
+     rule: with a keepMounted tab the container is in the tree even while the
+     panel is closed, so a flag that outlived a close by the one frame it takes
+     an effect to run would paint an opaque full-screen box over the app. Read
+     here rather than at the far end of the component so the two cannot drift. */
+  const isOpen = ctx?.isOpen ?? false;
+  const isMaximized = maximized && isOpen && !isMobile && !isSharedMode;
+  /* Masked by `isMaximized` on top of `isFloating`, and for the same reason: a
+     full-screen panel is not a 36px strip, so the two render modes cannot both
+     apply. The context already refuses to maximise a shaded panel; this keeps the
+     render honest if the flags ever meet by another route. */
+  const isCollapsed = isFloating && collapsed && !isMaximized;
   const {
     rect: floatRect, dragMode: floatDragMode, viewport: floatViewport,
     startDrag: startFloatDrag, nudge: nudgeFloat,
@@ -150,7 +208,6 @@ export function SidePanel() {
   // Lazy rendering: track whether content has been mounted at least once
   const [hasBeenOpened, setHasBeenOpened] = useState(false);
 
-  const isOpen = ctx?.isOpen ?? false;
   const tabs = ctx?.tabs ?? [];
   const activeTabId = ctx?.activeTabId ?? null;
 
@@ -482,6 +539,133 @@ export function SidePanel() {
     setPosition(isBottomDock ? bottomMode : lastDock);
   }, [isFloating, lastDock, bottomMode, setPosition]);
 
+  /**
+   * Enter / leave full screen.
+   *
+   * Only the flag moves: the dock, the panel width and a detached window's rect
+   * are all left exactly as they were, so this is a round trip with no state to
+   * restore afterwards.
+   */
+  const toggleMaximized = useCallback(() => {
+    setMaximized(!isMaximized);
+  }, [isMaximized, setMaximized]);
+
+  /**
+   * Escape leaves full screen.
+   *
+   * The restore button is right there in the tab bar, so this is a convenience,
+   * not the only way out - which is what lets it be this conservative:
+   *  - a handled Escape (`defaultPrevented`) belongs to whoever handled it;
+   *  - so does any open OVERLAY. The panel hosts content full of them (the
+   *    inspector alone is mostly Selects), and dismissing the whole full-screen
+   *    view along with the listbox the user was closing is worse than not
+   *    reacting at all.
+   *
+   * Radix dismisses its layers WITHOUT calling `preventDefault`, so the first
+   * clause does not cover the second: the roles have to be named. `dialog` and
+   * `alertdialog` are modals and Popover content, `listbox` is Select, `menu` is
+   * DropdownMenu - the four roles the app's overlay primitives actually render.
+   *
+   * And WHERE the match is matters as much as what it is. A bare document-wide
+   * query also finds the overlays of the page BEHIND the panel, which are hidden
+   * under it and can own nothing: the conversation-activity card carries
+   * `role="dialog"` and lives in the chat page's own tree, so leaving it open
+   * made Escape a silent no-op with no visible cause. Only two things are really
+   * on top: an overlay INSIDE the panel, and one portalled out of the app tree
+   * (Radix mounts those as direct children of `document.body`, which is why the
+   * app root is the boundary rather than the panel itself).
+   */
+  useEffect(() => {
+    if (!isMaximized) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const panel = panelRef.current;
+      const appRoot = appRootOf(panel);
+      const owned = [...document.querySelectorAll(OVERLAY_ROLES)].some((el) => (
+        panel?.contains(el) || !appRoot?.contains(el)
+      ));
+      if (owned) return;
+      setMaximized(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isMaximized, setMaximized]);
+
+  /**
+   * Everything the panel COVERS is made inert while it is full screen.
+   *
+   * The mode is not modal (see `isMaximized`), but an opaque box over the whole
+   * viewport still takes the page out of reach in every sense except the tab
+   * order, and a keyboard user tabbing past the panel's last control otherwise
+   * lands on a sidebar and a page they cannot see.
+   *
+   * The walk stops BELOW `document.body` on purpose. Every overlay this panel
+   * opens - menus, pickers, Selects - is portalled to `body` as a sibling of the
+   * app root, so inerting body's children would disable the panel's own
+   * controls; inerting the app root would disable the panel, which lives inside
+   * it. Marking each ancestor's OTHER children, up to but not including body,
+   * hides exactly the covered tree and nothing else.
+   */
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!isMaximized || !panel) return undefined;
+    const marked: HTMLElement[] = [];
+    // The loop CONDITION is what stops at body, not a break after the fact: a
+    // break placed at the end of the body still marks that level's siblings
+    // first, which is exactly the portal roots this is meant to spare.
+    for (let node: HTMLElement = panel; node.parentElement && node.parentElement !== document.body; node = node.parentElement) {
+      for (const sibling of node.parentElement.children) {
+        if (sibling === node || !(sibling instanceof HTMLElement)) continue;
+        // Never re-mark, so restoring cannot clear an `inert` somebody else set.
+        if (sibling.hasAttribute('inert')) continue;
+        sibling.setAttribute('inert', '');
+        marked.push(sibling);
+      }
+    }
+    return () => marked.forEach((el) => el.removeAttribute('inert'));
+  }, [isMaximized]);
+
+  /**
+   * A full-screen toggle is INSTANT in both directions, and re-fits the canvas once.
+   *
+   * Entering is instant for free (the full-screen style carries `transition:
+   * none`). LEAVING is not: the docked style comes back with `width` AND
+   * `transition: width 0.3s` in the same commit, so the browser arms a transition
+   * from the viewport width down to the dock width - while the panel is back in
+   * the flex flow, which squeezes the main content toward zero for the length of
+   * the animation. It also fires the `transitionend` listener above, so the
+   * canvas would be re-fitted twice, 300ms apart, each one animated and fighting
+   * the other.
+   *
+   * So the frame the mode changes on is painted with no transition at all, and
+   * the fit is dispatched from here. Two rAFs, not one: the class and the width
+   * have to be COMMITTED with transitions off before they are re-enabled, or the
+   * browser still sees a transitionable change and animates it anyway.
+   *
+   * `wasMaximizedRef` is seeded from the first render, so a mount fires nothing -
+   * and a re-mount costing one skipped re-fit is harmless, unlike a stranded flag.
+   */
+  const wasMaximizedRef = useRef(isMaximized);
+  // Derived during RENDER, and that is the whole point: an effect - passive or
+  // layout - runs after the commit, so the commit that re-applies `width` and
+  // `transition: width .3s` together has already gone out with the transition
+  // armed, and suppressing it one commit later only shortens the animation.
+  // Comparing the ref here puts `transition: none` in the SAME commit as the
+  // width, so the browser never sees a transitionable change at all.
+  const instantResize = wasMaximizedRef.current !== isMaximized;
+  // Re-arm afterwards from a plain re-render, NOT from a timer or a rAF: by the
+  // time this runs the width is committed, so restoring the transition cannot
+  // animate anything, and there is no frame budget to get wrong. (A rAF pair
+  // was the first version, and jsdom runs neither, so the test that was meant
+  // to pin this passed on a flag that had simply never been cleared.)
+  const [, rearmTransition] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (wasMaximizedRef.current === isMaximized) return;
+    wasMaximizedRef.current = isMaximized;
+    dispatchFitView();
+    rearmTransition();
+  }, [isMaximized, dispatchFitView]);
+
   if (!ctx) return null;
 
   const { setActiveTab, removeTab, moveTab, close, isPeeking, dismissPeek, openTab } = ctx;
@@ -646,7 +830,7 @@ export function SidePanel() {
 
       {/* Resize handle - left edge (right dock) or top edge (bottom dock). A detached
           window is not welded to any edge, so it carries its own handles instead. */}
-      {!isMobile && !isFloating && isOpen && isVisible && (
+      {!isMobile && !isFloating && !isMaximized && isOpen && isVisible && (
         <PanelResizeHandle
           panelWidth={currentWidth}
           isResizing={isResizing}
@@ -665,7 +849,7 @@ export function SidePanel() {
           as well. Hence 1px of overlap and no more, enough to make the border
           itself grabbable; the corners may overlap further, since the rounding
           leaves no content under them. */}
-      {isFloating && isOpen && isVisible && !isCollapsed && (() => {
+      {isFloating && isOpen && isVisible && !isCollapsed && !isMaximized && (() => {
         const GRIP = 9;
         const CORNER = 20;
         const { left, top, width, height } = floatRect;
@@ -788,23 +972,45 @@ export function SidePanel() {
         ref={panelRef}
         data-testid="side-panel"
         data-side-panel-floating={isFloating || undefined}
+        data-side-panel-maximized={isMaximized || undefined}
         className={cn(
           'bg-theme-primary overflow-hidden flex-shrink-0 border-theme',
-          isFloating
-            // Chrome only while the window is actually open: closed, the card is a
-            // 0x0 box, and a border plus a shadow on it paints a dot on the page.
-            // Above the sidebar's own z-[60] (its open mobile-drawer state, which
-            // survives a resize up to desktop width): a window buried under an
-            // opaque sidebar cannot be grabbed by its title bar.
-            ? cn('fixed z-[61]', isVisible && 'border rounded-2xl shadow-2xl')
-            : (isBottom ? 'w-full border-t' : 'border-l'),
-          isMobile && 'fixed right-0 top-0 h-full z-[40]',
+          // A ternary, not an additive override: the dock's `border-l` / `border-t`
+          // and the detached card's `border rounded-2xl` are utilities of the same
+          // specificity, so cancelling them with a `border-0` would come down to
+          // which one Tailwind happened to emit last. Full screen simply does not
+          // ask for them.
+          //
+          // The SAME tier as the detached card, deliberately, rather than a new one
+          // above it: z-[61] is the lowest value that clears the desktop sidebar
+          // (`md:relative z-[60]` while expanded), and every step higher is a step
+          // over more of the app's portalled surfaces. The floating grips at
+          // z-[62]/z-[63] are not rendered in this mode, so nothing is left to
+          // compete with, and modals (z-[9999] and up) still paint over the panel.
+          isMaximized
+            ? 'fixed inset-0 z-[61]'
+            : isFloating
+              // Chrome only while the window is actually open: closed, the card is a
+              // 0x0 box, and a border plus a shadow on it paints a dot on the page.
+              // Above the sidebar's own z-[60] (its open mobile-drawer state, which
+              // survives a resize up to desktop width): a window buried under an
+              // opaque sidebar cannot be grabbed by its title bar.
+              ? cn('fixed z-[61]', isVisible && 'border rounded-2xl shadow-2xl')
+              : (isBottom ? 'w-full border-t' : 'border-l'),
+          !isMaximized && isMobile && 'fixed right-0 top-0 h-full z-[40]',
         )}
         style={{
           // Detached: a full rect, fixed, so it takes no layout space and the main
           // area spans the whole width behind it. Docked: bottom resizes HEIGHT
           // (full width), right resizes WIDTH (full height).
-          ...(isFloating
+          ...(isMaximized
+            ? {
+                // `inset-0` already sizes it: an explicit width/height here would
+                // reinstate the dock's box, and a transition would animate a jump
+                // between two boxes that share no edge.
+                transition: 'none',
+              }
+            : isFloating
             ? {
                 left: `${floatRect.left}px`,
                 top: `${floatRect.top}px`,
@@ -822,8 +1028,8 @@ export function SidePanel() {
                 transition: 'none',
               }
             : isBottom
-            ? { height: `${currentWidth}px`, transition: isResizing ? 'none' : 'height 0.3s ease-in-out' }
-            : { width: `${currentWidth}px`, transition: isResizing ? 'none' : 'width 0.3s ease-in-out' }),
+            ? { height: `${currentWidth}px`, transition: isResizing || instantResize ? 'none' : 'height 0.3s ease-in-out' }
+            : { width: `${currentWidth}px`, transition: isResizing || instantResize ? 'none' : 'width 0.3s ease-in-out' }),
           // Safe area insets for notch devices
           ...(isMobile ? {
             paddingTop: 'env(safe-area-inset-top, 0px)',
@@ -919,7 +1125,7 @@ export function SidePanel() {
                       the two places this window is used. `self-stretch` gives it
                       the row's full 56px, so the target is bigger than the strip
                       it replaces even though it is narrower. */}
-                  {isFloating && (
+                  {isFloating && !isMaximized && (
                     <div
                       data-side-panel-titlebar
                       /* Focusable, but NOT role="button": that promises Enter/Space
@@ -1103,8 +1309,10 @@ export function SidePanel() {
                   {/* Window controls - always visible outside the scroll area */}
                   <div className="flex items-center flex-shrink-0 pl-1">
                     {/* Collapse - detached only, where a window can be in the way.
-                        A docked panel already has close and the dock buttons for that. */}
-                    {isFloating && !isSharedMode && (
+                        A docked panel already has close and the dock buttons for that.
+                        Not while full screen: a maximised panel has no window to
+                        shade, and the control that applies there is Restore. */}
+                    {isFloating && !isSharedMode && !isMaximized && (
                       <Button
                         ref={collapseRef}
                         variant="ghost"
@@ -1121,8 +1329,11 @@ export function SidePanel() {
                     )}
                     {/* Detach / re-attach. Desktop and tablet only: on a phone the
                         panel is a full-screen overlay, so there is nothing to float
-                        it over. Hidden in shared mode like every other panel control. */}
-                    {!isMobile && !isSharedMode && (
+                        it over. Hidden in shared mode like every other panel control.
+                        Hidden while full screen as well: detaching there would move
+                        a window nobody can see and land the user somewhere else the
+                        moment they restore. */}
+                    {!isMobile && !isSharedMode && !isMaximized && (
                       <Button
                         variant="ghost"
                         size="icon"
@@ -1135,6 +1346,26 @@ export function SidePanel() {
                         {isFloating
                           ? (lastDock === 'right' ? <PanelRight className="h-3.5 w-3.5" /> : <PanelBottom className="h-3.5 w-3.5" />)
                           : <PictureInPicture2 className="h-3.5 w-3.5" />}
+                      </Button>
+                    )}
+                    {/* Full screen - next to Detach, and the same shape of control:
+                        both answer "how much room does this panel get", one by
+                        taking it out of the layout and one by giving it all of it.
+                        Same gates as Detach (desktop/tablet, not shared mode), so
+                        the pair either both show or both do not. */}
+                    {!isMobile && !isSharedMode && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={toggleMaximized}
+                        aria-pressed={isMaximized}
+                        title={isMaximized ? tSidePanel('restoreSize') : tSidePanel('maximize')}
+                        data-testid="side-panel-maximize"
+                        className="w-7 h-7"
+                      >
+                        {isMaximized
+                          ? <Minimize2 className="h-3.5 w-3.5" />
+                          : <Maximize2 className="h-3.5 w-3.5" />}
                       </Button>
                     )}
                     <Button

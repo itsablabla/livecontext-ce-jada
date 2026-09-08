@@ -29,6 +29,8 @@ const {
   buildFrameArgs,
   isImageProbeFormat,
   buildOverlayArgs,
+  buildAssDocument,
+  buildSubtitlesArgs,
   mediaOutputExtension,
   MEDIA_MIME_TYPES,
   MEDIA_STDERR_TAIL_BYTES,
@@ -89,8 +91,19 @@ function parseMediaMultipart(req, workDir, { maxTotalBytes }) {
       reject(err);
     };
 
-    bb.on('field', (name, value) => {
-      if (name === 'spec') specText = value;
+    bb.on('field', (name, value, info) => {
+      if (name !== 'spec') return;
+      // busboy TRUNCATES an oversized field rather than failing, so without this the
+      // spec is parsed as JSON, the parse fails, and the caller is told their document
+      // is malformed - sending them to hunt a syntax error in a document they wrote
+      // correctly. Say what actually happened instead.
+      if (info && info.valueTruncated) {
+        fail(mediaError(413, 'INPUT_TOO_LARGE',
+          `the spec exceeds the ${MAX_SPEC_BYTES} byte limit and was truncated in transit; `
+          + 'send fewer or shorter entries (a long caption track is the usual cause)'));
+        return;
+      }
+      specText = value;
     });
 
     bb.on('file', (name, stream, info) => {
@@ -200,9 +213,14 @@ async function probeFullInfo(exec, ffprobePath, filePath, partName) {
 
 // One ffmpeg run under the per-op budget with the shared error mapping: a timeout kill
 // is OUR budget firing (504 MEDIA_TIMEOUT), anything else is 422 FFMPEG_FAILED + tail.
-async function execFfmpegOrThrow(exec, ffmpegPath, args, timeoutMs) {
+async function execFfmpegOrThrow(exec, ffmpegPath, args, timeoutMs, cwd) {
   try {
-    await exec(ffmpegPath, args, { timeout: timeoutMs, maxBuffer: MEDIA_MAX_BUFFER });
+    const opts = { timeout: timeoutMs, maxBuffer: MEDIA_MAX_BUFFER };
+    // Only the subtitles op passes a cwd, so it can name its .ass file RELATIVELY: the
+    // ass filter parses ':' as its own option separator, and an absolute path that ever
+    // contains one truncates the filename with no error at all.
+    if (cwd) opts.cwd = cwd;
+    await exec(ffmpegPath, args, opts);
   } catch (err) {
     if (isTimeoutKill(err)) {
       throw mediaError(504, 'MEDIA_TIMEOUT', `ffmpeg exceeded the ${timeoutMs}ms budget for this operation`);
@@ -307,6 +325,91 @@ async function runOverlay(specValue, partPaths, workDir, { exec, ffmpegPath, ffp
   };
 }
 
+/**
+ * Ask fontconfig which family a request actually resolves to. libass NEVER errors on a
+ * missing family, it silently substitutes one, so a caption burnt in the wrong face
+ * would only ever be caught by eye. Returns the matched family, or null when fc-match
+ * itself is unavailable - a missing DIAGNOSTIC tool must not fail an otherwise valid
+ * render, so the caller treats null as "cannot verify" and proceeds.
+ */
+async function matchFontFamily(exec, family) {
+  try {
+    const { stdout } = await exec('fc-match', [`${family}:family`, 'family'], {
+      timeout: PROBE_TIMEOUT_MS,
+      maxBuffer: MEDIA_MAX_BUFFER,
+    });
+    const matched = String(stdout || '').trim().split(',')[0].trim();
+    return matched.length > 0 ? matched : null;
+  } catch (err) {
+    // Fail OPEN: a missing diagnostic tool must not refuse an otherwise valid render.
+    // But say so - the caller is about to burn a font nobody verified, which is the
+    // very substitution this check exists to catch, and a silent return would leave
+    // no trace of why the guard did not run.
+    console.warn(`[media] font verification unavailable (fc-match failed: ${err && err.message}); `
+      + `burning '${family}' unverified`);
+    return null;
+  }
+}
+
+/**
+ * subtitles: probe the video (its dimensions drive every percentage in the style preset,
+ * its duration the budget), refuse a request whose font family is not installed, write
+ * the generated ASS beside the input, then burn it in (re-encode video, stream-copy
+ * audio when present).
+ */
+async function runSubtitles(specValue, partPaths, workDir, { exec, ffmpegPath, ffprobePath }) {
+  const videoIn = specValue.inputs.find((i) => i.role === 'video');
+  const videoProbe = await probeFullInfo(exec, ffprobePath, partPaths[videoIn.name], videoIn.name);
+  if (!videoProbe.info.has_video) {
+    throw mediaError(422, 'FFMPEG_FAILED', `input part '${videoIn.name}' has no video stream`);
+  }
+  const width = videoProbe.info.video ? videoProbe.info.video.width : 0;
+  const height = videoProbe.info.video ? videoProbe.info.video.height : 0;
+  if (!(width > 0 && height > 0)) {
+    throw mediaError(422, 'FFMPEG_FAILED',
+      `input part '${videoIn.name}' reports no usable frame size, so the caption size cannot be computed`);
+  }
+
+  const requested = specValue.options.fontFamily;
+  const matched = await matchFontFamily(exec, requested);
+  if (matched !== null && matched.toLowerCase() !== requested.toLowerCase()) {
+    throw mediaError(422, 'FFMPEG_FAILED',
+      `font family '${requested}' is not available on the renderer as itself (fontconfig resolved it to `
+      + `'${matched}', either because it is not installed or because it is aliased to a metric-compatible `
+      + `substitute). Burning it would silently use a different face, so the request is refused: omit `
+      + `font_family to use the default, ask for '${matched}' by name if that face is what you want, or `
+      + 'have an administrator add this font to the renderer image.');
+  }
+
+  const duration = videoProbe.info.duration_seconds;
+  if (typeof duration === 'number' && duration > 0) {
+    const firstStart = Math.min(...specValue.options.cues.map((c) => c.startSeconds));
+    if (firstStart >= duration) {
+      throw mediaError(422, 'FFMPEG_FAILED',
+        `every caption starts at or after the end of the video (the earliest is at ${firstStart}s, `
+        + `the video is ${duration}s long), so the result would carry no visible caption at all. `
+        + 'Time the cues against this video, not a longer one.');
+    }
+  }
+
+  const assName = 'subtitles.ass';
+  const assPath = path.join(workDir, assName);
+  await fsp.writeFile(assPath, buildAssDocument(specValue.options, width, height), 'utf8');
+
+  const outputPath = path.join(workDir, 'out.mp4');
+  const parts = { [videoIn.name]: { path: partPaths[videoIn.name] } };
+  const args = buildSubtitlesArgs(specValue, videoProbe.info, { parts, assName, outputPath });
+  const timeoutMs = computeMediaTimeoutMs(videoProbe.info.duration_seconds);
+  await execFfmpegOrThrow(exec, ffmpegPath, args, timeoutMs, workDir);
+  const durationSeconds = await probeDurationSeconds(exec, ffprobePath, outputPath, 'output', false);
+  return {
+    kind: 'file',
+    path: outputPath,
+    mime: MEDIA_MIME_TYPES.mp4,
+    durationSeconds: durationSeconds !== null ? durationSeconds : 0,
+  };
+}
+
 const ARG_BUILDERS = {
   mux_audio: buildMuxAudioArgs,
   mix: buildMixArgs,
@@ -332,6 +435,7 @@ async function runMediaOperation(specValue, partPaths, workDir, opts = {}) {
   if (specValue.operation === 'concat') return runConcat(specValue, partPaths, workDir, tools);
   if (specValue.operation === 'frame') return runFrame(specValue, partPaths, workDir, tools);
   if (specValue.operation === 'overlay') return runOverlay(specValue, partPaths, workDir, tools);
+  if (specValue.operation === 'subtitles') return runSubtitles(specValue, partPaths, workDir, tools);
 
   // Quick duration pass: feeds the timeout formula AND rejects unreadable uploads early.
   const parts = {};

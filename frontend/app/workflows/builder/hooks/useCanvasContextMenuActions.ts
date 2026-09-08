@@ -5,6 +5,7 @@ import type { Edge, Node, XYPosition } from 'reactflow';
 import type { BuilderNodeData, PaletteDragItem, PaletteItem } from '../types';
 import { getPaletteItemDataFromId } from '../nodes/nodeClasses';
 import { nodeClipboard } from '../services/nodeClipboard';
+import { track } from '@/lib/analytics/analytics';
 import {
   cloneNodesForPaste,
   computeDownstreamNodeIds,
@@ -123,12 +124,13 @@ export function useCanvasContextMenuActions({
   );
 
   const deleteIds = React.useCallback(
-    (ids: string[]) => {
+    (ids: string[], method: 'node' | 'selection') => {
       if (ids.length === 0) return;
       const idSet = new Set(ids);
       setNodes((prev) => prev.filter((node) => !idSet.has(node.id)));
       setEdges((prev) => removeEdgesTouchingNodes(prev, idSet));
       setSelectedNodeIds((prev) => prev.filter((id) => !idSet.has(id)));
+      track('workflow_node_deleted', { deleted_count: ids.length, method });
     },
     [setNodes, setEdges, setSelectedNodeIds],
   );
@@ -161,8 +163,8 @@ export function useCanvasContextMenuActions({
           : { x: 0, y: 0 };
         onCreateNodeRef.current(item, position);
       },
-      deleteNode: (nodeId) => deleteIds(resolveTargets(nodeId)),
-      deleteSelection: () => deleteIds(selectedRef.current),
+      deleteNode: (nodeId) => deleteIds(resolveTargets(nodeId), 'node'),
+      deleteSelection: () => deleteIds(selectedRef.current, 'selection'),
       selectAll: () => setSelectedNodeIds(nodesRef.current.map((node) => node.id)),
     }),
     [copyIds, cloneIntoCanvas, duplicateIds, deleteIds, resolveTargets, setEdges, setSelectedNodeIds],

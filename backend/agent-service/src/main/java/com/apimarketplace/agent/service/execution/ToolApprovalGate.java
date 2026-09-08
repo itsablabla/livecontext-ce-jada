@@ -1,5 +1,6 @@
 package com.apimarketplace.agent.service.execution;
 
+import com.apimarketplace.agent.tools.ask.UserQuestionAnswerEnvelope;
 import com.apimarketplace.conversation.client.StreamRedisKeys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -65,6 +66,20 @@ public class ToolApprovalGate {
     static final String VERDICT_DENIED = "denied";
 
     /**
+     * How a park ended, plus what the person said when the card was a question.
+     *
+     * <p>{@code payloadJson} is the raw {@link UserQuestionAnswerEnvelope} the answer side
+     * wrote, present only when the decision is {@link Decision#APPROVED} and the card
+     * carried a payload; the boolean cards never have one. Kept raw here so the gate stays
+     * ignorant of question shapes: the caller that asked is the one that reads it.
+     */
+    public record Answer(Decision decision, String payloadJson) {
+        public static Answer of(Decision decision) {
+            return new Answer(decision, null);
+        }
+    }
+
+    /**
      * Written by {@link #beginPark} to advertise that a call is waiting on this key, and
      * removed when the park ends. It is what makes the answer side able to tell "a call is
      * holding for this card" from "nobody is holding any more", which decides whether the
@@ -103,38 +118,43 @@ public class ToolApprovalGate {
     static final int MAX_CONSECUTIVE_READ_FAILURES = 3;
 
     /**
-     * The longest a call may be held when the answer has to survive a CLI sitting on the
-     * other end of the tool call (the CLI bridge route - see {@code BridgeProviders}).
+     * The longest a call may be held on the CLI bridge route when the session does NOT say
+     * how long its CLI keeps waiting: a bridge older than {@link ParkRequest#cliMaxParkMs()},
+     * or a CLI whose per-call timeout the bridge cannot set (mistral-vibe).
      *
-     * <p>Those CLIs each stop waiting inline on one MCP call for their own reason and after
-     * their own delay - codex errors out on a per-call timeout documented at 60 s, the
-     * others background or time out on values that vary by version. None of it is ours: the
-     * binaries are installed unpinned, and a CLI that stops waiting does NOT cancel the
-     * request, so the call stays held and later runs for real with nobody to read it.
+     * <p>On that route a CLI is sitting on one MCP call, stops waiting after its own delay,
+     * and does NOT cancel the request when it does: the call stays held and later runs for
+     * real with nobody to read it. When the bridge has written that CLI's timeout (it
+     * generates codex's config.toml and gemini's settings.json) or knows it (claude-code's
+     * stdio idle default), it declares half of it per session and a park on that session is
+     * bounded by the declared value instead - still under half the inactivity window and the
+     * gate's own budget, which apply on every route. This constant covers the sessions that
+     * declare nothing, and it is sized for the shortest per-call wait any supported CLI
+     * documents: codex publishes 60 s for a server whose config sets none, which is exactly
+     * what an older bridge produces.
      *
-     * <p>Rather than configure four binaries this codebase cannot test (claude-code, codex,
-     * gemini-cli and mistral-vibe, all installed unpinned), this bounds the silence the
-     * GATE ADDS. Running out of time is not a failure: it lands on the flow that shipped
-     * before the gate existed (the card stays, the turn ends, the user's answer starts a
-     * new one), so a slow answer costs the improvement, not correctness. The direct route,
-     * where we control the caller, keeps the full budget.
+     * <p>Running out of time is not a failure: it lands on the flow that shipped before the
+     * gate existed (the card stays, the turn ends, the user's answer starts a new one), so a
+     * slow answer costs the improvement, not correctness. The direct route, where we control
+     * the caller, keeps the full budget.
      *
      * <p><b>What it does NOT do.</b> The CLI's timer covers the whole call - this wait AND
      * the tool run that follows an approval. A tool that on its own outruns the CLI was
      * already abandoned before this gate existed, and still is; the gate cannot fix that,
      * it can only avoid making it much worse. Sized so that a park run to the very end
-     * still leaves the larger share of the shortest known floor (codex publishes 60 s) to
-     * the tool: 35 s of 60, against 15 s if the wait took 45.
+     * still leaves the larger share of that 60 s floor to the tool: 35 s of 60, against
+     * 15 s if the wait took 45. The same halving is what the bridge applies to a declared
+     * timeout, for the same reason.
      *
      * <p><b>What this costs, plainly.</b> 25 s is enough for "allow this action?", where the
-     * user is present and clicks in seconds. It is NOT enough to connect a service: that
-     * card waits on an OAuth round trip in another tab, so on the bridge it will normally
-     * expire and fall back to the old two-turn flow. Half the feature, on that route, by
-     * choice - the half that would otherwise cost a killed run.
+     * user is present and clicks in seconds. It is NOT enough to read and answer a card with
+     * several questions, nor to connect a service (an OAuth round trip in another tab): on a
+     * session that declares nothing those fall back to the two-turn flow. That is the price
+     * of not knowing the CLI, paid only where the bridge could not say.
      *
-     * <p>The floor itself is documentation, not something this repo can verify - codex
-     * publishes 60 s; the others vary by version. If a CLI is ever observed giving up while
-     * agent-service is still logged as parking, this is the number to lower.
+     * <p>The floor itself is documentation, not something this repo can verify. If a CLI is
+     * ever observed giving up while agent-service is still logged as parking, this is the
+     * number to lower (or, for a CLI the bridge configures, the adapter's declared timeout).
      */
     static final long BRIDGE_MAX_PARK_MS = 25_000;
 
@@ -178,9 +198,20 @@ public class ToolApprovalGate {
      * getting coffee. Beyond this many, the gate declines to park and the caller falls back
      * to the flow that shipped before it existed - a worse experience for that one call,
      * against an unresponsive service for everyone.
+     *
+     * <p>Sized against the pool (Tomcat's default 200 threads), not against how long a
+     * park lasts: a bridge park used to end at 25 s and now runs to half the inactivity
+     * window (150 s by default), so a slot is held six times longer and the ceiling is
+     * reached by fewer people answering at once. The question is therefore how much of
+     * the pool may sit in parks before everything else queues, and a third is the answer:
+     * 64 leaves two thirds to every other request. Raise it with the pool, never past a
+     * third of it.
      */
-    @Value("${agent.tool.approval-gate.max-concurrent:32}")
+    @Value("${agent.tool.approval-gate.max-concurrent:" + DEFAULT_MAX_CONCURRENT_PARKS + "}")
     private int maxConcurrentParks;
+
+    /** The default above, as a number the tests can read and the seam can reuse. */
+    static final int DEFAULT_MAX_CONCURRENT_PARKS = 64;
 
     /** Parks currently holding a thread; the ceiling above applies to this. */
     private final java.util.concurrent.atomic.AtomicInteger activeParks =
@@ -196,7 +227,7 @@ public class ToolApprovalGate {
 
     /** Test seam: exercise the park deterministically without a Spring context. */
     void configureForTest(boolean enabled, long defaultTimeoutMs, long pollIntervalMs) {
-        configureForTest(enabled, defaultTimeoutMs, pollIntervalMs, 32);
+        configureForTest(enabled, defaultTimeoutMs, pollIntervalMs, DEFAULT_MAX_CONCURRENT_PARKS);
     }
 
     void configureForTest(boolean enabled, long defaultTimeoutMs, long pollIntervalMs, int maxConcurrentParks) {
@@ -278,11 +309,19 @@ public class ToolApprovalGate {
      * @param park what is being parked and for how long; see {@link ParkRequest}
      */
     public Decision awaitDecision(ParkRequest park) {
+        return awaitAnswer(park).decision();
+    }
+
+    /**
+     * {@link #awaitDecision} for a card whose answer carries a payload (a question card).
+     * Same park, same ceilings, same failure modes; only the return type differs.
+     */
+    public Answer awaitAnswer(ParkRequest park) {
         String conversationId = park.conversationId();
         String gateKey = park.gateKey();
         if (!enabled || conversationId == null || conversationId.isBlank()
                 || gateKey == null || gateKey.isBlank()) {
-            return Decision.UNAVAILABLE;
+            return Answer.of(Decision.UNAVAILABLE);
         }
 
         String key = StreamRedisKeys.approvalDecisionKey(conversationId, gateKey);
@@ -307,7 +346,7 @@ public class ToolApprovalGate {
         }
     }
 
-    private Decision pollUntilAnswered(ParkRequest park, String key, long deadline) {
+    private Answer pollUntilAnswered(ParkRequest park, String key, long deadline) {
         String gateKey = park.gateKey();
         log.info("Parking tool call {} on approval gate (up to {}ms)", gateKey, deadline - System.currentTimeMillis());
 
@@ -324,7 +363,7 @@ public class ToolApprovalGate {
                 // action on a turn the user cancelled - the one outcome this class promises
                 // never happens. Every OTHER way of giving up wants the last look.
                 clear(key);
-                return Decision.STOPPED;
+                return Answer.of(Decision.STOPPED);
             }
             VerdictRead read = readVerdict(key);
             if (read.failed()) {
@@ -338,10 +377,10 @@ public class ToolApprovalGate {
                 }
             } else {
                 consecutiveReadFailures = 0;
-                if (read.decision() != null) {
-                    log.info("Approval gate for {} released as {}", gateKey, read.decision());
+                if (read.answer() != null) {
+                    log.info("Approval gate for {} released as {}", gateKey, read.answer().decision());
                     clear(key);
-                    return read.decision();
+                    return read.answer();
                 }
             }
             long remaining = deadline - System.currentTimeMillis();
@@ -384,16 +423,16 @@ public class ToolApprovalGate {
      * stopped turn discards the verdict instead of taking it. This is the promise
      * {@link Decision#STOPPED} makes in absolute terms; the loop alone did not keep it.
      */
-    private Decision endPark(String key, String streamId, Decision fallback) {
+    private Answer endPark(String key, String streamId, Decision fallback) {
         try {
-            Decision late = parseVerdict(redisTemplate.opsForValue().getAndDelete(key));
+            Answer late = parseVerdict(redisTemplate.opsForValue().getAndDelete(key));
             if (late != null) {
                 if (wasStopped(streamId)) {
                     log.info("Approval gate for {} read {} on its last look, but the turn was "
-                            + "stopped - discarding it", key, late);
-                    return Decision.STOPPED;
+                            + "stopped - discarding it", key, late.decision());
+                    return Answer.of(Decision.STOPPED);
                 }
-                log.info("Approval gate for {} released as {} on its last look", key, late);
+                log.info("Approval gate for {} released as {} on its last look", key, late.decision());
                 return late;
             }
         } catch (Exception e) {
@@ -404,22 +443,22 @@ public class ToolApprovalGate {
             log.warn("Approval gate could not delete the park marker at {} ({}) - the card is dead "
                     + "until the key expires", key, e.getMessage());
         }
-        return fallback;
+        return Answer.of(fallback);
     }
 
     /** One poll: either a read failure, or a verdict (possibly "nobody answered yet"). */
-    private record VerdictRead(boolean failed, Decision decision) {
+    private record VerdictRead(boolean failed, Answer answer) {
         static VerdictRead failure() {
             return new VerdictRead(true, null);
         }
-        static VerdictRead of(Decision decision) {
-            return new VerdictRead(false, decision);
+        static VerdictRead of(Answer answer) {
+            return new VerdictRead(false, answer);
         }
     }
 
     /**
      * @return {@link VerdictRead#failed()} when Redis could not be reached, otherwise the
-     *         verdict, with a {@code null} decision meaning nobody has answered yet.
+     *         verdict, with a {@code null} answer meaning nobody has answered yet.
      */
     private VerdictRead readVerdict(String key) {
         String raw;
@@ -437,23 +476,36 @@ public class ToolApprovalGate {
      *         the key is gone, or it still holds the {@link #VERDICT_PENDING} marker this
      *         park wrote for itself.
      */
-    private Decision parseVerdict(String raw) {
+    private Answer parseVerdict(String raw) {
         if (raw == null || raw.isBlank()) {
             return null;
+        }
+        if (UserQuestionAnswerEnvelope.looksLikeEnvelope(raw)) {
+            // A question card: the answer side wrote a JSON envelope instead of a word. An
+            // envelope that does not parse is treated like an unrecognised word below, and
+            // for the same reason: an unreadable answer must never pass for a given one.
+            var parsed = UserQuestionAnswerEnvelope.parse(raw);
+            if (parsed.isEmpty()) {
+                log.warn("Approval gate read a malformed answer envelope - treating as dismissed");
+                return Answer.of(Decision.DENIED);
+            }
+            return parsed.get().answered()
+                    ? new Answer(Decision.APPROVED, raw)
+                    : Answer.of(Decision.DENIED);
         }
         String verdict = raw.trim().toLowerCase(java.util.Locale.ROOT);
         if (VERDICT_PENDING.equals(verdict)) {
             return null;
         }
         if (VERDICT_APPROVED.equals(verdict)) {
-            return Decision.APPROVED;
+            return Answer.of(Decision.APPROVED);
         }
         if (VERDICT_DENIED.equals(verdict)) {
-            return Decision.DENIED;
+            return Answer.of(Decision.DENIED);
         }
         // An unrecognised value is not a licence to run a sensitive action.
         log.warn("Approval gate read an unrecognised verdict '{}' - treating as denied", raw);
-        return Decision.DENIED;
+        return Answer.of(Decision.DENIED);
     }
 
     /** Consume the verdict so a later call reusing the key cannot inherit this answer. */
@@ -509,12 +561,13 @@ public class ToolApprovalGate {
      *       predates the gate (a four-minute {@code workflow:execute} produces no CLI output
      *       either). Fixing THAT means teaching the watchdog about pending cards, which is a
      *       change to the bridge, not to this budget.</li>
-     *   <li>{@link #BRIDGE_MAX_PARK_MS}, when a CLI is sitting on this very call. It is its
-     *       own ceiling rather than part of the one above because the two answer different
-     *       questions: the window says when the RUN is declared dead and can legally be
-     *       switched off, this says when the CLI stops waiting on ONE call, which it does
-     *       either way. Deriving it from the window made it vanish exactly where it was
-     *       needed most.</li>
+     *   <li>The CLI's own wait, when a CLI is sitting on this very call: the value the
+     *       bridge declared for it ({@link ParkRequest#cliMaxParkMs()}), else
+     *       {@link #BRIDGE_MAX_PARK_MS}. It is its own ceiling rather than part of the one
+     *       above because the two answer different questions: the window says when the RUN
+     *       is declared dead and can legally be switched off, this says when the CLI stops
+     *       waiting on ONE call, which it does either way. Deriving it from the window made
+     *       it vanish exactly where it was needed most.</li>
      * </ul>
      */
     private long resolveDeadline(ParkRequest park) {
@@ -540,8 +593,12 @@ public class ToolApprovalGate {
         }
         if (park.cliBridgeSession()) {
             // A CLI is sitting on this call. Short enough that it does not stop waiting on
-            // us first - independent of the watchdog, which can legitimately be off.
-            deadline = Math.min(deadline, callStarted + BRIDGE_MAX_PARK_MS);
+            // us first - independent of the watchdog, which can legitimately be off. The
+            // bridge states how long ITS CLI keeps waiting when it knows (it writes that
+            // CLI's config, so it is the one place that can); a session that says nothing
+            // gets the floor sized for the shortest CLI.
+            long cap = park.cliMaxParkMs() > 0 ? park.cliMaxParkMs() : BRIDGE_MAX_PARK_MS;
+            deadline = Math.min(deadline, callStarted + cap);
         }
         return deadline;
     }
@@ -568,10 +625,25 @@ public class ToolApprovalGate {
      *                       session, never inferred: the watchdog window is absent when the
      *                       watchdog is off and present on the direct route when configured,
      *                       so it identifies neither route.
+     * @param cliMaxParkMs   how long a call may be held on the CLI at the other end, as
+     *                       declared by the bridge session that spawned it (the bridge writes
+     *                       that CLI's config, so it knows the wait it granted); {@code 0}
+     *                       when the session did not say, which falls back to
+     *                       {@link #BRIDGE_MAX_PARK_MS}. Read only when
+     *                       {@code cliBridgeSession} is set.
      */
     public record ParkRequest(String conversationId, String gateKey, String streamId,
                               long hardDeadlineEpochMs, long inactivityWindowMs,
                               long callStartedEpochMs, long executionReserveMs,
-                              boolean cliBridgeSession) {
+                              boolean cliBridgeSession, long cliMaxParkMs) {
+
+        /** A park whose bridge session (if any) declared no wait of its own. */
+        public ParkRequest(String conversationId, String gateKey, String streamId,
+                           long hardDeadlineEpochMs, long inactivityWindowMs,
+                           long callStartedEpochMs, long executionReserveMs,
+                           boolean cliBridgeSession) {
+            this(conversationId, gateKey, streamId, hardDeadlineEpochMs, inactivityWindowMs,
+                    callStartedEpochMs, executionReserveMs, cliBridgeSession, 0L);
+        }
     }
 }

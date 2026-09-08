@@ -1464,6 +1464,7 @@ public class AgentContextBuilder {
         if (tc.applicationAccessMode() != null) credentials.put("__applicationAccessMode__", tc.applicationAccessMode());
         if (tc.skillAccessMode() != null) credentials.put("__skillAccessMode__", tc.skillAccessMode());
         if (tc.fileAccessMode() != null) credentials.put("__fileAccessMode__", tc.fileAccessMode());
+        if (tc.memoryAccessMode() != null) credentials.put("__memoryAccessMode__", tc.memoryAccessMode());
     }
 
     /**

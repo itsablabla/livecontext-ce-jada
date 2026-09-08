@@ -154,6 +154,93 @@ class PublicLinkNodeTest {
         assertTrue(result.errorMessage().orElse("").contains("not enabled"));
     }
 
+    /**
+     * A table {@code file} / {@code image} cell resolves to the canonical asset, which carries
+     * {@code id} and {@code url} on top of a workflow FileRef's fields. The table help tells agents
+     * to map that whole cell into this node, so the extra keys must not stop it resolving.
+     */
+    @Test
+    @DisplayName("the asset map's extra keys (id, url) do not stop a link being minted")
+    void tableMediaCellMintsPublicUrl() {
+        Map<String, Object> assetCell = new HashMap<>();
+        assetCell.put("_type", "file");
+        assetCell.put("id", "c7963596-ab99-46af-9cb5-fccb64461702");
+        assetCell.put("path", OWN_KEY);
+        assetCell.put("url", "/api/proxy/files/by-id/c7963596-ab99-46af-9cb5-fccb64461702/raw");
+        assetCell.put("name", "clip.mp4");
+        assetCell.put("mimeType", "video/mp4");
+        assetCell.put("size", 24438642);
+        when(templateAdapter.resolveTemplates(anyMap(), any()))
+            .thenReturn(Map.of("__expr__", assetCell));
+
+        NodeExecutionResult result = node("{{table:queue.output.items[0].video}}", 60, realService).execute(context);
+
+        assertTrue(result.isSuccess(), "failure was: " + result.errorMessage());
+        assertNotNull(result.output().get("url"));
+    }
+
+    /**
+     * The counterpart the help must not over-promise: an asset known only by id carries no storage
+     * path, and this node is where that shows up. The message has to name the missing path, because
+     * it is the only clue the agent gets about which cell to fix.
+     */
+    @Test
+    @DisplayName("a media cell known only by id -> FAILS naming the missing storage path")
+    void tableMediaCellWithoutAPathFails() {
+        Map<String, Object> assetCell = new HashMap<>();
+        assetCell.put("_type", "file");
+        assetCell.put("id", "c7963596-ab99-46af-9cb5-fccb64461702");
+        assetCell.put("url", "/api/proxy/files/by-id/c7963596-ab99-46af-9cb5-fccb64461702/raw");
+        assetCell.put("name", "clip.mp4");
+        when(templateAdapter.resolveTemplates(anyMap(), any()))
+            .thenReturn(Map.of("__expr__", assetCell));
+
+        NodeExecutionResult result = node("{{table:queue.output.items[0].video}}", 60, realService).execute(context);
+
+        assertFalse(result.isSuccess());
+        assertNull(result.output().get("url"));
+        assertTrue(result.errorMessage().orElse("").contains("storage path"),
+            "failure must name the missing storage path, got: " + result.errorMessage());
+    }
+
+    /**
+     * The widening accepts a file-shaped map with NO path so the missing-path message can be the
+     * one the caller sees. It must not also accept a map whose path is present but malformed: that
+     * would stringify to something like "123", fail the tenant-prefix test, and report a shape
+     * error as a cross-tenant refusal - in the WARN log that exists for real ones.
+     */
+    @Test
+    @DisplayName("a file-shaped map with a NON-string path is a shape error, not a tenant refusal")
+    void nonStringPathIsAShapeErrorNotASecurityRefusal() {
+        Map<String, Object> malformed = new HashMap<>();
+        malformed.put("_type", "file");
+        malformed.put("path", 123);
+        when(templateAdapter.resolveTemplates(anyMap(), any()))
+            .thenReturn(Map.of("__expr__", malformed));
+
+        NodeExecutionResult result = node("{{core:x.output.file}}", 60, realService).execute(context);
+
+        assertFalse(result.isSuccess());
+        assertTrue(result.errorMessage().orElse("").contains("WHOLE FileRef"),
+            "a malformed path must read as a shape error, got: " + result.errorMessage());
+        assertFalse(result.errorMessage().orElse("").contains("does not belong"));
+    }
+
+    @Test
+    @DisplayName("an ordinary API object with url and name is still refused as not a file reference")
+    void ordinaryObjectWithUrlAndNameIsStillRefused() {
+        Map<String, Object> repo = new HashMap<>();
+        repo.put("name", "livecontext");
+        repo.put("url", "https://api.github.com/repos/x/livecontext");
+        when(templateAdapter.resolveTemplates(anyMap(), any()))
+            .thenReturn(Map.of("__expr__", repo));
+
+        NodeExecutionResult result = node("{{mcp:gh.output.repo}}", 60, realService).execute(context);
+
+        assertFalse(result.isSuccess());
+        assertTrue(result.errorMessage().orElse("").contains("WHOLE FileRef"));
+    }
+
     @Test
     @DisplayName("out-of-range TTL is clamped (999999 -> 10080 minutes)")
     void ttlClamped() {
@@ -162,5 +249,31 @@ class PublicLinkNodeTest {
 
         assertTrue(result.isSuccess());
         assertEquals(10_080, result.output().get("ttl_minutes"));
+    }
+
+    @Test
+    @DisplayName("reports the file expression as `file`, the plan's key name the label registry already declared")
+    @SuppressWarnings("unchecked")
+    void reportsFileUnderPlanKeyName() {
+        PublicLinkNode node = node("{{core:make.output.file}}", 30, realService);
+
+        NodeExecutionResult result = node.execute(context);
+
+        // The template adapter is deliberately left unstubbed, so the node fails to
+        // resolve the file reference. Asserted rather than left implicit: this test
+        // pins the FAILURE path, which is the one that used to carry the wrong name,
+        // and a future refactor that moved the map inside the success branch would
+        // otherwise leave this test green while the failure path drifted again.
+        assertFalse(result.isSuccess(), "this test pins the failure path on purpose");
+
+        Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+        // The plan writes params.file / params.ttl_minutes / params.disposition
+        // (stepProcessor). `file_expression` was a fourth name for the first one, and
+        // the label registry already had an entry for `file` waiting on a key the
+        // node never sent.
+        assertEquals("{{core:make.output.file}}", params.get("file"));
+        assertFalse(params.containsKey("file_expression"));
+        assertEquals(30, params.get("ttl_minutes"));
+        assertEquals("inline", params.get("disposition"));
     }
 }

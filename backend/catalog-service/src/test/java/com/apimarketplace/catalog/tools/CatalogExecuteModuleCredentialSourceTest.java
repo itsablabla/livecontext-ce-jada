@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The caller's explicit credential choice.
  *
  * <p>{@code GenerationModule} has always forwarded a caller's
- * {@code credential_source} into this module, and the {@code core:generate} node
+ * {@code credential_source} into this module, and the {@code agent:generate} node
  * surfaces it as a toggle, but the value used to be dropped on the floor: it was
  * not a reserved control key, so it fell through to the tool inputs and was
  * filtered out downstream. The visible consequence was a workflow that asked to

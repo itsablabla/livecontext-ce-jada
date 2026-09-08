@@ -732,8 +732,12 @@ public class ExtractFromFileNode extends BaseNode {
                 Map<String, Object> resolved = templateAdapter.resolveTemplates(toResolve, context);
                 Object result = resolved.get("__expr__");
 
-                if (result instanceof Map<?, ?> mapResult
-                    && "file".equals(mapResult.get("_type")) && mapResult.get("path") != null) {
+                // The file SHAPE decides, not the path. Requiring a path here sent a file-shaped
+                // value that has none - a table media cell naming a file known only by id, a link
+                // to somewhere else - down the string fallback below, where String.valueOf turned
+                // the Map into "{_type=file, id=...}" and the node COMPLETED with that as the
+                // extracted document. The download judges the path and says what is missing.
+                if (result instanceof Map<?, ?> mapResult && "file".equals(mapResult.get("_type"))) {
                     return downloadFileRefBytes((Map<String, Object>) mapResult);
                 }
 
@@ -755,7 +759,9 @@ public class ExtractFromFileNode extends BaseNode {
     }
 
     private byte[] downloadFileRefBytes(Map<String, Object> fileRef) {
-        String path = String.valueOf(fileRef.get("path"));
+        if (!(fileRef.get("path") instanceof String path) || path.isBlank()) {
+            throw new IllegalStateException("The file " + com.apimarketplace.orchestrator.domain.file.FileRefMessages.NO_STORAGE_PATH);
+        }
         if (fileStorageService == null) {
             throw new IllegalStateException("FileStorageService not available for FileRef download: " + path);
         }
@@ -811,9 +817,9 @@ public class ExtractFromFileNode extends BaseNode {
                 Map<String, Object> resolved = templateAdapter.resolveTemplates(toResolve, context);
                 Object result = resolved.get("__expr__");
 
-                // Detect FileRef map from upstream node output
-                if (result instanceof Map<?, ?> mapResult
-                    && "file".equals(mapResult.get("_type")) && mapResult.get("path") != null) {
+                // Detect FileRef map from upstream node output. Shape only: see resolveInputBytes
+                // for why a path check here silently turned a path-less ref into its toString().
+                if (result instanceof Map<?, ?> mapResult && "file".equals(mapResult.get("_type"))) {
                     // Let FileRef download errors propagate (not a template resolution issue)
                     return downloadFileRef((Map<String, Object>) mapResult, format);
                 }
@@ -836,7 +842,9 @@ public class ExtractFromFileNode extends BaseNode {
      * Returns base64 for xlsx format (parser expects it), raw string for others.
      */
     private String downloadFileRef(Map<String, Object> fileRef, String format) {
-        String path = String.valueOf(fileRef.get("path"));
+        if (!(fileRef.get("path") instanceof String path) || path.isBlank()) {
+            throw new IllegalStateException("The file " + com.apimarketplace.orchestrator.domain.file.FileRefMessages.NO_STORAGE_PATH);
+        }
         if (fileStorageService == null) {
             throw new IllegalStateException("FileStorageService not available for FileRef download: " + path);
         }

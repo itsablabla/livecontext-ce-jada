@@ -243,6 +243,23 @@ describe('FlowNode: launching a new epoch from a focused epoch', () => {
     expect(focusPlay(), 'and the focus play must stand down').toBeUndefined();
   });
 
+  it('shows without hover, like the play it stands in for - and lifts the rest of the bar with it', () => {
+    // The bar reveals as one unit, so the flag is also what puts pin/unpin back on a focused
+    // epoch. Without it the whole row waits for hover here while the all-epochs view shows its
+    // play (and its pin) unprompted - the same node, two different rules.
+    renderNode(triggerNode('manual-trigger'));
+    expect(focusPlay().revealsBar).toBe(true);
+  });
+
+  it('leaves the contextual buttons unflagged: the reveal means "you can run this now"', () => {
+    // Flagging anything else would make the bar permanent on every node carrying an agent or
+    // files button, which is the cue spent on nothing.
+    renderNode(triggerNode('manual-trigger'));
+    for (const b of (lastBar().buttons ?? [])) {
+      if (b.key !== 'focus-trigger-play') expect(b.revealsBar).toBeFalsy();
+    }
+  });
+
   it('names itself with the shared canvas string, not a hardcoded label', () => {
     // next-intl is stubbed to echo the key, so this pins the key rather than the
     // English text - the six locales already translate it.

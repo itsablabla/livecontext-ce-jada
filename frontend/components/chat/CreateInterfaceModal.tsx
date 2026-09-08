@@ -12,6 +12,7 @@ import { useTranslations } from 'next-intl';
 import { normalizeInterfaceFormat, resolveInterfaceFormat } from '@/lib/interfaces/interfaceFormats';
 import { InterfaceFormatSelect } from '@/components/interfaces/InterfaceFormatSelect';
 import { ModalStepIndicator } from '@/components/ui/ModalStepIndicator';
+import { track } from '@/lib/analytics/analytics';
 import {
   Layout, ArrowRight, ArrowLeft, Check, Code, FileText
 } from 'lucide-react';
@@ -161,6 +162,14 @@ export const CreateInterfaceModal: React.FC<CreateInterfaceModalProps> = ({
       } else {
         const created = await orchestratorApi.createInterface(payload);
         createdId = (created as { id?: string } | undefined)?.id;
+        track('interface_created', {
+          interface_id: createdId ?? null,
+          is_edit: isEditMode,
+          format: effectiveFormat,
+          has_html: Boolean(payload.htmlTemplate),
+          has_css: Boolean(payload.cssTemplate),
+          has_js: Boolean(payload.jsTemplate),
+        });
       }
 
       // The id only travels on a CREATE: on an edit the page already sits where it sits,

@@ -49,13 +49,20 @@ public record AdHocNodeRequest(
     }
 
     /**
-     * The core's id inside the synthetic plan.
+     * The node's id inside the synthetic plan.
      *
-     * <p>Built with {@code LabelNormalizer.coreKey} rather than by hand, because that is the
-     * same normalisation the plan parser and every {@code {{core:...}}} template use: a key
+     * <p>Built with {@code LabelNormalizer} rather than by hand, because that is the same
+     * normalisation the plan parser and every {@code {{core:...}}} template use: a key
      * spelled differently here would build a node no template could address.
+     *
+     * <p>The prefix follows the list the plan files the node under. {@code generate} is an AI
+     * node keyed {@code agent:<label>}, and the builder derives that key from the label
+     * itself - so a {@code core:} id here would leave the plan entry and the built node
+     * disagreeing about what the node is called.
      */
     public String nodeKey() {
-        return com.apimarketplace.orchestrator.utils.LabelNormalizer.coreKey(label());
+        return AdHocNodeTypeResolver.AGENT_TYPES.contains(nodeType())
+                ? com.apimarketplace.orchestrator.utils.LabelNormalizer.agentKey(label())
+                : com.apimarketplace.orchestrator.utils.LabelNormalizer.coreKey(label());
     }
 }

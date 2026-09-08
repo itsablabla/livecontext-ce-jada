@@ -256,7 +256,15 @@ function renderAncestorNode(
     // or a CRUD node (table: prefix - create-row, read-row, update-row, delete-row, find-row)
     // These nodes have their OWN outputs - use SourceCoreNodeInspector
     // Using nodeRegistry for centralized detection
-    const isCoreNode = nodeRegistry.isCoreNode(node) || nodeRegistry.isCrudNode(node);
+    // Generate is named explicitly: it left the core family, so isCoreNode is
+    // false for it now, and it matches no agent branch either (those key on a
+    // reasoning kind or an ai-agent- id). Without this it fell through to the
+    // bare navigation link and the panel listed it with no output fields at all,
+    // which is the one thing this panel exists to show. The inspector below
+    // already asks nodeRegistry.isGenerateNode for the GENERATE schema.
+    const isCoreNode = nodeRegistry.isCoreNode(node)
+        || nodeRegistry.isCrudNode(node)
+        || nodeRegistry.isGenerateNode(node);
 
     if (isCoreNode) {
         return (

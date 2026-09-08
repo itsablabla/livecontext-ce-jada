@@ -76,8 +76,9 @@ public class WorkspacePurgeService {
 
         String orgIdStr = orgId.toString();
 
-        // 1. Operational data across every schema (NOT the financial ledger / audit).
-        workspaceDataPurger.purgeOperationalData(orgIdStr);
+        // 1. Auth-schema operational data + the outbox row every other service's follower
+        //    acts on (NOT the financial ledger / audit).
+        workspaceDataPurger.purgeOperationalData(orgIdStr, WorkspaceDataPurger.SOURCE_WORKSPACE);
 
         // 2. Memberships - the workspace is dead. Native delete to avoid touching the kept org
         //    row's ORM cascade. organization_member.organization_id is UUID; cast to text so the

@@ -93,7 +93,9 @@
     "noResults": "No results for \"{query}\"",
     "searching": "Searching...",
     "untitled": "Untitled",
-    "clear": "Clear search"
+    "clear": "Clear search",
+    "shortcutKeys": "Ctrl K",
+    "shortcutKeysMac": "⌘K"
   },
   "reward": {
     "page": {
@@ -382,6 +384,16 @@
     "deleteRows": "Delete Rows",
     "deleteColumnsButton": "Delete Columns",
     "deleteRowsConfirm": "Are you sure you want to delete {count} selected row(s)? This action cannot be undone.",
+    "duplicateRows": "Duplicate",
+    "duplicateRowsSuccessTitle": "Rows duplicated",
+    "duplicateRowsSuccessMessage": "{count} row(s) have been copied",
+    "duplicateRowsSuccessMessageVector": "{count} row(s) have been copied. They stay out of similarity search until they are re-embedded.",
+    "duplicateRowsPartialTitle": "Some rows were not duplicated",
+    "duplicateRowsPartialMessage": "{done} of {total} row(s) were copied: {reason}",
+    "duplicateRowsReasonNotLoaded": "rows selected on another page were not loaded",
+    "duplicateRowsReasonUnknown": "no reason given",
+    "duplicateRowsErrorTitle": "Error duplicating rows",
+    "duplicateRowsErrorMessage": "Failed to duplicate the selected rows: {reason}",
     "cancel": "Cancel",
     "saveRow": "Save Row",
     "addRow": "Add Row",
@@ -436,6 +448,7 @@
     "assetUrl": "Use a link",
     "assetUrlPlaceholder": "Paste an image or file URL",
     "assetUrlConfirm": "Use",
+    "assetUrlBack": "Back to file sources",
     "assetUrlInvalid": "This does not look like a usable URL",
     "assetExternal": "External link",
     "assetUnresolvableHint": "This file is no longer available. It may have been deleted from Files.",
@@ -494,6 +507,8 @@
     "openBottom": "Open panel at the bottom",
     "detach": "Detach panel",
     "attach": "Dock panel back",
+    "maximize": "Full screen",
+    "restoreSize": "Exit full screen",
     "moveWindow": "Move panel",
     "moveWindowHint": "Move the panel: drag it, or use the arrow keys (Shift to resize from the bottom-right, Ctrl+Shift from the top-left, Alt for a 1px step)",
     "collapseWindow": "Collapse the panel",
@@ -508,6 +523,7 @@
     "errorLoading": "Failed to load items",
     "aiChat": "AI Chat",
     "runTab": "Run",
+    "inspectorTab": "Inspector",
     "welcomeTitle": "How can I help you?",
     "agent": "Agent",
     "workflowPanel": "Workflow Panel",
@@ -528,21 +544,35 @@
     "deleteDatasourceTitle": "Delete Data Source",
     "deleteDatasourceConfirm": "Are you sure you want to delete \"{name}\"? This action cannot be undone."
   },
+  "platformStatus": {
+    "headline": {
+      "operational": "All systems operational",
+      "maintenance": "Maintenance in progress",
+      "degraded": "Degraded performance",
+      "major_outage": "Major outage",
+      "unknown": "Status unavailable"
+    },
+    "strip": {
+      "incident": "Ongoing incident",
+      "maintenance": "Maintenance in progress",
+      "view": "View status",
+      "dismiss": "Dismiss"
+    },
+    "card": {
+      "title": "Platform status",
+      "subtitle": "Current state of the LiveContext cloud",
+      "state": "State",
+      "incidents": "Ongoing incidents",
+      "lastChecked": "Last checked",
+      "loadError": "The status could not be loaded."
+    }
+  },
   "sidebar": {
-    "board": "Board",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
     "closeSidebar": "Close sidebar",
-    "newChat": "New chat",
     "searchChats": "Search chats",
-    "home": "Home",
-    "applications": "Applications",
-    "marketplace": "Market Place",
-    "workflows": "Workflows",
-    "tables": "Tables",
-    "interfaces": "Interfaces",
     "projects": "Projects",
-    "agents": "Agents",
     "chats": "Chats",
     "noConversations": "No conversations",
     "generatingTitle": "Generating title...",
@@ -557,7 +587,6 @@
     "allChats": "All",
     "filterChats": "Filter conversations",
     "shareConversation": "Share conversation",
-    "credits": "Credits",
     "cost": "Cost",
     "viewQuota": "View usage & quota",
     "noProjects": "No projects yet",
@@ -571,7 +600,6 @@
     },
     "nav": {
       "board": "Board",
-      "home": "Home",
       "marketplace": "Marketplace",
       "agents": "Agents",
       "applications": "Applications",
@@ -579,10 +607,10 @@
       "interfaces": "Interfaces",
       "tables": "Tables",
       "files": "Files",
-      "newChat": "New Chat"
+      "newChat": "New chat",
+      "agenda": "Agenda"
     },
     "settings": "Settings",
-    "pricing": "Pricing",
     "about": "About",
     "information": "Information",
     "workspace": "Workspace",
@@ -611,7 +639,25 @@
     "upgrade": "Upgrade",
     "signIn": "Sign In",
     "scheduledAgent": "Scheduled agent",
-    "webhookAgent": "Webhook agent"
+    "webhookAgent": "Webhook agent",
+    "more": {
+      "title": "More",
+      "back": "Back"
+    },
+    "customize": {
+      "title": "Customize",
+      "pagesTitle": "Pages in the sidebar",
+      "pagesHint": "Tick the pages you want in the sidebar. At least {count} are always kept.",
+      "minimumReached": "The sidebar keeps at least {count} pages. Add another one to remove this.",
+      "quickOpenTitle": "Quick open",
+      "quickOpenHint": "Where the home page shortcut and the keys below take you.",
+      "reset": "Reset to defaults",
+      "shortcutKeys": "Ctrl Shift O",
+      "shortcutKeysMac": "⇧⌘O",
+      "shortcutAria": "Keyboard shortcut",
+      "shortcutTitle": "{label} ({keys})"
+    },
+    "studioChats": "Studio"
   },
   "dashboard": {
     "title": "Settings",
@@ -728,6 +774,17 @@
           "datasource": "Data table",
           "workflow": "Workflow",
           "error": "Error"
+        },
+        "triggerActions": {
+          "label": "Schedule actions",
+          "runNow": "Run now",
+          "runNowHint": "The scheduled run still happens.",
+          "runInstead": "Run instead of the scheduled run",
+          "runInsteadHint": "Uses up the run that was coming.",
+          "openAgenda": "Open in the agenda",
+          "ranKeeping": "Started. The scheduled run still happens.",
+          "ranReplacing": "Started, in place of the scheduled run.",
+          "runFailed": "Could not start it."
         }
       },
       "recent": {
@@ -767,7 +824,9 @@
           "AGENT_TASK_ASSIGNED": "{count, plural, one {# task assigned} other {# tasks assigned}}",
           "AGENT_TASK_AWAITING_REVIEW": "{count, plural, one {# task awaiting your review} other {# tasks awaiting your review}}",
           "BRIDGE_LOW_CREDIT": "{count, plural, one {# low-credit bridge} other {# low-credit bridges}}",
-          "ORG_INVITATION_PENDING": "{count, plural, one {# organization invitation} other {# organization invitations}}"
+          "ORG_INVITATION_PENDING": "{count, plural, one {# organization invitation} other {# organization invitations}}",
+          "BADGE_UNLOCKED": "{count, plural, one {# new trophy} other {# new trophies}}",
+          "BUDGET_REACHED": "{count, plural, one {# workflow stopped on its spending cap} other {# workflows stopped on their spending cap}}"
         },
         "approvalOpen": "Open",
         "approvalReview": "Review",
@@ -1096,6 +1155,9 @@
     "reactivateRun": {
       "title": "Reactivate this run"
     },
+    "runAction": {
+      "failed": "This did not work. Try again."
+    },
     "applicationMode": "Application Mode",
     "application": "Application",
     "templates": {
@@ -1152,14 +1214,15 @@
       "budgetReached": "Budget reached, no new run will start",
       "epochCost": "Epoch {epoch}",
       "budgetBlockedTitle": "Budget reached",
-      "budgetBlockedMessage": "Spent {spent} of {budget}. No new run was started.",
+      "budgetBlockedMessage": "Spent {spent} of {budget} {period}. No new run was started; it resumes on its own next period.",
       "openInPanel": "Open run details in the panel",
       "backToWorkflow": "Back to the workflow",
       "scrollLeft": "Show previous details",
       "scrollRight": "Show more details",
       "cost": "Cost",
       "scopeAll": "all epochs",
-      "scopeEpoch": "epoch {epoch}"
+      "scopeEpoch": "epoch {epoch}",
+      "budgetBlockedMessageCumulative": "Spent {spent} of {budget}, and this cap never resets. No new run was started; raise the cap or change how it resets to continue."
     }
   },
   "workflowRelations": {
@@ -1278,7 +1341,15 @@
     "released": "Released {date}",
     "infoTooltip": "View model details",
     "recommended": "Recommended",
-    "notSet": "-"
+    "notSet": "-",
+    "creditEstimateShort": "~{credits} credits",
+    "creditEstimateTooltip": {
+      "agentConversation": "About {credits} credits for a typical conversation where this model works with tools, around 5 turns and 45 tool calls. An estimate from real usage, not a cap.",
+      "chatConversation": "About {credits} credits for a typical exchange with no tool call. An estimate from real usage, not a cap.",
+      "guardrailCheck": "About {credits} credits per check on a typical message. An estimate from real usage, not a cap.",
+      "classifyStep": "About {credits} credits per classification on a typical input. An estimate from real usage, not a cap."
+    },
+    "creditEstimateLabel": "Estimated cost"
   },
   "status": {
     "paused": "Paused",
@@ -1512,7 +1583,11 @@
     "unpublishError": "Failed to unshare workflow",
     "retry": "Retry",
     "skipShowcase": "Skip - no runs available for this version",
-    "noShowcaseNeeded": "Showcase is optional. You can share without a preview."
+    "noShowcaseNeeded": "Showcase is optional. You can share without a preview.",
+    "studioLabel": "Studio shelf",
+    "studioHint": "The Studio shelf gathers the applications that produce media. The application keeps its category as well: this is a separate axis, not a replacement.",
+    "studioToggle": "Show on the Studio shelf",
+    "studioToggleHint": "For applications that produce an image, a video or a sound."
   },
   "showcase": {
     "preview": "Showcase Preview",
@@ -1681,6 +1756,9 @@
     "ceExclusiveTooltip": "Runs on a self-hosted install only (Community Edition)",
     "ceExclusiveTitle": "Self-hosted install required",
     "ceExclusiveDescription": "This app uses features that only run on a self-hosted install, so it cannot be installed here. Install it from a self-hosted deployment to use it.",
+    "planUpgradeTitle": "A higher plan is needed",
+    "planUpgradeDescription": "This app uses a capability your workspace plan does not include yet. Upgrading unlocks the install.",
+    "planUpgradeCta": "See plans",
     "ceExclusiveFeatureCliAgent": "Local CLI agents (Claude Code, Codex, Gemini CLI, Mistral Vibe)",
     "ceExclusiveFeatureVectorSearch": "Vector search (embeddings)",
     "acquiring": "Installing...",
@@ -1776,7 +1854,10 @@
     },
     "settingsMenu": {
       "label": "Application settings"
-    }
+    },
+    "studioFilterChip": "Studio only",
+    "studioFilterClear": "Show the whole marketplace",
+    "studioSubtitle": "Applications that produce an image, a video or a sound."
   },
   "reviews": {
     "title": "Reviews",
@@ -2077,13 +2158,6 @@
       "pricing": "Pricing",
       "safeToClose": "You can close this page safely."
     },
-    "welcomeGift": {
-      "title": "Welcome Gift!",
-      "subtitle": "Renewed every month, free",
-      "credits": "credits / month",
-      "description": "We've added {amount} free credits per month to your account so you can explore all features right away - they refresh automatically every month.",
-      "cta": "Start exploring"
-    },
     "suggestedApps": {
       "title": "Apps picked for you",
       "subtitle": "Based on what you told us during onboarding, here are applications you might like.",
@@ -2200,12 +2274,7 @@
       "successTitle": "Updated",
       "successMessage": "\"{name}\" updated successfully",
       "errorTitle": "Error",
-      "errorMessage": "Failed to update",
-      "advancedSection": "Advanced",
-      "budgetLabel": "Cost budget",
-      "budgetPlaceholder": "No limit",
-      "budgetHelpCredits": "Maximum credits this workflow can spend. When reached, no new run starts.",
-      "budgetHelpDollars": "Maximum spend for this workflow. When reached, no new run starts."
+      "errorMessage": "Failed to update"
     },
     "createWorkflow": {
       "title": "Create New Workflow",
@@ -2216,10 +2285,11 @@
       "cancel": "Cancel",
       "create": "Create Workflow",
       "creating": "Creating...",
-      "success": "Success",
-      "successMessage": "Workflow \"{name}\" created successfully",
       "error": "Error",
-      "errorMessage": "Failed to create workflow"
+      "errorMessage": "Failed to create workflow",
+      "budgetErrorTitle": "Spending cap not saved",
+      "budgetErrorMessage": "The workflow was created. Set its cap again from the builder.",
+      "openAnyway": "Open the workflow"
     },
     "createInterface": {
       "title": "Create New Interface",
@@ -2385,8 +2455,7 @@
       },
       "configVectorDimension": "Embedding dimension",
       "configVectorMetric": "Distance metric",
-      "ceOnlyBadge": "CE only",
-      "ceOnlyTooltip": "Available on the self-hosted Community Edition only",
+      "planOnlyTooltip": "Available from the {plan} plan. Upgrade to use embedding columns.",
       "mediaRender": {
         "label": "Show as",
         "thumbnail": "Thumbnail",
@@ -2586,7 +2655,11 @@
       "noResources": "No resources",
       "noResourcesAvailable": "No resources available",
       "resourcesSelected": "{count} of {total} resources",
-      "duplicateName": "An agent named \"{name}\" already exists. Choose a different name."
+      "duplicateName": "An agent named \"{name}\" already exists. Choose a different name.",
+      "memoryAccessLabel": "Long-term memory",
+      "memoryAccessInfo": "What this agent saves is added to the context of every agent in the workspace. Set it to recall-only for an agent that should use the workspace facts without changing them.",
+      "memoryAccessWrite": "Can save and delete",
+      "memoryAccessRead": "Recall only"
     },
     "createSkill": {
       "title": "Create Skill",
@@ -2909,7 +2982,7 @@
   },
   "nodeTypeSettings": {
     "title": "Node Types",
-    "subtitle": "Enable or disable workflow node types available to the AI agent",
+    "subtitle": "Enable or disable workflow node types, and set the minimum plan each node and integration requires",
     "adminOnlyBadge": "Admin only",
     "searchPlaceholder": "Search node types...",
     "enabled": "Enabled",
@@ -2933,7 +3006,33 @@
     },
     "errors": {
       "fetchFailed": "Failed to load node types",
-      "toggleFailed": "Failed to toggle node type"
+      "toggleFailed": "Failed to toggle node type",
+      "planChangeFailed": "Failed to change the minimum plan"
+    },
+    "plan": {
+      "label": "Minimum plan",
+      "everyone": "Everyone"
+    },
+    "tabs": {
+      "nodes": "Nodes",
+      "integrations": "Integrations",
+      "capabilities": "Capabilities"
+    },
+    "integrations": {
+      "searchPlaceholder": "Search integrations...",
+      "hint": "Open an integration to set the plan for each of its endpoints. Publishing endpoints are what a plan usually gates, not reading ones.",
+      "previous": "Previous",
+      "next": "Next",
+      "back": "All integrations",
+      "apiLevelHint": "Whole integration, reading included",
+      "wholeApiGated": "Whole integration from {plan}",
+      "gatedEndpoints": "{count} endpoint(s) on a paid plan"
+    },
+    "capabilities": {
+      "vectorSearch": {
+        "label": "Vector columns and similarity search",
+        "description": "Embedding columns, similarity queries (RAG) and installing marketplace apps that use them. Embeddings share the managed database, so the bar is a paid plan rather than a free-for-all."
+      }
     }
   },
   "adminCredits": {
@@ -3548,7 +3647,7 @@
       "appliesTo": "Applies to",
       "scopeAll": "All surfaces",
       "scopeChat": "General chat",
-      "scopeWorkflow": "Workflow agent",
+      "scopeWorkflow": "Workflow node",
       "scopeWebhook": "Webhook",
       "scopeWidget": "Widget",
       "scopeSchedule": "Schedule",
@@ -5047,12 +5146,16 @@
         "storage1tb": "1 TB storage",
         "logs7": "7-day execution log retention",
         "logs30": "30-day execution log retention",
-        "logs60": "60-day execution log retention",
+        "logs90": "90-day execution log retention",
         "logsCustom": "Custom log retention",
         "versioning": "Workflow versioning",
         "apiAccess": "API access",
         "cePlatformCreds": "Managed integration credentials",
         "cePlatformCredsTooltip": "A cloud-linked self-hosted install can run third-party integrations with LiveContext platform credentials, no API keys of your own needed. A small per-call markup in credits applies.",
+        "vectorSearch": "Vector search and RAG on cloud",
+        "vectorSearchTooltip": "Embedding columns and similarity search on your tables, for retrieval-augmented generation. Embeddings share the managed database, so on cloud they start at Pro. A self-hosted install has them on every plan, because it owns its own database.",
+        "browserAgent": "Browser Agent node",
+        "browserAgentTooltip": "An LLM that drives a real browser: navigate, fill forms, extract structured data from sites with no API. It holds a browser session for the length of the task, a scarce resource on shared infrastructure, so it starts at Pro.",
         "priorityExecution": "Priority execution",
         "executionSearch": "Execution search",
         "analyticsBasic": "Basic analytics",
@@ -5073,7 +5176,85 @@
         "supportPriority": "Priority support 24/7",
         "supportSla": "Priority support with SLA",
         "accountManager": "Dedicated account manager",
-        "onboarding": "Custom onboarding & training"
+        "onboarding": "Custom onboarding & training",
+        "nodesCore": "Core node library (publishing integrations excluded)",
+        "nodesPublishing": "Publishing integrations included",
+        "nodesAll": "Every node and integration, without restriction",
+        "nodesPublishingTooltip": "Publish straight from a workflow to the social and video platforms in the catalogue, YouTube, Instagram, TikTok, X and LinkedIn among them, with more added over time."
+      }
+    },
+    "compare": {
+      "open": "Compare plans",
+      "title": "Compare plans",
+      "subtitle": "What every plan includes, side by side. Prices shown with the {credits}-credit pack.",
+      "cycleLabel": "Billing period",
+      "featureColumn": "Feature",
+      "unlocksBadge": "Unlocks this",
+      "included": "Included",
+      "notIncluded": "Not included",
+      "footnote": "Credit packs scale on every paid plan: pick yours on the plans page. Prices exclude tax.",
+      "sections": {
+        "usage": "Usage and limits",
+        "building": "Building workflows",
+        "collaboration": "Team and workspaces",
+        "security": "Security and governance",
+        "support": "Analytics and support"
+      },
+      "dimensions": {
+        "credits": "Monthly credits",
+        "nodes": "Nodes and integrations",
+        "nodesTooltip": "Only publishing is held back: posting to YouTube, Instagram, TikTok, X, LinkedIn and 13 other platforms needs a paid plan. Reading from them, and every other node, is on every plan.",
+        "concurrent": "Concurrent executions",
+        "storage": "Storage",
+        "logs": "Execution log retention",
+        "variables": "Workflow variables",
+        "users": "Users",
+        "workspaces": "Workspaces",
+        "analytics": "Analytics",
+        "support": "Support",
+        "creditsTooltip": "Credits pay for what the models and tools actually process, so what a month buys depends on the work. Priced on a top-tier model such as Claude Sonnet 5: about {simpleCredits} credits for a plain question and answer with no tool call, about {agentCredits} for a conversation in which an agent builds a workflow for you (around 5 turns and 45 tool calls, and a longer build costs more), and about {classifyCredits} for a single classification step inside a running workflow. Lighter models cost several times less."
+      },
+      "values": {
+        "creditsFree": "1,000 / month",
+        "creditsDynamic": "From {credits} / month",
+        "creditsCustom": "Custom",
+        "nodesCore": "All but publishing",
+        "nodesPublishing": "Everything",
+        "nodesAll": "Everything",
+        "concurrent1": "1",
+        "concurrent5": "5",
+        "concurrent20": "20",
+        "concurrent50": "50",
+        "concurrentUnlimited": "Unlimited",
+        "storage100mb": "100 MB",
+        "storage1gb": "1 GB",
+        "storage10gb": "10 GB",
+        "storage100gb": "100 GB shared",
+        "storage1tb": "1 TB",
+        "logs7": "7 days",
+        "logs30": "30 days",
+        "logs90": "90 days",
+        "logsCustom": "Custom",
+        "variables3": "3",
+        "variables25": "25",
+        "variables100": "100",
+        "variables500": "500",
+        "variablesUnlimited": "Unlimited",
+        "users1": "1",
+        "users25": "Up to 25",
+        "usersUnlimited": "Unlimited",
+        "workspaces1": "1",
+        "workspaces3": "3",
+        "workspaces10": "10",
+        "workspacesUnlimited": "Unlimited",
+        "analyticsBasic": "Basic",
+        "analyticsDetailed": "Detailed",
+        "analyticsTeam": "Team + reporting",
+        "analyticsAdvanced": "Advanced + reporting",
+        "supportCommunity": "Community",
+        "supportEmail": "Email",
+        "supportPriority": "Priority 24/7",
+        "supportSla": "Priority + SLA"
       }
     },
     "businessPlans": {
@@ -5090,7 +5271,7 @@
       "title": "How do credits work?",
       "toolUsage": {
         "title": "Tool usage",
-        "description": "Each use of an MCP tool consumes 1 credit. Complex tools may consume more credits depending on their intensity."
+        "description": "Each call to an MCP tool costs 1 credit, and a heavier tool costs more. What a model reads and writes is billed separately, on its tokens."
       },
       "dataStorage": {
         "title": "Data storage",
@@ -5104,20 +5285,43 @@
     "faq": {
       "title": "Frequently Asked Questions",
       "exceedCredits": {
-        "question": "What happens if I exceed my credits?",
-        "answer": "You can upgrade your subscription, add a credit pack to your existing plan via the slider, or buy a one-time Pay As You Go top-up ($10 / $50 / $100). PAYG credits persist across renewal cycles and are consumed after your subscription credits run out."
+        "question": "What happens if I run out of credits?",
+        "answer": "New runs and conversations are held until you top up, so a runaway job can never quietly bill you. You can raise the credit pack on your current plan with the slider, upgrade, or buy a one-time Pay As You Go top-up ($10 / $50 / $100). PAYG credits stay across renewal cycles and are consumed after your plan credits."
       },
       "changePlans": {
         "question": "Can I change plans at any time?",
-        "answer": "Yes, you can upgrade at any time. To downgrade, you'll need to wait until the end of your current billing period."
+        "answer": "Upgrades take effect immediately and are prorated by the payment provider. A downgrade, or a smaller credit pack, is scheduled for the end of the period you already paid for, so you keep what you bought until then. A scheduled change can usually be cancelled before it applies."
       },
       "payAsYouGo": {
         "question": "How does Pay As You Go work?",
-        "answer": "Pay As You Go is a one-time top-up - pick a $10 / $50 / $100 tier and your wallet is credited with 8,000 / 40,000 / 80,000 credits (≈ $1.25 per 1,000 credits). No subscription required, credits persist across renewal cycles and are consumed only after your subscription credits run out."
+        "answer": "Pay As You Go is a one-time top-up: pick $10, $50 or $100 and your wallet is credited with 8,000, 40,000 or 80,000 credits. No subscription required. Those credits stay across renewal cycles and are only spent once your plan credits are gone."
       },
       "sharedStorage": {
         "question": "Is storage shared between users?",
-        "answer": "No, each account has its own storage space. For teams, storage can be shared among members depending on your plan and needs."
+        "answer": "Each account has its own storage. Team plans add a shared pool, so a workspace's files count against the team allowance rather than each member's own quota."
+      },
+      "conversationCost": {
+        "question": "How many conversations do my credits cover?",
+        "answer": "It depends on how much work you ask for, so here are both ends. A plain question and answer, with no tool involved, costs about {simpleCredits} credits. Working with an agent to build a workflow is the heavy end: it searches the tool catalogue, reads your tables, creates and wires the nodes, runs the workflow and reads the results back, and the whole transcript is re-sent to the model on every one of those tool calls. Measured across every real conversation in which an agent called tools, around 5 turns and 45 tool calls, one costs about {agentCredits} credits, and a build that takes more turns than that costs proportionally more. A single classification step inside a running workflow is about {classifyCredits} credits. The figures are priced on a top-tier model such as Claude Sonnet 5; lighter models cost several times less. You are billed for the tokens a model reads and writes, never per message.",
+        "examplesCaption": "What the {credits} credits every paid plan starts with buy:",
+        "examples": {
+          "simpleChat": {
+            "count": "{count} conversations",
+            "detail": "Question and answer, no tool involved. About {credits} credits each."
+          },
+          "agentChat": {
+            "count": "{count} workflow-building conversations",
+            "detail": "An agent searching tools, creating and wiring nodes and testing the run with you. Priced on a typical tool-calling conversation, around 5 turns and 45 tool calls; a longer build costs more. About {credits} credits each."
+          },
+          "classifyStep": {
+            "count": "{count} classification steps",
+            "detail": "A single routing or sorting decision inside a running workflow. About {credits} credits each."
+          }
+        }
+      },
+      "rollover": {
+        "question": "Do unused credits roll over?",
+        "answer": "Plan credits reset at each renewal, so a month's pack is meant to be spent within that month. Pay As You Go top-ups behave differently: they stay in your wallet across renewals and are only used once the month's plan credits are gone."
       }
     },
     "creditSlider": {
@@ -5544,6 +5748,10 @@
     "unauthorized": "Unauthorized Access",
     "mustBeLoggedIn": "You must be logged in to access settings.",
     "signIn": "Sign In",
+    "agentDefaults": {
+      "title": "Agents & chat defaults",
+      "subtitle": "Default options applied to every agent conversation and every new general chat in this workspace."
+    },
     "bundles": {
       "title": "Catalog Bundles",
       "subtitle": "Distribute signed model and API catalog bundles to community editions.",
@@ -5778,7 +5986,8 @@
       "security": "Security",
       "preferences": "Preferences",
       "notifications": "Notifications",
-      "advanced": "Advanced"
+      "advanced": "Advanced",
+      "trophies": "Trophies"
     },
     "common": {
       "loading": "Loading...",
@@ -5861,11 +6070,20 @@
       "creditLimitDescription": "Number of credits usable without confirmation",
       "chatDefaultsTitle": "Chat defaults",
       "chatDefaultsDescription": "Default options applied to new conversations in this workspace.",
+      "chatDefaultsLink": "Open agent & chat settings",
       "savePreferences": "Save Preferences",
       "workflowLayoutDirection": "Workflow layout",
       "workflowLayoutDirectionDescription": "Direction the workflow builder reads in: left to right, or top to bottom. Sets where node connections and buttons sit, and how auto-layout arranges the graph.",
       "workflowLayoutDirectionHorizontal": "Left to right",
-      "workflowLayoutDirectionVertical": "Top to bottom"
+      "workflowLayoutDirectionVertical": "Top to bottom",
+      "inspectorDock": "Node inspector",
+      "inspectorDockDescription": "Where a node's configuration opens: floating over the canvas, or as a tab of the side panel so it never covers the graph.",
+      "inspectorDockCanvas": "Floating on the canvas",
+      "inspectorDockPanel": "In the side panel",
+      "inspectorOpenMode": "Node click opens",
+      "inspectorOpenModeDescription": "How much of a node opens when you click it while building: its settings alone, or the full view with what feeds the node and what it produced. Opening a run always shows the full view.",
+      "inspectorOpenModeSimple": "Settings only",
+      "inspectorOpenModeAdvanced": "Settings, input and output"
     },
     "notifications": {
       "title": "Notification Preferences",
@@ -6147,7 +6365,9 @@
       "workflowFailedTitle": "Workflow failed",
       "workflowFailedMessage": "The workflow execution has failed. Check the failed steps for details.",
       "workflowTimeoutTitle": "Workflow timed out",
-      "workflowTimeoutMessage": "The workflow execution has exceeded the maximum allowed time."
+      "workflowTimeoutMessage": "The workflow execution has exceeded the maximum allowed time.",
+      "rerunRefusedTitle": "Restart refused",
+      "rerunRefusedMessage": "The run would not restart from there. It may still be executing, or that step has no result to redo. If the run is still going, wait for it to settle and try again."
     },
     "inspector": {
       "manualTriggerTitle": "Manual Trigger",
@@ -6430,6 +6650,46 @@
       "item": "Item",
       "noData": "No data",
       "noExecutionData": "No execution data",
+      "runData": {
+        "viewFile": "View file",
+        "downloadFile": "Download file",
+        "copyValue": "Copy value",
+        "copyAll": "Copy everything",
+        "copied": "Copied",
+        "viewSwitcherLabel": "Data view",
+        "viewTree": "Tree",
+        "viewJson": "Raw JSON",
+        "viewTable": "Table",
+        "tableUnavailable": "This data is not a list of rows, so it cannot be shown as a table.",
+        "tableColumnsTruncated": "Showing the first {shown} columns, {hidden} more are hidden.",
+        "jsonBadge": "JSON",
+        "expandJson": "Expand this JSON value",
+        "collapseJson": "Collapse this JSON value",
+        "showMore": "Show more",
+        "showLess": "Show less",
+        "unresolvedBadge": "Unresolved",
+        "unresolvedInvalidTemplate": "The engine could not parse this expression, so the value was left as written.",
+        "unresolvedVariable": "A variable template reached this value without being replaced.",
+        "unresolvedStringifiedObject": "An object was turned into text before it reached this value.",
+        "stateRunning": "Running",
+        "stateAwaiting": "Waiting",
+        "stateRunningParams": "The node is executing. These are the values it was launched with, before resolution.",
+        "stateRunningOutput": "The node is executing. Its output appears here as soon as it finishes.",
+        "stateAwaitingParams": "The node is paused on a signal. These are the values it was launched with.",
+        "stateAwaitingOutput": "The node is paused on a signal. Its output appears here once the signal is resolved.",
+        "signalWaitTimer": "Wait timer",
+        "signalUserApproval": "User approval",
+        "signalWebhookWait": "Webhook callback",
+        "signalInterface": "Interface action",
+        "signalAgentExecution": "Agent execution",
+        "signalBrowserTakeover": "Browser takeover",
+        "signalExpiresAt": "expires {date}",
+        "noResolvedParams": "No resolved parameters",
+        "configuredParamsTitle": "Launched with",
+        "mismatchTitle": "{count, plural, one {# parameter not reported by this run} other {# parameters not reported by this run}}",
+        "mismatchRenamed": "Reported under a different name: {runtimeKey}",
+        "mismatchNotReported": "Configured on the node but absent from what the run reported."
+      },
       "moreActions": "More actions",
       "tablesTrigger": {
         "advancedOptions": "Advanced options",
@@ -7055,7 +7315,9 @@
     "rerunConfirm": {
       "title": "Restart from this step?",
       "message": "This run is automatic. Restarting here re-runs this step, then lets the rest of the workflow run again on its own, which can call paid tools and send real messages.",
-      "confirm": "Restart"
+      "confirm": "Restart",
+      "scopeEpoch": "Epoch {epoch}",
+      "scopeLatestEpoch": "This step's latest epoch"
     },
     "canvas": {
       "portSingleTargetHint": "This output is already connected. One port goes to a single node - add a Fork node to run several in parallel.",
@@ -7099,6 +7361,9 @@
       "backToHome": "Back to home",
       "searchPlaceholder": "Search {context}...",
       "frequentlyUsed": "Frequently Used",
+      "paletteCategories": "Categories",
+      "paletteNodes": "Nodes",
+      "paletteIntegrations": "Integrations",
       "mcp": "MCP",
       "noApiFound": "No API found",
       "noToolFound": "No tool found",
@@ -7226,7 +7491,24 @@
       "close": "Close",
       "layoutDirection": "Layout",
       "layoutHorizontal": "Left to right",
-      "layoutVertical": "Top to bottom"
+      "layoutVertical": "Top to bottom",
+      "inspectorDock": "Inspector",
+      "inspectorDockCanvas": "Floating",
+      "inspectorDockPanel": "Side panel",
+      "inspectorOpenMode": "Node click opens",
+      "inspectorOpenModeSimple": "Settings only",
+      "inspectorOpenModeAdvanced": "Settings, input and output",
+      "paletteTooltip": {
+        "badgeTrigger": "Trigger",
+        "badgeIntegration": "Integration",
+        "badgeCategory": "Category",
+        "badgeNode": "Node",
+        "details": "Details",
+        "requiresPlan": "Requires {plan}",
+        "hintClickAdd": "Click to add",
+        "hintClickBrowse": "Click to browse",
+        "hintDrag": "or drag onto the canvas"
+      }
     },
     "nodes": {
       "filePreview": {
@@ -7427,11 +7709,17 @@
       "generate": {
         "title": "Generate",
         "description": "Generates one asset from a prompt: image, video, audio, voice or music. The model you pick decides the format produced, the parameters it accepts and what each run costs.",
+        "assetType": "Asset type",
+        "provider": "Provider",
+        "credential": "Key and billing",
         "model": "Model",
         "modelPlaceholder": "Select a model",
         "modelsLoading": "Loading models...",
         "modelHint": "Changing the model clears any parameter the new model does not accept.",
         "noModels": "No generation models are available on this installation.",
+        "modelsUnavailable": "The model catalogue could not be read just now. This says nothing about whether generation works here: try again in a moment.",
+        "unknownModel": "This node uses the model \"{model}\", which this installation does not offer. Choose another model, or the run will be refused.",
+        "parameters": "Parameters",
         "selectValue": "Select a value",
         "filePlaceholder": "e.g. {{core:download.output.file}}",
         "limitRange": "Allowed range: {min} to {max}",
@@ -7573,7 +7861,37 @@
         "opacityHint": "Between {min} and {max}. Default: 1.",
         "startSeconds": "Start (seconds)",
         "endSeconds": "End (seconds)",
-        "overlayTimingHint": "Leave start and end empty to show the overlay for the whole video."
+        "overlayTimingHint": "Leave start and end empty to show the overlay for the whole video.",
+        "opSubtitles": "Burn captions",
+        "opSubtitlesDesc": "Burn timed captions into the picture of a video",
+        "subtitlesVideoHint": "Caption last: the captions become part of the picture and cannot be removed afterwards.",
+        "cues": "Captions",
+        "cue": "Caption {index}",
+        "cueText": "Text",
+        "cueTextPlaceholder": "The line shown on screen",
+        "cueStartSeconds": "Appears at (seconds)",
+        "cueEndSeconds": "Disappears at (seconds)",
+        "addCue": "Add caption",
+        "removeCue": "Remove caption",
+        "moveCueUp": "Move caption up",
+        "moveCueDown": "Move caption down",
+        "cuesHint": "Up to {max} captions, in order and without overlapping. Time them from the audio actually in the video.",
+        "cuesExpressionHint": "This caption track is computed by an upstream node, so it cannot be edited here.",
+        "subtitleStyle": "Style",
+        "subtitleStyleTiktok": "Short-form",
+        "subtitleStyleTiktokDesc": "Big, bold, uppercase, above the middle",
+        "subtitleStyleClassic": "Classic",
+        "subtitleStyleClassicDesc": "Smaller, mixed case, near the bottom",
+        "fontFamily": "Font",
+        "fontFamilyPlaceholder": "Default font",
+        "fontFamilyHint": "Leave empty unless you need a specific font: a font the renderer cannot find fails the run instead of being replaced.",
+        "fontSizePercent": "Font size (% of height)",
+        "fontSizePercentHint": "Between {min} and {max}. Empty keeps the style's size.",
+        "positionPercent": "Position (% from the top)",
+        "positionPercentHint": "Between {min} and {max}. Empty keeps the style's position.",
+        "textColor": "Text colour",
+        "outlineColor": "Outline colour",
+        "outlineColorHint": "The outline is what keeps captions readable over a bright shot."
       },
       "fork": {
         "outputBranches": "Output Branches",
@@ -7891,7 +8209,8 @@
       "paste": "Paste",
       "selectAll": "Select all",
       "autoLayout": "Auto-layout",
-      "fitView": "Fit view"
+      "fitView": "Fit view",
+      "ctrlKeyName": "Ctrl"
     },
     "credentialSelector": {
       "accountLabel": "Account used by this step",
@@ -8086,7 +8405,9 @@
       "tabFleet": "Fleet",
       "tabMetrics": "Metrics",
       "shared": "Shared",
-      "tabBoard": "Board"
+      "tabBoard": "Board",
+      "tabMemory": "Memory",
+      "tabSettings": "Settings"
     },
     "skill": {
       "title": "Skills",
@@ -8428,6 +8749,26 @@
     "resumeContinue": "I authorized that action - please continue.",
     "resumeInstalled": "I installed the application myself - it's now in my workspace. Continue without acquiring it again."
   },
+  "askUser": {
+    "title": "The assistant has a question",
+    "subtitle": "Pick an answer so it can continue",
+    "stepOf": "Question {current} of {total}",
+    "next": "Next",
+    "back": "Back",
+    "waitingForYou": "The assistant is waiting for your answer to continue.",
+    "answerResumes": "Its turn is over. Your answer will start it again.",
+    "selectOne": "Choose one",
+    "selectMultiple": "Choose one or more",
+    "otherOption": "Other",
+    "otherPlaceholder": "Type your own answer",
+    "submit": "Send answer",
+    "submitting": "Sending",
+    "skip": "Skip",
+    "submitFailed": "Your answer could not be sent. Please try again.",
+    "submitFailedTitle": "Answer not sent",
+    "resumeIntro": "My answers:",
+    "noAnswer": "No answer yet"
+  },
   "onboarding": {
     "emailVerification": {
       "title": "Verify Your Email",
@@ -8461,8 +8802,13 @@
     "role": "What's your role?",
     "customRolePlaceholder": "Enter your role...",
     "companySize": "Company Size",
-    "useCasesLabel": "What will you use LiveContext for?",
-    "experienceLevel": "Experience Level",
+    "primaryGoalLabel": "Your main goal",
+    "primaryGoalRequired": "Pick a main goal to continue",
+    "toolsUsedLabel": "Which tools do you already use?",
+    "toolsUsedHint": "Optional, select all that apply",
+    "previousToolLabel": "What do you automate with today?",
+    "referralSourceLabel": "How did you hear about LiveContext?",
+    "step3Required": "Answer both questions to finish",
     "loginRequired": "Sign In Required",
     "loginRequiredDescription": "Please sign in to complete your profile setup",
     "signIn": "Sign In",
@@ -8472,19 +8818,18 @@
     "ce": {
       "role": "Your CE role",
       "teamSize": "Local team size",
-      "useCasesLabel": "What will this CE instance run?",
-      "experienceLevel": "Self-hosting experience",
+      "primaryGoalLabel": "This instance's main goal",
       "step1": {
         "title": "Set up your CE workspace",
         "description": "Choose the local profile used in this self-hosted instance"
       },
       "step2": {
-        "title": "What should this instance focus on?",
-        "description": "Select the local workflows and integrations your community will maintain"
+        "title": "What should this instance automate first?",
+        "description": "Pick the work this self-hosted workspace should take on first"
       },
       "step3": {
-        "title": "CE operating goals",
-        "description": "Pick the work this self-hosted workspace should optimize first"
+        "title": "Almost there",
+        "description": "Two last questions and your workspace is ready"
       },
       "teamSizes": {
         "solo": "Solo instance",
@@ -8502,16 +8847,6 @@
         "community": "Community Lead",
         "other": "Other"
       },
-      "interests": {
-        "selfHostedAgents": "Self-hosted agents",
-        "localAutomation": "Local automation",
-        "privateData": "Private data",
-        "integrations": "Integrations",
-        "teamWorkflows": "Team workflows",
-        "localMarketplace": "Local marketplace",
-        "governance": "Governance",
-        "other": "Other"
-      },
       "useCases": {
         "internalAutomation": "Internal automation",
         "privateAssistants": "Private assistants",
@@ -8521,14 +8856,6 @@
         "marketplacePublishing": "Marketplace publishing",
         "evaluationSandbox": "Evaluation sandbox",
         "other": "Other"
-      },
-      "experience": {
-        "firstInstall": "First install",
-        "firstInstallDesc": "Setting it up",
-        "operator": "Operator",
-        "operatorDesc": "Running services",
-        "powerUser": "Power user",
-        "powerUserDesc": "Extending CE"
       }
     },
     "step1": {
@@ -8536,12 +8863,12 @@
       "description": "Tell us a bit about yourself to personalize your experience"
     },
     "step2": {
-      "title": "What interests you?",
-      "description": "Select the topics you're most interested in"
+      "title": "What do you want to automate first?",
+      "description": "Pick the one that matters most, it shapes your first suggestions"
     },
     "step3": {
-      "title": "Your goals",
-      "description": "Help us understand how we can help you best"
+      "title": "Almost there",
+      "description": "Two last questions and you're in"
     },
     "roles": {
       "sales": "Sales",
@@ -8559,41 +8886,70 @@
       "freelancer": "Freelancer",
       "other": "Other"
     },
-    "interests": {
-      "automation": "Automation",
-      "aiMl": "AI & Machine Learning",
-      "dataAnalytics": "Data & Analytics",
-      "integrations": "Integrations",
-      "productivity": "Productivity Tools",
-      "businessIntelligence": "Business Intelligence",
-      "customerExperience": "Customer Experience",
-      "salesCrm": "Sales & CRM",
-      "marketingAutomation": "Marketing Automation",
-      "ecommerceTools": "E-commerce Tools",
+    "primaryGoals": {
+      "emailFollowUps": "Email follow-ups & replies",
+      "contentPublishing": "Content creation & publishing",
+      "leadGeneration": "Lead generation & CRM",
+      "customerSupport": "Customer support",
+      "reporting": "Reports & dashboards",
+      "dataSync": "Syncing data between tools",
+      "monitoringAlerts": "Monitoring & alerts",
+      "aiAssistant": "An AI assistant for my team",
+      "other": "Something else"
+    },
+    "tools": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "googleSheets": "Google Sheets",
+      "slack": "Slack",
+      "notion": "Notion",
+      "hubspot": "HubSpot",
+      "salesforce": "Salesforce",
+      "shopify": "Shopify",
+      "stripe": "Stripe",
+      "github": "GitHub",
+      "discord": "Discord",
+      "telegram": "Telegram",
+      "linkedin": "LinkedIn",
+      "airtable": "Airtable",
       "other": "Other"
     },
-    "customInterestPlaceholder": "Enter your interest...",
-    "useCases": {
-      "workflowAutomation": "Workflow Automation",
-      "chatbotsAssistants": "Chatbots & Assistants",
-      "dataIntegration": "Data Integration",
-      "contentGeneration": "Content Generation",
-      "leadGeneration": "Lead Generation",
-      "customerSupport": "Customer Support",
-      "reportingDashboards": "Reporting & Dashboards",
-      "ecommerceAutomation": "E-commerce Automation",
-      "teamCollaboration": "Team Collaboration",
-      "monitoringAlerts": "Monitoring & Alerts",
+    "previousTools": {
+      "none": "Nothing yet",
+      "zapierMake": "Zapier or Make",
+      "n8n": "n8n",
+      "customCode": "Custom code or scripts",
+      "otherPlatform": "Another platform"
+    },
+    "referralSources": {
+      "search": "Search engine",
+      "social": "Social media",
+      "wordOfMouth": "A colleague or friend",
+      "github": "GitHub",
+      "article": "An article or newsletter",
+      "aiAssistant": "An AI assistant recommended it",
       "other": "Other"
     },
-    "customUseCasePlaceholder": "Enter your use case...",
-    "experience": {
-      "beginner": "Beginner",
-      "beginnerDesc": "Just getting started",
-      "intermediate": "Intermediate",
-      "intermediateDesc": "Some experience",
-      "advanced": "Expert",
-      "advancedDesc": "Power user"
+    "firstBuild": {
+      "goalPrompts": {
+        "emailFollowUps": "Build me a workflow that goes through my inbox every weekday morning, finds the emails still waiting on a reply from me, and sends me one short summary ordered by urgency.",
+        "contentPublishing": "Build me a workflow that turns one idea into a week of content: draft the posts, let me approve them, then publish them on schedule.",
+        "leadGeneration": "Build me a workflow that captures every new lead, enriches it with company details, adds it to my CRM, and sends a personalized first reply within a minute.",
+        "customerSupport": "Build me an agent that reads incoming support requests, answers the routine ones from our own documentation, and escalates the rest to me with a suggested reply.",
+        "reporting": "Build me a workflow that collects my key numbers every Monday morning, turns them into a dashboard I can open, and emails me what changed since last week.",
+        "dataSync": "Build me a workflow that keeps my tools in sync: when a record changes on one side, update the other, and keep a log of everything that moved.",
+        "monitoringAlerts": "Build me a workflow that checks on a schedule what matters to me and alerts me only when something actually needs my attention.",
+        "aiAssistant": "Build me an agent my team can chat with, that knows our documents and can act in our tools instead of only answering.",
+        "internalAutomation": "Build me a workflow that takes one of our recurring internal chores from end to end, and shows me every run so I can trust it.",
+        "privateAssistants": "Build me an assistant that runs on this install, answers from our own documents, and sends them nowhere else.",
+        "dataPipelines": "Build me a pipeline that collects data on a schedule, cleans it, stores it in a table, and tells me when a run fails.",
+        "toolOrchestration": "Build me a workflow that chains several of our tools into one operation, with a step I approve before the last one.",
+        "teamWorkspaces": "Build me a shared workspace for my team: a table we all write to, a page to read it, and a workflow that keeps it up to date.",
+        "marketplacePublishing": "Build me a small application I can publish, with a page to use it and a workflow behind it.",
+        "evaluationSandbox": "Build me a small end-to-end example that shows what this platform can do: a trigger, a few steps, and a page showing the result."
+      },
+      "toolsClause": "I mainly work with {tools}.",
+      "promptSeparator": " "
     }
   },
   "webhookSettings": {
@@ -8880,6 +9236,19 @@
     "manageSharedLinks": "Manage shared links"
   },
   "billing": {
+    "balance": {
+      "title": "Balance",
+      "upgrade": "Upgrade",
+      "total": "Monthly grant",
+      "remaining": "Remaining",
+      "remainingAmount": "{amount} credits remaining",
+      "triggerLabel": "{amount}, {detail}",
+      "creditsAmount": "{amount} credits",
+      "overAllowance": "+{percent}% over your plan",
+      "overAllowanceTiny": "Just over your plan",
+      "usedPercent": "{percent}% of your plan used",
+      "viewUsage": "View usage"
+    },
     "cancel": {
       "title": "Payment Cancelled",
       "subtitle": "Your payment was not processed",
@@ -8950,6 +9319,9 @@
       "title": "Your credits cannot pay for this model",
       "explanation": "Your monthly credits cover running workflow nodes, but not what a model does (chat, agents, generation). That comes out of pay-as-you-go credits, and you have none left.",
       "cta": "See plans or top up"
+    },
+    "planLocked": {
+      "nodeNotice": "This node is available from the {plan} plan. It will fail when the workflow runs until you upgrade."
     }
   },
   "localMcp": {
@@ -9935,6 +10307,16 @@
     "copied": "Copied",
     "anonymousCheckNotice": "The daily update check sends this version and a random install id, so live self-hosted installs can be counted. The record kept contains no IP address, hostname or account. Set CE_VERSIONCHECK_SENDINSTALLID=false to stop sending the id, or CE_VERSIONCHECK_ENABLED=false to disable the check."
   },
+  "changelog": {
+    "whatsNew": "What's new",
+    "dismiss": "Got it",
+    "learnMore": "See all updates",
+    "latest": {
+      "title": "Your agents stop starting from zero",
+      "body": "Agents now keep what they learn: a correction, a preference, a rule of the house. Each fact is carried into every run of every workflow in this workspace, so a scheduled agent applies on Monday what you told it on Friday. Open the Memory tab to read what they have retained, correct it, pin what matters or delete what does not.",
+      "mediaAlt": "The Memory tab listing what the agents in a workspace have retained, with its type, scope and pinned state on each entry"
+    }
+  },
   "optionalComponents": {
     "title": "Optional components",
     "subtitle": "Heavy features that are off by default on self-hosted installs",
@@ -10435,5 +10817,567 @@
     "renameFailed": "The folder could not be renamed.",
     "deleteFailed": "The folder could not be deleted.",
     "moveFailed": "The move could not be completed."
+  },
+  "agenda": {
+    "nav": {
+      "previous": "Previous period",
+      "next": "Next period",
+      "today": "Today"
+    },
+    "view": {
+      "month": "Month",
+      "week": "Week",
+      "day": "Day",
+      "list": "List"
+    },
+    "weekRange": "{from} to {to}",
+    "searchPlaceholder": "Search",
+    "clock": {
+      "tooltip": "Current time in {zone}"
+    },
+    "datePicker": {
+      "open": "Jump to a date",
+      "month": "Month",
+      "year": "Year",
+      "previousMonth": "Previous month",
+      "nextMonth": "Next month",
+      "openWith": "{period}. Jump to a date"
+    },
+    "create": {
+      "title": "New scheduled workflow",
+      "description": "Proposed from the slot you picked: {slot}.",
+      "slotWithTime": "{date} at {time}",
+      "nameLabel": "Name",
+      "namePlaceholder": "Weekly revenue report",
+      "confirm": "Create and open",
+      "createdTitle": "Workflow created",
+      "createdMessage": "\"{name}\" is ready to build.",
+      "notLiveYet": "The schedule is saved with the workflow. It starts firing once you have built it and set it as production.",
+      "slotActionAt": "Schedule something on {date} at {time}",
+      "slotActionOn": "Schedule something on {date}",
+      "monthlyDayGap": "A schedule on day {day} does not run in months that are shorter."
+    },
+    "moreCount": "+{n} more",
+    "showLess": "Show less",
+    "movedBadge": "Moved off its schedule",
+    "resource": {
+      "workflow": "Workflows",
+      "application": "Applications",
+      "agent": "Agents"
+    },
+    "kind": {
+      "schedule": "Schedule",
+      "webhook": "Webhook",
+      "manual": "Manual",
+      "chat": "Chat",
+      "form": "Form",
+      "datasource": "Table",
+      "workflow": "Workflow",
+      "error": "Error"
+    },
+    "status": {
+      "planned": "Scheduled",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "fired": "Triggered",
+      "budgetBlocked": "Will not run: spending cap reached"
+    },
+    "filters": {
+      "resourceTypes": "Resource types",
+      "view": "View",
+      "settings": "Display settings",
+      "timezone": "Time zone",
+      "weekStart": "Week starts on",
+      "monday": "Monday",
+      "sunday": "Sunday",
+      "hourRange": "Hours shown",
+      "showWeekends": "Show weekends",
+      "showPast": "Show past runs",
+      "showPastHint": "Draws what actually ran on past days.",
+      "showPaused": "Show paused schedules",
+      "compact": "Compact rows",
+      "reset": "Reset display settings"
+    },
+    "menu": {
+      "runNow": "Run now",
+      "runNowHint": "The scheduled run still happens.",
+      "move": "Move...",
+      "pause": "Pause schedule",
+      "resume": "Resume schedule",
+      "open": "Open resource",
+      "openRun": "Open this run"
+    },
+    "move": {
+      "title": "Move {name}",
+      "description": "New date: {date}",
+      "timeLabel": "Time",
+      "scopeNext": "This occurrence only",
+      "scopeNextHint": "Later runs return to their usual slot.",
+      "scopeAll": "Every occurrence",
+      "scopeAllHint": "The schedule itself moves to this time.",
+      "scopeAllUnavailable": "Unavailable: {cron} has no single time of day to move.",
+      "pastWarning": "This time has passed, so the run will start at the next check.",
+      "confirm": "Move",
+      "scopeNextUnavailable": "Only the next run can be moved on its own; this one is further ahead."
+    },
+    "common": {
+      "cancel": "Cancel",
+      "working": "Working..."
+    },
+    "truncated": {
+      "schedules": "{n, plural, one {# schedule fires} other {# schedules fire}} too often to draw in full here. Switch to the day view to see them all.",
+      "past": "Some older runs in this range are not shown."
+    },
+    "empty": {
+      "title": "Nothing scheduled here",
+      "description": "Schedules from your workflows, applications and agents show up on this calendar.",
+      "allFilteredTitle": "No resource kind selected",
+      "allFilteredDescription": "Turn a resource kind back on to see what is scheduled.",
+      "searchTitle": "No match",
+      "searchDescription": "No scheduled resource matches your search in this period.",
+      "filteredTitle": "Nothing matches your filters",
+      "filteredDescription": "Your display settings are hiding everything in this period."
+    },
+    "errors": {
+      "loadTitle": "Could not load the agenda",
+      "loadMessage": "Please try again.",
+      "patternNotShiftable": "This schedule has no single time of day, so it cannot be moved as a whole. Move this occurrence only.",
+      "weekdaySetNotMatched": "This schedule runs on fixed weekdays and the chosen date is not one of them. Move this occurrence only.",
+      "dayOfMonthUnsafe": "A monthly schedule cannot land after the 28th, because some months do not have that day.",
+      "notArmed": "This schedule is paused.",
+      "executionRefused": "The run could not be started.",
+      "notFound": "This schedule no longer exists.",
+      "generic": "Something went wrong.",
+      "notTheNextOccurrence": "Only the next run can be moved on its own. Moving a later one would cancel every run before it. Use \"Every occurrence\" instead, or move the next run.",
+      "viewerRole": "Your role in this workspace does not allow changing schedules.",
+      "scheduleRejected": "The schedule could not be changed. It may have been archived."
+    },
+    "toasts": {
+      "movedTitle": "Moved",
+      "movedAll": "Every future run uses the new time.",
+      "movedNext": "The next run moved. The ones after it are unchanged.",
+      "ranTitle": "Started",
+      "ranMessage": "The scheduled run still happens as planned.",
+      "runFailedTitle": "Could not run it",
+      "pausedTitle": "Paused",
+      "pausedMessage": "It will not fire until you resume it.",
+      "resumedTitle": "Resumed",
+      "resumedMessage": "It is armed again.",
+      "toggleFailedTitle": "Could not change the schedule"
+    },
+    "hiddenOnWeekends": "{n, plural, one {# run falls on a weekend, which is hidden.} other {# runs fall on a weekend, which is hidden.}} Show weekends."
+  },
+  "badges": {
+    "title": "Trophies",
+    "subtitle": "Badges unlock on their own as you build, run and share on LiveContext.",
+    "summary": "{unlocked} of {total} unlocked",
+    "recent": "Recently unlocked",
+    "nextUp": "Closest to unlocking",
+    "locked": "Locked",
+    "unlockedOn": "Unlocked {date}",
+    "progress": "{value} / {threshold}",
+    "loadError": "Trophies could not be loaded.",
+    "publicHeading": "Trophies",
+    "publicEmpty": "No trophies yet.",
+    "showAll": "Show all",
+    "showLess": "Show less",
+    "detail": {
+      "requirementLabel": "How to earn it",
+      "remaining": "{count} to go",
+      "ladder": "This family"
+    },
+    "family": {
+      "FOUNDER": "Origin",
+      "TENURE": "Loyalty",
+      "BUILDER": "Builder",
+      "APP_MAKER": "App maker",
+      "SHIPPER": "Shipping",
+      "OPERATOR": "Operations",
+      "RELIABILITY": "Reliability",
+      "CONSISTENCY": "Consistency",
+      "NIGHT_OWL": "Night shift",
+      "PUBLISHER": "Publishing",
+      "SHARER": "Sharing",
+      "POPULARITY": "Reach"
+    },
+    "tier": {
+      "BRONZE": "Bronze",
+      "SILVER": "Silver",
+      "GOLD": "Gold",
+      "PLATINUM": "Platinum",
+      "DIAMOND": "Diamond"
+    },
+    "requirement": {
+      "MEMBER_DAYS": "Be a member for {count} days",
+      "WORKFLOWS_CREATED": "Create {count} workflows",
+      "APPLICATIONS_CREATED": "Create {count} applications",
+      "RUNS_LAUNCHED": "Launch {count} executions",
+      "RUNS_COMPLETED": "Finish {count} runs successfully",
+      "ACTIVE_DAYS": "Run something on {count} different days",
+      "NIGHT_LAUNCHES": "Launch {count} executions between midnight and 5am UTC",
+      "WORKFLOWS_PINNED": "Pin {count} workflows to production",
+      "PUBLICATIONS_PUBLISHED": "Publish {count} items to the marketplace",
+      "PUBLICATIONS_PUBLIC": "Make {count} publications public",
+      "PUBLICATION_USES": "Have your publications installed {count} times",
+      "DAYS_UNTIL_JOIN_CUTOFF": "Join LiveContext early"
+    },
+    "item": {
+      "founder_2026": {
+        "name": "Founding Member",
+        "requirement": "Sign up before the end of 2026"
+      },
+      "tenure_30": {
+        "name": "First Month"
+      },
+      "tenure_100": {
+        "name": "Hundred Days"
+      },
+      "tenure_730": {
+        "name": "Two Years In"
+      },
+      "tenure_1095": {
+        "name": "Three Years In"
+      },
+      "tenure_1825": {
+        "name": "Five Years In"
+      },
+      "builder_1": {
+        "name": "First Build"
+      },
+      "builder_5": {
+        "name": "Tinkerer"
+      },
+      "builder_10": {
+        "name": "Workflow Smith"
+      },
+      "builder_50": {
+        "name": "Automation Architect"
+      },
+      "builder_100": {
+        "name": "Master Builder"
+      },
+      "builder_300": {
+        "name": "Workflow Legend"
+      },
+      "appmaker_1": {
+        "name": "App Crafter"
+      },
+      "appmaker_3": {
+        "name": "App Studio"
+      },
+      "appmaker_25": {
+        "name": "App Factory"
+      },
+      "appmaker_60": {
+        "name": "App Empire"
+      },
+      "shipper_1": {
+        "name": "Shipped It"
+      },
+      "shipper_5": {
+        "name": "In Production"
+      },
+      "shipper_50": {
+        "name": "Production Line"
+      },
+      "operator_1": {
+        "name": "First Launch"
+      },
+      "operator_10": {
+        "name": "Warming Up"
+      },
+      "operator_100": {
+        "name": "Operator"
+      },
+      "operator_5000": {
+        "name": "Flight Controller"
+      },
+      "operator_50000": {
+        "name": "Mission Control"
+      },
+      "operator_1000000": {
+        "name": "Orbital Command"
+      },
+      "reliability_25": {
+        "name": "Green Light"
+      },
+      "reliability_250": {
+        "name": "Steady Hand"
+      },
+      "reliability_10000": {
+        "name": "Clockwork"
+      },
+      "reliability_50000": {
+        "name": "Flawless Engine"
+      },
+      "consistency_3": {
+        "name": "Getting Into It"
+      },
+      "consistency_10": {
+        "name": "Regular"
+      },
+      "consistency_90": {
+        "name": "Committed"
+      },
+      "consistency_250": {
+        "name": "Relentless"
+      },
+      "consistency_750": {
+        "name": "Ever Present"
+      },
+      "nightowl_1": {
+        "name": "Night Shift"
+      },
+      "nightowl_25": {
+        "name": "Night Owl"
+      },
+      "nightowl_500": {
+        "name": "Nocturnal Engine"
+      },
+      "publisher_1": {
+        "name": "First Publish"
+      },
+      "publisher_3": {
+        "name": "Publisher"
+      },
+      "publisher_25": {
+        "name": "Prolific Publisher"
+      },
+      "publisher_60": {
+        "name": "Publishing House"
+      },
+      "sharer_1": {
+        "name": "Shared With The World"
+      },
+      "sharer_5": {
+        "name": "Open Handed"
+      },
+      "sharer_40": {
+        "name": "Community Pillar"
+      },
+      "popularity_1": {
+        "name": "First Install"
+      },
+      "popularity_10": {
+        "name": "Word Of Mouth"
+      },
+      "popularity_500": {
+        "name": "Crowd Favourite"
+      },
+      "popularity_5000": {
+        "name": "Viral"
+      },
+      "popularity_50000": {
+        "name": "Household Name"
+      }
+    }
+  },
+  "generation": {
+    "formats": {
+      "image": "Image",
+      "video": "Video",
+      "audio": "Sound",
+      "voice": "Speech",
+      "music": "Music"
+    },
+    "params": {
+      "negative_prompt": "What to avoid",
+      "voice": "Voice",
+      "language": "Language",
+      "style": "Style",
+      "aspect_ratio": "Aspect ratio",
+      "resolution": "Resolution",
+      "quality": "Quality",
+      "duration_seconds": "Duration (seconds)",
+      "n": "How many",
+      "seed": "Seed",
+      "input_image": "Reference image",
+      "input_audio": "Reference audio",
+      "input_video": "Reference video"
+    },
+    "price": {
+      "perUnit": "{rate} credits per {unit}",
+      "plusBase": "plus {base} to start",
+      "flat": "{credits} credits",
+      "min": "minimum {credits}",
+      "max": "capped at {credits}",
+      "total": "{credits} credits for this request",
+      "unpriced": "Not sold on the platform key"
+    },
+    "fields": {
+      "providerPlaceholder": "Choose a provider",
+      "optionsLoading": "Loading values...",
+      "optionsTruncated": "Showing the first values of {count}. Type a value if the one you want is not listed.",
+      "optionsEmpty": "The provider returned no values for this field. Type one if you know it."
+    },
+    "modelCount": "{count} models",
+    "empty": "No generation model is available yet.",
+    "billedOn": "Billed on {quantity} {unit}",
+    "assetRoles": {
+      "source": "Source image",
+      "first_frame": "First frame",
+      "reference": "Reference image",
+      "mask": "Mask"
+    }
+  },
+  "studio": {
+    "composer": {
+      "placeholder": "Describe what to create with {model}",
+      "placeholderNoModel": "Choose a model to start creating",
+      "send": "Create",
+      "missingRequired": "Fill in the highlighted settings first",
+      "addFile": "Add a file",
+      "allSlotsFull": "This model takes no more files",
+      "uploading": "Uploading",
+      "uploadFailed": "Upload failed",
+      "retryUpload": "Try this file again",
+      "removeFile": "Remove this file",
+      "parameters": "Parameters"
+    },
+    "modelPicker": {
+      "change": "Change model",
+      "none": "Choose a model",
+      "empty": "No generation model is available yet.",
+      "back": "Back",
+      "stepKind": "What to make",
+      "stepProvider": "Provider"
+    },
+    "params": {
+      "required": "{label} is required",
+      "loadingOptions": "Asking the provider",
+      "optionsUnavailable": "The available values could not be read. You can still type one.",
+      "optionsTruncated": "Showing a sample. You can type a value that is not listed.",
+      "freeTextPlaceholder": "Type a value",
+      "clear": "Clear"
+    },
+    "untitled": "Untitled creation",
+    "thread": {
+      "loading": "Loading this studio thread"
+    },
+    "welcome": {
+      "title1": "Make something great",
+      "title2": "What are we making today?",
+      "title3": "Describe it, and it gets made.",
+      "title4": "A clip, an image, a voice. Your call.",
+      "title5": "What do you want to see?"
+    },
+    "turn": {
+      "noPrompt": "No prompt, this turn ran on its files and settings.",
+      "running": "Creating. Video can take a few minutes.",
+      "noAnswer": "No answer came back for this one. It may still have finished and been charged, so check your files before running it again.",
+      "failed": "This did not produce anything.",
+      "savedNoPreview": "It finished, but nothing came back that this page can show. If an asset was produced, it is in your files.",
+      "reuse": "Reuse",
+      "openInFiles": "See it in Files",
+      "chargedNoAsset": "This generation ran and was charged for, but the file could not be saved. Use the link below to keep it: it expires in a few minutes.",
+      "recoverAsset": "Save the asset from the provider"
+    },
+    "notices": {
+      "conversation_create_failed": "This studio thread could not be started, so nothing was sent and nothing was charged.",
+      "conversation_unreadable": "This conversation could not be read, so nothing can be created into it. Reload the page, or start a new studio.",
+      "connection_lost": "The connection dropped while this was running. It may still be finishing, and it may still be charged, so check your files before sending it again.",
+      "refused": "This was refused before it ran, so nothing was charged. Your prompt and files are still here.",
+      "unexpected": "Something went wrong on the way.",
+      "catalogue_empty": "No generation model is available yet. An administrator can add one.",
+      "dismiss": "Dismiss"
+    },
+    "modeSwitch": {
+      "label": "What to do here",
+      "chat": "Chat",
+      "studio": "Studio"
+    },
+    "apps": {
+      "title": "Studio apps",
+      "favorites": "My studio apps"
+    },
+    "payer": {
+      "change": "Who pays for this",
+      "platform": "Platform key",
+      "ownKey": "My key"
+    }
+  },
+  "budget": {
+    "advancedSection": "Advanced",
+    "amountWithUnit": "{amount} {unit}",
+    "capHelp": "Leave empty for no cap. It counts agent spend, on every run except a test fire from the builder. Paid integrations and generation are billed separately and do not count against it.",
+    "capHelpCredits": "Maximum credits this workflow can spend. When reached, no new run starts.",
+    "capHelpDollars": "Maximum spend for this workflow. When reached, no new run starts.",
+    "capLabel": "Cost budget",
+    "capPlaceholder": "No limit",
+    "chipTitleCapped": "Agent spend {period}: {values} ({unit}), against the cap",
+    "chipTitleUncapped": "Agent spend {period}: {values}. No cap set.",
+    "periodCumulative": "Never (lifetime)",
+    "periodLabel": "Resets",
+    "periodMonth": "this month",
+    "periodMonthly": "Every month",
+    "periodTotal": "total",
+    "periodWeek": "this week",
+    "periodWeekly": "Every week",
+    "popoverCap": "Cap",
+    "popoverNeverResets": "This cap never resets, so the allowance does not start again on its own.",
+    "popoverNoCap": "None set",
+    "popoverResetsOn": "The allowance starts again on {date}.",
+    "popoverScope": "Counts agent spend in {unit}. Paid integrations and generation are billed separately.",
+    "popoverSpent": "Spent",
+    "popoverStopped": "The cap is reached: no new run starts until the allowance starts again.",
+    "popoverStoppedForGood": "The cap is reached: no new run starts until you raise it or change how it resets.",
+    "popoverTitle": "Agent spend",
+    "runCostTitle": "Cost of this run, across every epoch",
+    "unitCredits": "credits",
+    "unitDollars": "dollars"
+  },
+  "memory": {
+    "explainer": "What the agents in this workspace have learned. Each summary below is carried in every agent's context; the detail behind it is read only when an agent needs it. Memory belongs to this workspace: switch workspace and you see that one's memory instead.",
+    "searchPlaceholder": "Search memory...",
+    "createButton": "New memory",
+    "filterAll": "All",
+    "emptyTitle": "No memories yet",
+    "emptySubtitle": "Agents save durable facts here as they work, and you can add or correct one at any time.",
+    "noMatches": "No memory matches",
+    "noMatchesSubtitle": "Try another word, or clear the filters.",
+    "createTitle": "New memory",
+    "editTitle": "Edit memory",
+    "fieldTitle": "Title",
+    "fieldTitlePlaceholder": "Release cadence",
+    "fieldSummary": "Summary",
+    "fieldSummaryPlaceholder": "The team ships on Thursdays and freezes Wednesday afternoon.",
+    "fieldSummaryHint": "This single line is added to every agent's context in this workspace, on every run. State the fact rather than pointing at it. {count}/{max}",
+    "fieldContent": "Details",
+    "fieldContentPlaceholder": "Exceptions, reasoning, anything an agent should read once it decides this entry is relevant.",
+    "fieldContentHint": "Not added to context. An agent opens it on demand when the summary looks relevant.",
+    "fieldType": "Type",
+    "fieldPinned": "Always in context",
+    "fieldPinnedHint": "Pinning adds the full details to every run for every agent here, so keep it for rules that must never be missed.",
+    "pinnedBadge": "Pinned",
+    "pinAction": "Always keep in context",
+    "unpinAction": "Stop keeping in context",
+    "editAction": "Edit",
+    "deleteAction": "Delete",
+    "scopeWorkspace": "Workspace",
+    "scopeAgent": "One agent",
+    "sourceUser": "Added by a person",
+    "sourceAgent": "Saved by an agent",
+    "metaLine": "{slug} · recalled {recalls} times · updated {updated}",
+    "save": "Save",
+    "saving": "Saving...",
+    "cancel": "Cancel",
+    "close": "Close",
+    "toastCreated": "Memory saved.",
+    "toastUpdated": "Memory updated.",
+    "toastDeleted": "Memory deleted.",
+    "type": {
+      "user": "About the user",
+      "feedback": "Feedback",
+      "project": "Project",
+      "reference": "Reference"
+    },
+    "deleteConfirm": "Delete the memory \"{title}\"? This cannot be undone. To make the agents stop using it while keeping it, deactivate it instead.",
+    "deleteTitle": "Delete this memory?",
+    "inactiveBadge": "Inactive",
+    "activateAction": "Reactivate",
+    "deactivateAction": "Deactivate",
+    "loadFailedTitle": "Could not load memory",
+    "loadFailedSubtitle": "The list did not load, so this is not necessarily empty. Try again."
   }
 }

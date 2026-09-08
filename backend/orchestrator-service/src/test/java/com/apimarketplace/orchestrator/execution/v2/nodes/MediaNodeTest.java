@@ -90,6 +90,69 @@ class MediaNodeTest {
         return new FileResult(FileRef.of("tenant-1/wf/run/core:media_test/out.mp4", "out.mp4", "video/mp4", 42), 20.5);
     }
 
+    // ==================== File-shaped input without a path ====================
+
+    @Nested
+    @DisplayName("a file-shaped input with no storage path")
+    class FileShapedWithoutPath {
+
+        /**
+         * A table media cell naming a file this workspace knows only by id is a correct mapping of a
+         * real value. Judging it by its path alone made the node answer "map the WHOLE FileRef
+         * output", sending the author to re-map an expression that was already right. The failure
+         * has to name the one thing that is missing.
+         */
+        @Test
+        @DisplayName("FAILS naming the missing storage path, not the mapping")
+        void pathlessFileRefNamesTheMissingPath() {
+            Map<String, Object> pathless = new HashMap<>();
+            pathless.put("_type", "file");
+            pathless.put("id", "c7963596-ab99-46af-9cb5-fccb64461702");
+            pathless.put("name", "clip.mp4");
+
+            NodeExecutionResult result = node(Map.of("operation", "probe", "input", pathless))
+                .execute(context);
+
+            assertFalse(result.isSuccess());
+            String message = result.errorMessage().orElse("");
+            assertTrue(message.contains("no storage path"),
+                "failure must name the missing path, got: " + message);
+            assertFalse(message.contains("WHOLE FileRef"),
+                "a correct mapping must not be blamed, got: " + message);
+        }
+
+        @Test
+        @DisplayName("a BLANK path is not a path either, and fails the same way")
+        void blankPathIsNotAPath() {
+            Map<String, Object> blank = new HashMap<>();
+            blank.put("_type", "file");
+            blank.put("path", "   ");
+            blank.put("name", "clip.mp4");
+
+            NodeExecutionResult result = node(Map.of("operation", "probe", "input", blank))
+                .execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("").contains("no storage path"),
+                "failure must name the missing path, got: " + result.errorMessage());
+        }
+
+        @Test
+        @DisplayName("an ordinary object that is not file-shaped still reports a mapping error")
+        void nonFileShapedStillBlamesTheMapping() {
+            Map<String, Object> repo = new HashMap<>();
+            repo.put("name", "livecontext");
+            repo.put("url", "https://api.github.com/repos/x/livecontext");
+
+            NodeExecutionResult result = node(Map.of("operation", "probe", "input", repo))
+                .execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("").contains("WHOLE FileRef"),
+                "a genuinely wrong mapping must still say so, got: " + result.errorMessage());
+        }
+    }
+
     // ==================== Renderer availability ====================
 
     @Nested
@@ -128,7 +191,7 @@ class MediaNodeTest {
     class OperationValidation {
 
         @Test
-        @DisplayName("missing operation -> failure listing the four accepted values")
+        @DisplayName("missing operation -> failure listing the accepted values")
         void missingOperationFails() {
             NodeExecutionResult result = node(Map.of()).execute(context);
 
@@ -1304,6 +1367,519 @@ class MediaNodeTest {
             assertEquals(2d, optionsCaptor.getValue().get("start_seconds"));
             assertEquals(8d, optionsCaptor.getValue().get("end_seconds"));
             assertEquals(0.5d, optionsCaptor.getValue().get("opacity"));
+        }
+    }
+
+    // ==================== subtitles ====================
+
+    @Nested
+    @DisplayName("subtitles")
+    class Subtitles {
+
+        private Map<String, Object> cue(double start, double end, String text) {
+            Map<String, Object> cue = new LinkedHashMap<>();
+            cue.put("start_seconds", start);
+            cue.put("end_seconds", end);
+            cue.put("text", text);
+            return cue;
+        }
+
+        private Map<String, Object> params(Object... extra) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("operation", "subtitles");
+            params.put("video", fileRef(VIDEO_KEY));
+            params.put("cues", List.of(cue(0, 2.4, "It starts here")));
+            for (int i = 0; i < extra.length; i += 2) {
+                params.put((String) extra[i], extra[i + 1]);
+            }
+            return params;
+        }
+
+        private void stubRender() {
+            when(mediaRenderService.render(anyString(), any(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), anyString(), anyMap(), anyList()))
+                .thenReturn(stubFileResult());
+        }
+
+        @Test
+        @DisplayName("missing video -> failure naming the param an agent must map")
+        void missingVideoFails() {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("operation", "subtitles");
+            params.put("cues", List.of(cue(0, 2.4, "It starts here")));
+
+            NodeExecutionResult result = node(params).execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("").contains("video is required"),
+                "got: " + result.errorMessage().orElse(""));
+        }
+
+        @Test
+        @DisplayName("missing cues -> failure showing the {start_seconds, end_seconds, text} shape")
+        void missingCuesFails() {
+            NodeExecutionResult result = node(Map.of(
+                "operation", "subtitles", "video", fileRef(VIDEO_KEY))).execute(context);
+
+            assertFalse(result.isSuccess());
+            String message = result.errorMessage().orElse("");
+            assertTrue(message.contains("cues is required"), "got: " + message);
+            assertTrue(message.contains("start_seconds") && message.contains("end_seconds")
+                && message.contains("text"), "the error must show the cue shape, got: " + message);
+        }
+
+        @Test
+        @DisplayName("empty cues array -> same 'required' failure as no cues at all")
+        void emptyCuesFails() {
+            NodeExecutionResult result = node(Map.of(
+                "operation", "subtitles", "video", fileRef(VIDEO_KEY), "cues", List.of()))
+                .execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("").contains("cues is required"));
+        }
+
+        @Test
+        @DisplayName("more than 600 cues -> failure naming the cap and what to do instead")
+        void tooManyCuesFails() {
+            List<Map<String, Object>> cues = new java.util.ArrayList<>();
+            for (int i = 0; i < 601; i++) {
+                cues.add(cue(i, i + 0.5, "line " + i));
+            }
+
+            NodeExecutionResult result = node(params("cues", cues)).execute(context);
+
+            assertFalse(result.isSuccess());
+            String message = result.errorMessage().orElse("");
+            assertTrue(message.contains("at most 600"), "got: " + message);
+            assertTrue(message.contains("601"), "the error must report the count given, got: " + message);
+        }
+
+        @Test
+        @DisplayName("exactly 600 cues is accepted (the cap is inclusive)")
+        void sixHundredCuesAccepted() {
+            stubRender();
+            List<Map<String, Object>> cues = new java.util.ArrayList<>();
+            for (int i = 0; i < 600; i++) {
+                cues.add(cue(i, i + 0.5, "line " + i));
+            }
+
+            NodeExecutionResult result = node(params("cues", cues)).execute(context);
+
+            assertTrue(result.isSuccess(), "expected success, got: " + result.errorMessage());
+        }
+
+        @Test
+        @DisplayName("a cue that is not an object -> failure naming its index")
+        void nonObjectCueFails() {
+            NodeExecutionResult result = node(params("cues", List.of("0 -> 2.4 It starts here")))
+                .execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("").contains("cues[0] must be an object"),
+                "got: " + result.errorMessage().orElse(""));
+        }
+
+        @Test
+        @DisplayName("a cue missing end_seconds -> failure explaining both timings are needed")
+        void cueMissingEndFails() {
+            Map<String, Object> incomplete = new LinkedHashMap<>();
+            incomplete.put("start_seconds", 0);
+            incomplete.put("text", "It starts here");
+
+            NodeExecutionResult result = node(params("cues", List.of(incomplete))).execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("")
+                .contains("cues[0] needs both start_seconds and end_seconds"),
+                "got: " + result.errorMessage().orElse(""));
+        }
+
+        @Test
+        @DisplayName("a negative start_seconds -> failure naming the cue and the bound")
+        void negativeStartFails() {
+            NodeExecutionResult result = node(params("cues", List.of(cue(-1, 2, "Too early"))))
+                .execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("")
+                .contains("cues[0].start_seconds must be a number >= 0"),
+                "got: " + result.errorMessage().orElse(""));
+        }
+
+        @Test
+        @DisplayName("end_seconds not after start_seconds -> failure showing both values")
+        void zeroLengthCueFails() {
+            NodeExecutionResult result = node(params("cues", List.of(cue(2, 2, "Never visible"))))
+                .execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("")
+                .contains("cues[0].end_seconds must be greater than start_seconds"),
+                "got: " + result.errorMessage().orElse(""));
+        }
+
+        @Test
+        @DisplayName("blank text -> failure saying what the text is for")
+        void blankTextFails() {
+            NodeExecutionResult result = node(params("cues", List.of(cue(0, 2, "   "))))
+                .execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("").contains("cues[0].text is required"),
+                "got: " + result.errorMessage().orElse(""));
+        }
+
+        @Test
+        @DisplayName("text past 240 characters -> failure naming the cap and the length given")
+        void overlongTextFails() {
+            NodeExecutionResult result = node(params("cues", List.of(cue(0, 2, "x".repeat(241)))))
+                .execute(context);
+
+            assertFalse(result.isSuccess());
+            String message = result.errorMessage().orElse("");
+            assertTrue(message.contains("longer than 240 characters"), "got: " + message);
+            assertTrue(message.contains("241"), "the error must report the length given, got: " + message);
+        }
+
+        @Test
+        @DisplayName("the length cap is measured on the TRIMMED text, which is what actually gets sent")
+        void lengthMeasuredOnTrimmedText() {
+            stubRender();
+            // 236 real characters padded to 241 with spaces: the cap must judge the line,
+            // not the padding, or the caller sees a rejection with no visible cause.
+            String padded = "  " + "x".repeat(236) + "   ";
+            assertEquals(241, padded.length());
+
+            NodeExecutionResult result = node(params("cues", List.of(cue(0, 2, padded)))).execute(context);
+
+            assertTrue(result.isSuccess(), "expected success, got: " + result.errorMessage());
+            verify(mediaRenderService).render(anyString(), any(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), eq("subtitles"), optionsCaptor.capture(), anyList());
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> cues = (List<Map<String, Object>>) optionsCaptor.getValue().get("cues");
+            assertEquals(236, ((String) cues.get(0).get("text")).length());
+        }
+
+        @Test
+        @DisplayName("a track past the TOTAL character limit is refused, even with every line inside the per-line cap")
+        void totalTrackLengthCapped() {
+            // 600 lines of 240 characters each is legal per line and far past what the
+            // renderer can receive: past its request cap the document is TRUNCATED in
+            // transit, and the caller is told their JSON is malformed. Refuse here, in
+            // terms of the caption track the caller actually wrote.
+            List<Map<String, Object>> cues = new java.util.ArrayList<>();
+            for (int i = 0; i < 600; i++) {
+                cues.add(cue(i, i + 0.5, "x".repeat(240)));
+            }
+
+            NodeExecutionResult result = node(params("cues", cues)).execute(context);
+
+            assertFalse(result.isSuccess());
+            String message = result.errorMessage().orElse("");
+            assertTrue(message.contains("longer than 40000 characters in total"), "got: " + message);
+            verify(mediaRenderService, never()).render(anyString(), any(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), anyString(), anyMap(), anyList());
+        }
+
+        @Test
+        @DisplayName("a long but reasonable track is accepted: the total cap does not bite a real script")
+        void realisticTrackAccepted() {
+            stubRender();
+            // 400 lines of ~60 characters is a dense 20-minute narration and must pass.
+            List<Map<String, Object>> cues = new java.util.ArrayList<>();
+            for (int i = 0; i < 400; i++) {
+                cues.add(cue(i * 3, i * 3 + 2.5, "a caption line of about sixty characters, like a real one"));
+            }
+
+            NodeExecutionResult result = node(params("cues", cues)).execute(context);
+
+            assertTrue(result.isSuccess(), "expected success, got: " + result.errorMessage());
+        }
+
+        @Test
+        @DisplayName("overlapping cues are REFUSED, not reordered - an overlap is always a timing bug")
+        void overlappingCuesFail() {
+            NodeExecutionResult result = node(params("cues", List.of(
+                cue(0, 3, "First line"), cue(2, 5, "Second line")))).execute(context);
+
+            assertFalse(result.isSuccess());
+            String message = result.errorMessage().orElse("");
+            assertTrue(message.contains("cues[1].start_seconds (2.0) overlaps the previous cue"),
+                "got: " + message);
+            assertTrue(message.contains("ascending, non-overlapping"), "got: " + message);
+            verify(mediaRenderService, never()).render(anyString(), any(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), anyString(), anyMap(), anyList());
+        }
+
+        @Test
+        @DisplayName("cues that merely touch (end == next start) are accepted - only real overlap is a bug")
+        void touchingCuesAccepted() {
+            stubRender();
+
+            NodeExecutionResult result = node(params("cues", List.of(
+                cue(0, 2.4, "First line"), cue(2.4, 5, "Second line")))).execute(context);
+
+            assertTrue(result.isSuccess(), "expected success, got: " + result.errorMessage());
+        }
+
+        @Test
+        @DisplayName("one bad cue does not cascade: the second error names cue 2, not cue 1 again")
+        void oneBadCueDoesNotCascade() {
+            NodeExecutionResult result = node(params("cues", List.of(
+                cue(0, 3, "First"), cue(2, 5, "Overlaps"), cue(6, 8, "Fine")))).execute(context);
+
+            assertFalse(result.isSuccess());
+            String message = result.errorMessage().orElse("");
+            assertTrue(message.contains("cues[1]"), "got: " + message);
+            assertFalse(message.contains("cues[2]"),
+                "the cue AFTER the overlap is well ordered and must not be reported, got: " + message);
+        }
+
+        @Test
+        @DisplayName("cues MAPPED as a template that resolves to nothing -> 'resolved to no caption track', not 'required'")
+        void mappedCuesResolvingEmptyReportsUpstreamProblem() {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("operation", "subtitles");
+            params.put("video", fileRef(VIDEO_KEY));
+            params.put("cues", "{{core:build_cues.output.result.cues}}");
+            when(templateAdapter.resolveTemplates(anyMap(), any())).thenAnswer(inv -> {
+                Map<String, Object> resolved = new LinkedHashMap<>((Map<String, Object>) inv.getArgument(0));
+                resolved.put("cues", List.of());
+                return resolved;
+            });
+
+            NodeExecutionResult result = node(params).execute(context);
+
+            assertFalse(result.isSuccess());
+            String message = result.errorMessage().orElse("");
+            assertTrue(message.contains("{{core:build_cues.output.result.cues}}"), "got: " + message);
+            assertTrue(message.contains("resolved to no caption track"), "got: " + message);
+            assertFalse(message.contains("cues is required"),
+                "a mapped param must NOT be reported as missing, got: " + message);
+        }
+
+        @Test
+        @DisplayName("a caption track COMPUTED upstream runs: a template resolving to a real array is accepted")
+        void templatedCuesResolvingToArrayAccepted() {
+            stubRender();
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("operation", "subtitles");
+            params.put("video", fileRef(VIDEO_KEY));
+            params.put("cues", "{{core:build_cues.output.result.cues}}");
+            when(templateAdapter.resolveTemplates(anyMap(), any())).thenAnswer(inv -> {
+                Map<String, Object> resolved = new LinkedHashMap<>((Map<String, Object>) inv.getArgument(0));
+                resolved.put("cues", List.of(cue(0, 2.4, "Computed upstream")));
+                return resolved;
+            });
+
+            NodeExecutionResult result = node(params).execute(context);
+
+            assertTrue(result.isSuccess(), "expected success, got: " + result.errorMessage());
+            verify(mediaRenderService).render(anyString(), any(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), eq("subtitles"), optionsCaptor.capture(), anyList());
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> cues = (List<Map<String, Object>>) optionsCaptor.getValue().get("cues");
+            assertEquals("Computed upstream", cues.get(0).get("text"));
+        }
+
+        @Test
+        @DisplayName("a cue whose end precedes its start does not make the NEXT cue look out of order too")
+        void invalidCueDoesNotPoisonTheOrderingCheck() {
+            NodeExecutionResult result = node(params("cues", List.of(
+                cue(10, 4, "End before start"), cue(11, 13, "Perfectly fine")))).execute(context);
+
+            assertFalse(result.isSuccess());
+            String message = result.errorMessage().orElse("");
+            assertTrue(message.contains("cues[0].end_seconds"), "got: " + message);
+            assertFalse(message.contains("cues[1]"),
+                "the next cue is well ordered against the last VALID end and must not be reported, got: " + message);
+        }
+
+        @Test
+        @DisplayName("unknown style -> failure listing the two presets")
+        void unknownStyleFails() {
+            NodeExecutionResult result = node(params("style", "karaoke")).execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("").contains("style must be one of: tiktok, classic"),
+                "got: " + result.errorMessage().orElse(""));
+        }
+
+        @Test
+        @DisplayName("font_family with characters a family name cannot contain -> failure, never a silent drop")
+        void invalidFontFamilyFails() {
+            NodeExecutionResult result = node(params("font_family", "Impact; rm -rf /")).execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("").contains("font_family must be a font family name"),
+                "got: " + result.errorMessage().orElse(""));
+        }
+
+        @Test
+        @DisplayName("a colour that is not a 6-digit hex -> failure naming the expected form")
+        void invalidColourFails() {
+            NodeExecutionResult result = node(params("text_color", "yellow")).execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("").contains("text_color must be a hex colour"),
+                "got: " + result.errorMessage().orElse(""));
+        }
+
+        @Test
+        @DisplayName("font_size_percent outside 1-20 -> failure naming the bound and that it is of the HEIGHT")
+        void fontSizeOutOfBoundsFails() {
+            NodeExecutionResult result = node(params("font_size_percent", 30)).execute(context);
+
+            assertFalse(result.isSuccess());
+            String message = result.errorMessage().orElse("");
+            assertTrue(message.contains("font_size_percent must be a number between 1 and 20"), "got: " + message);
+            assertTrue(message.contains("HEIGHT"), "got: " + message);
+        }
+
+        @Test
+        @DisplayName("position_percent outside 0-100 -> failure naming the bound")
+        void positionPercentOutOfBoundsFails() {
+            NodeExecutionResult result = node(params("position_percent", 140)).execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("")
+                .contains("position_percent must be a number between 0 and 100"),
+                "got: " + result.errorMessage().orElse(""));
+        }
+
+        @Test
+        @DisplayName("happy path defaults -> style tiktok, ONE video input, and no look option invented here")
+        void happyPathSendsContractDefaults() {
+            stubRender();
+
+            NodeExecutionResult result = node(params()).execute(context);
+
+            assertTrue(result.isSuccess(), "expected success, got: " + result.errorMessage());
+            assertNotNull(result.output().get("file"));
+            assertEquals(20.5, result.output().get("duration_seconds"));
+            assertFalse(result.output().containsKey("timestamp_seconds"),
+                "timestamp_seconds is a frame-only output and must be absent for subtitles");
+
+            verify(mediaRenderService).render(anyString(), any(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), eq("subtitles"), optionsCaptor.capture(), inputsCaptor.capture());
+            Map<String, Object> options = optionsCaptor.getValue();
+            assertEquals("tiktok", options.get("style"));
+            // The preset owns the look. A default duplicated in this layer would drift
+            // from the one that actually renders, so nothing is sent unless asked for.
+            assertFalse(options.containsKey("font_family"), "no font unless the caller chose one");
+            assertFalse(options.containsKey("font_size_percent"), "size comes from the preset");
+            assertFalse(options.containsKey("position_percent"), "position comes from the preset");
+            assertFalse(options.containsKey("text_color"), "colour comes from the preset");
+            assertFalse(options.containsKey("outline_color"), "colour comes from the preset");
+
+            List<MediaInput> inputs = inputsCaptor.getValue();
+            assertEquals(1, inputs.size(), "subtitles takes the video and nothing else");
+            assertEquals("input0", inputs.get(0).name());
+            assertEquals("video", inputs.get(0).role());
+            assertEquals(VIDEO_KEY, inputs.get(0).fileRef().get("path"));
+        }
+
+        @Test
+        @DisplayName("cues are forwarded normalised: numbers as numbers, text trimmed, order preserved")
+        void cuesForwardedNormalised() {
+            stubRender();
+
+            NodeExecutionResult result = node(params("cues", List.of(
+                cue(0, 2.4, "  First line  "), cue(3, 5, "Second line")))).execute(context);
+
+            assertTrue(result.isSuccess(), "expected success, got: " + result.errorMessage());
+            verify(mediaRenderService).render(anyString(), any(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), eq("subtitles"), optionsCaptor.capture(), anyList());
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> cues = (List<Map<String, Object>>) optionsCaptor.getValue().get("cues");
+            assertEquals(2, cues.size());
+            assertEquals(0d, cues.get(0).get("start_seconds"));
+            assertEquals(2.4d, cues.get(0).get("end_seconds"));
+            assertEquals("First line", cues.get(0).get("text"));
+            assertEquals("Second line", cues.get(1).get("text"));
+        }
+
+        @Test
+        @DisplayName("numeric strings in a cue are accepted (a template resolves to text)")
+        void numericStringsInCueAccepted() {
+            stubRender();
+            Map<String, Object> stringCue = new LinkedHashMap<>();
+            stringCue.put("start_seconds", "0");
+            stringCue.put("end_seconds", "2.4");
+            stringCue.put("text", "It starts here");
+
+            NodeExecutionResult result = node(params("cues", List.of(stringCue))).execute(context);
+
+            assertTrue(result.isSuccess(), "expected success, got: " + result.errorMessage());
+            verify(mediaRenderService).render(anyString(), any(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), eq("subtitles"), optionsCaptor.capture(), anyList());
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> cues = (List<Map<String, Object>>) optionsCaptor.getValue().get("cues");
+            assertEquals(2.4d, cues.get(0).get("end_seconds"));
+        }
+
+        @Test
+        @DisplayName("every look override is forwarded when given, colours kept verbatim")
+        void lookOverridesForwarded() {
+            stubRender();
+
+            NodeExecutionResult result = node(params(
+                "style", "classic", "font_family", "DejaVu Sans", "font_size_percent", 3.4,
+                "position_percent", 89, "text_color", "#FFEE00", "outline_color", "#101010"))
+                .execute(context);
+
+            assertTrue(result.isSuccess(), "expected success, got: " + result.errorMessage());
+            verify(mediaRenderService).render(anyString(), any(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), eq("subtitles"), optionsCaptor.capture(), anyList());
+            Map<String, Object> options = optionsCaptor.getValue();
+            assertEquals("classic", options.get("style"));
+            assertEquals("DejaVu Sans", options.get("font_family"));
+            assertEquals(3.4d, options.get("font_size_percent"));
+            assertEquals(89d, options.get("position_percent"));
+            assertEquals("#FFEE00", options.get("text_color"));
+            assertEquals("#101010", options.get("outline_color"));
+        }
+
+        @Test
+        @DisplayName("the run's echoed params report a cue COUNT, never the whole caption track")
+        void resolvedParamsSummariseCues() {
+            stubRender();
+
+            NodeExecutionResult result = node(params("cues", List.of(
+                cue(0, 2.4, "First line"), cue(3, 5, "Second line")))).execute(context);
+
+            assertTrue(result.isSuccess(), "expected success, got: " + result.errorMessage());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resolved = (Map<String, Object>) result.output().get("resolved_params");
+            assertEquals(2, resolved.get("cue_count"));
+            assertFalse(resolved.containsKey("cues"),
+                "echoing hundreds of cues back into the run output would bloat it for no reader");
+            assertEquals("tiktok", resolved.get("style"), "the other options are still echoed verbatim");
+        }
+
+        @Test
+        @DisplayName("video MAPPED as a template that resolves to null -> 'resolved to nothing', not 'required'")
+        void mappedVideoResolvingNullReportsUpstreamProblem() {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("operation", "subtitles");
+            params.put("video", "{{core:compile_reel.output.file}}");
+            params.put("cues", List.of(cue(0, 2.4, "It starts here")));
+            when(templateAdapter.resolveTemplates(anyMap(), any())).thenAnswer(inv -> {
+                Map<String, Object> resolved = new LinkedHashMap<>((Map<String, Object>) inv.getArgument(0));
+                resolved.put("video", "");
+                return resolved;
+            });
+
+            NodeExecutionResult result = node(params).execute(context);
+
+            assertFalse(result.isSuccess());
+            String message = result.errorMessage().orElse("");
+            assertTrue(message.contains("{{core:compile_reel.output.file}}"), "got: " + message);
+            assertTrue(message.contains("resolved to nothing"), "got: " + message);
+            assertFalse(message.contains("video is required"),
+                "a mapped param must NOT be reported as missing, got: " + message);
         }
     }
 

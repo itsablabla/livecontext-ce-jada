@@ -4,6 +4,8 @@ import { LandingShell } from '@/components/landing/LandingShell';
 import { IS_CE } from '@/lib/edition';
 import { fetchPublicProfile, fetchPublicationsByPublisher } from '@/lib/marketplace/publicProfiles';
 import PublicationCardSsr from '@/app/marketplace/_components/PublicationCardSsr';
+import { fetchPublicBadges, publicBadgeName } from '@/lib/marketplace/publicBadges';
+import { PublicBadgeShowcase } from '@/components/badges/PublicBadgeShowcase';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
 
@@ -61,7 +63,12 @@ export default async function PublicProfilePage({
   // the backend intends: a probe must not be able to tell them apart.
   if (!profile) notFound();
 
-  const publications = await fetchPublicationsByPublisher(profile.userId);
+  // Both reads are independent and both degrade to an empty list, so one slow
+  // service cannot delay the other half of the page.
+  const [publications, badges] = await Promise.all([
+    fetchPublicationsByPublisher(profile.userId),
+    fetchPublicBadges(profile.userId),
+  ]);
   const name = profile.displayName ?? `@${profile.handle}`;
 
   return (
@@ -75,6 +82,8 @@ export default async function PublicProfilePage({
           )}
         </header>
 
+        <PublicBadgeShowcase badges={badges} nameFor={publicBadgeName} heading="Trophies" />
+
         <h2 className="mb-4 text-lg font-semibold text-[var(--text-primary)]">
           Published apps
         </h2>
@@ -84,9 +93,12 @@ export default async function PublicProfilePage({
             {name} has not published anything yet.
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          // Same grid rhythm as the marketplace index: the card grew a
+          // thumbnail, and a 1rem gap left the covers touching.
+          <div className="grid grid-cols-1 gap-x-5 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
             {publications.map((publication) => (
-              <PublicationCardSsr key={publication.id} publication={publication} />
+              // h3: this grid already sits under the "Published apps" h2.
+              <PublicationCardSsr key={publication.id} publication={publication} headingLevel="h3" />
             ))}
           </div>
         )}

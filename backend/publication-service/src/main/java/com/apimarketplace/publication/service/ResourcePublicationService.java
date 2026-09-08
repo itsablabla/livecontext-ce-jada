@@ -285,7 +285,7 @@ public class ResourcePublicationService {
         // agent paths, so the caller always gets the same reason for the same
         // publication rather than a different message per publication type.
         if (ceExclusiveGuard != null) {
-            ceExclusiveGuard.check(publication);
+            ceExclusiveGuard.check(publication, tenantId);
         }
 
         if (isOwnPublication(publication, tenantId, orgScope)) {

@@ -12,7 +12,6 @@ import {
   isDownloadFileNode,
   isPublicLinkNode,
   isMediaNode,
-  isGenerateNode,
   isHttpRequestNode,
   isDataInputNode,
   isMergeNode,
@@ -48,7 +47,6 @@ import {
   isDatabaseNode,
 } from './planHelpers';
 import { buildMediaPlanParams } from './mediaParams';
-import { buildGeneratePlanParams } from './generateParams';
 import { nodeRegistry } from '../registry/nodeRegistry';
 
 /**
@@ -231,7 +229,6 @@ export function processTransformAndWaitNodes(ctx: PlanGeneratorContext): void {
   const downloadFileNodes = ctx.nodes.filter((node) => isDownloadFileNode(node));
   const publicLinkNodes = ctx.nodes.filter((node) => isPublicLinkNode(node));
   const mediaNodes = ctx.nodes.filter((node) => isMediaNode(node));
-  const generateNodes = ctx.nodes.filter((node) => isGenerateNode(node));
   const httpRequestNodes = ctx.nodes.filter((node) => isHttpRequestNode(node));
   const dataInputNodes = ctx.nodes.filter((node) => isDataInputNode(node));
   const aggregateNodes = ctx.nodes.filter((node) => isAggregateNode(node));
@@ -402,36 +399,6 @@ export function processTransformAndWaitNodes(ctx: PlanGeneratorContext): void {
 
     const d = node.data as any;
     core.params = buildMediaPlanParams(d.mediaOperation, d.mediaParams);
-
-    const nodePosition = getNodePosition(node);
-    if (nodePosition) {
-      core.position = nodePosition;
-    }
-
-    ctx.plan.cores!.push(core);
-    ctx.stepPlanByNodeId.set(node.id, core);
-  });
-
-  // Process generate nodes.
-  // Like media, the generate config lives in the generic `params` map with the
-  // EXACT contract field names ({ model, credential_source, ...unified params }).
-  // The params are rebuilt from generateModel + generateParams (NOT from
-  // paramExpressions, which stringify numbers) so types survive the roundtrip.
-  generateNodes.forEach((node) => {
-    const label = node.data.label || node.id;
-    const normalizedLabel = normalizeLabel(label);
-    ctx.stepLabelMap.set(node.id, normalizedLabel);
-
-    const core: any = {
-      id: node.id,  // Use node.id directly to avoid prefix doubling on reload
-      graphNodeId: node.id,
-      type: 'generate',
-      label: label,
-    };
-
-    const d = node.data as any;
-    core.params = buildGeneratePlanParams(
-      d.generateModel, d.generateCredentialSource, d.generateParams, d.selectedCredentialId);
 
     const nodePosition = getNodePosition(node);
     if (nodePosition) {

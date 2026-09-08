@@ -243,7 +243,7 @@ public class AgentToolsProvider implements ToolsProvider {
             boolParam("is_active", "Whether agent is active (for: create, update)", false, true),
             stringParam("prompt", "Prompt/task to send to the sub-agent (for: execute)", false),
             stringParam("context", "Additional context to prepend to the prompt (for: execute)", false),
-            boolParam("memory", "Sub-agent conversation memory. true (default)=agent sees previous conversations, false=stateless one-shot (for: execute)", false, true),
+            boolParam("memory", "Sub-agent CONVERSATION HISTORY - not the `memory` tool, which is a separate thing entirely. true (default)=the sub-agent sees its previous conversations, false=stateless one-shot (for: execute)", false, true),
             intParam("timeout", "Execution timeout in seconds, 10-300 (for: execute)", false, 120),
             intParam("limit", "Max results to return (for: list, get_history, search_messages). Default: 25 for list, 20 for get_history and search_messages. search_messages caps at 50.", false, 25),
             intParam("offset", "Pagination offset (for: list, task_get_execution)", false, 0),
@@ -257,6 +257,7 @@ public class AgentToolsProvider implements ToolsProvider {
             enumParam("application_access_mode", "Applications access: 'write' (default) or 'read' - see RESOURCE GRANTS. (for: create, update)", false, List.of("read", "write")),
             enumParam("skill_access_mode", "Skills access: 'write' (default) or 'read' (view only). Skills have no list/_grant params - use skill(action='assign') to grant skills. (for: create, update)", false, List.of("read", "write")),
             enumParam("file_access_mode", "Files access: 'write' (default) or 'read' (list/get/view/visualize only, no create_folder/move_to_folder). Independent of resource grants. (for: create, update)", false, List.of("read", "write")),
+            enumParam("memory_access_mode", "Long-term memory access: 'write' (default) or 'read' (get/list/search/help only, no save or delete). What this agent saves is injected into every agent in the workspace, so use 'read' for an agent that should consult the workspace's facts without changing them. (for: create, update)", false, List.of("read", "write")),
             // Per-resource GRANT scope (none/all/custom). Authoritative when set: 'all' grants EVERY
             // resource of that family (the matching id list is ignored). Omit to derive from the list
             // (empty=none, non-empty=custom) - so existing callers keep working unchanged.

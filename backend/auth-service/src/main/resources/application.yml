@@ -1,3 +1,11 @@
+# PostHog server-side product analytics. OFF by default (CE / local / unconfigured
+# emit nothing); cloud prod turns it on through the same POSTHOG_* env the other
+# services read. EU host for GDPR.
+posthog:
+  enabled: ${POSTHOG_ENABLED:false}
+  api-key: ${POSTHOG_API_KEY:}
+  host: ${POSTHOG_HOST:https://eu.i.posthog.com}
+
 # Service CLOUD UNIQUEMENT. Le monolith CE charge ce JAR via dépendance Maven; les beans KC restent
 # inactifs en CE via @ConditionalOnProperty(auth.mode=keycloak, matchIfMissing=false).
 # Voir CLAUDE.md section "Règle architecturale CE / Cloud".
@@ -189,11 +197,12 @@ billing:
   # 1 credit = $0.001 of provider LIST price; every LLM call is billed
   # providerCost × llm.cloud-multiplier. The cache multipliers weight cached tokens
   # DOWN to what providers actually charge, BEFORE the cloud multiplier, so
-  # cloud-multiplier is the pricing multiplier. Defaults equal the historical
-  # ModelPricingService constants; PROD-effective values pinned in values-prod.yaml
+  # cloud-multiplier is the pricing multiplier. cloud-multiplier moved 1.8 -> 1.11 on
+  # 2026-09-03 (deliberate margin cut on LLM/conversation billing); the cache weights
+  # are unchanged provider-true values. PROD-effective values pinned in values-prod.yaml
   # (services.auth.env) so margin is declared & diff-tracked. See the project docs.
   llm:
-    cloud-multiplier: ${BILLING_LLM_CLOUD_MULTIPLIER:1.8}
+    cloud-multiplier: ${BILLING_LLM_CLOUD_MULTIPLIER:1.11}
     anthropic-cache-write-multiplier: ${BILLING_LLM_ANTHROPIC_CACHE_WRITE_MULTIPLIER:1.25}
     anthropic-cache-read-multiplier: ${BILLING_LLM_ANTHROPIC_CACHE_READ_MULTIPLIER:0.1}
     openai-cached-multiplier: ${BILLING_LLM_OPENAI_CACHED_MULTIPLIER:0.5}
@@ -284,3 +293,11 @@ org:
     rate-limit:
       per-inviter-per-hour: ${ORG_INVITE_PER_INVITER:20}
       per-org-per-hour: ${ORG_INVITE_PER_ORG:50}
+
+# In-app "What's new" announcement. The entry itself ships with the frontend build;
+# this switch decides whether the deployment surfaces it at all. Set CHANGELOG_ENABLED=false
+# to turn the modal, the sidebar entry and its unread dot off everywhere at once, with no
+# rebuild and no redeploy of the frontend - the API then reports the feature as off and the
+# client stops announcing. Same key, same effect, in CE (monolith) and in cloud.
+changelog:
+  enabled: ${CHANGELOG_ENABLED:true}

@@ -113,6 +113,16 @@ export const queryKeys = {
     page: (page: number, pageSize: number) => ['conversations', page, pageSize] as const,
     detail: (id: string) => ['conversations', id] as const,
     search: (term: string, type: 'title' | 'content') => ['conversations', 'search', term, type] as const,
+    /**
+     * One kind of conversation, filtered by the SERVER.
+     *
+     * <p>Under the `conversations` prefix on purpose: invalidating `all` after creating one must
+     * refresh these too, or a thread the reader just started is missing from the filter it was
+     * created for until a full page reload.
+     */
+    ofKind: (kind: string) => ['conversations', 'kind', kind] as const,
+    /** Whether the workspace has ANY conversation of a kind - one row, asked to decide a control. */
+    hasKind: (kind: string) => ['conversations', 'kind', kind, 'any'] as const,
   },
 
   // Messages

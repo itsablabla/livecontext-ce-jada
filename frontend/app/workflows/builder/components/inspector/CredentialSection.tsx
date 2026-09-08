@@ -24,6 +24,8 @@ import {
 import { normalizeScopes } from '@/lib/credentials/normalizeScopes';
 import { MissingScopesBanner } from './MissingScopesBanner';
 
+import { platformSellsThis } from '@/lib/generation/platformSells';
+
 export type CredentialSource = 'user' | 'platform';
 
 interface ToolCredential {
@@ -62,7 +64,7 @@ interface CredentialSectionProps {
    */
   apiToolId?: string | null;
   /**
-   * Generation model id the node is bound to (`core:generate` only). One
+   * Generation model id the node is bound to (`agent:generate` only). One
    * endpoint can back several models at different prices, so with it the rate
    * shown is that MODEL's, not the endpoint's.
    */
@@ -94,7 +96,7 @@ interface CredentialSectionProps {
    * generation descriptor in the catalog).
    *
    * <p>It travels to the quote because a generation is never sold on the
-   * credential-wide default: execution refuses that exact call. A `core:generate`
+   * credential-wide default: execution refuses that exact call. A `agent:generate`
    * step says so implicitly by naming a model, but an `mcp:` step bound straight
    * to a generation endpoint names none, so without this the catch-all default
    * came back as a price and the platform toggle offered a step the server
@@ -326,10 +328,7 @@ export function CredentialSection({
   // platform option would let users switch to a rate-free "free ride", which
   // we never want - admins opt endpoints into platform-sourcing explicitly
   // by publishing a per-tool or API-wide rate.
-  const platformAvailable =
-    !!platformInfo?.available
-    && platformInfo.platformCredentialId != null
-    && !!platformInfo?.hasPricing;
+  const platformAvailable = platformSellsThis(platformInfo);
 
   // Build search terms from tool credentials (stable with useMemo)
   const searchTerms = React.useMemo(() => {
@@ -607,7 +606,22 @@ export function CredentialSection({
     setConfiguringCredential(null);
   };
 
-  const showPlatformToggle = !!onCredentialSourceChange && (platformAvailable || credentialSource === 'platform');
+  // Once offered, the choice STAYS offered for as long as this control is mounted.
+  //
+  // Without this it is a one-way door: a reader sitting on the platform source sees the toggle
+  // (the clause below), picks their own key, and the toggle vanishes with no way back - the
+  // platform option was only on screen because they were standing on it. Leaving is possible and
+  // returning is not, which is the shape of a mistake a control should never make.
+  //
+  // Latched on the platform being REALLY available, never on merely standing on it. A caller can
+  // hold `'platform'` as its initial state before anything has been asked - the studio does - and
+  // treating that as evidence made the toggle offer a platform key that does not exist: on an
+  // integration the platform does not sell at all, the reader was shown a payer choice between
+  // their own key and nothing.
+  const offeredPlatform = React.useRef(false);
+  if (platformAvailable) offeredPlatform.current = true;
+  const showPlatformToggle = !!onCredentialSourceChange
+    && (platformAvailable || credentialSource === 'platform' || offeredPlatform.current);
   const usingPlatform = credentialSource === 'platform';
 
   const handleSwitchToUser = () => {
@@ -616,7 +630,12 @@ export function CredentialSection({
   };
   const handleSwitchToPlatform = () => {
     if (!onCredentialSourceChange || isDisabled) return;
-    if (!platformAvailable || !platformInfo?.platformCredentialId) return;
+    // Gated on the CREDENTIAL existing, not on it being sellable. `platformAvailable` also requires
+    // a published price, and requiring that here is what made the way back dead: a reader who left
+    // the platform source could press Platform and have nothing happen, with no reason given. An
+    // unpriced platform run is refused server-side with a message that says so, which is a better
+    // answer than a button that ignores the press.
+    if (!platformInfo?.platformCredentialId) return;
     onCredentialSourceChange('platform', platformInfo.platformCredentialId);
   };
 

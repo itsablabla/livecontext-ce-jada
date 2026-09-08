@@ -106,6 +106,7 @@ export function UnifiedNodeOutput({
           stepAlias={stepAlias}
           dataType={dataType}
           isDraggable={false}
+          node={currentNode}
           onLoadedOutputChange={onLoadedOutputChange}
         />
       ) : (

@@ -32,10 +32,20 @@ public final class WorkflowIconExtractor {
         "deepseek", "deepseek"
     );
 
-    private static final Map<String, String> AGENT_TYPE_TO_NODE_ID = Map.of(
+    // Package-visible for the parity guard: this map decides the glyph on every
+    // workflow card and marketplace listing, it exists twice (here and in the
+    // other service), and a missing entry falls back to "ai-agent" rather than
+    // failing, so drift between the two copies is invisible in the product.
+    static final Map<String, String> AGENT_TYPE_TO_NODE_ID = Map.of(
         "agent", "ai-agent",
         "guardrail", "guardrail",
-        "classify", "classify"
+        "classify", "classify",
+        // Generate joined this family and is not an LLM call. Read through the
+        // cores branch it used to yield its own type as the icon id; filed with
+        // the agents it falls to the "ai-agent" default below, so every workflow
+        // card and marketplace listing drew a generation step as an agent.
+        "browser_agent", "browser_agent",
+        "generate", "generate"
     );
 
     /**

@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * 3-way alignment guard for {@code core:generate}.
+ * 3-way alignment guard for {@code agent:generate}.
  *
  * <p>The persisted output is whatever {@link GenerateNodeSpec} declares (the
  * generic mapper writes exactly the declared keys), the agent reads
@@ -44,8 +44,12 @@ class GenerateNodeSpecTest {
         NodeDefinition def = new GenerateNodeSpec().definition();
 
         assertEquals("GENERATE", def.nodeType());
-        assertEquals("core", def.category());
-        assertEquals("core", def.variablePrefix());
+        // The AI family, not core: it runs a model and hands back what the model
+        // produced, and it is keyed `agent:<label>` like its siblings. The prefix
+        // is what every reference resolves through, so a `core:` here would have
+        // `{{agent:make_clip.output.file}}` resolve to nothing, silently.
+        assertEquals("agent", def.category());
+        assertEquals("agent", def.variablePrefix());
 
         Set<String> keys = outputKeys();
         assertEquals(

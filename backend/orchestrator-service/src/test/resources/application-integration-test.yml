@@ -86,3 +86,9 @@ gateway:
 logging:
   level:
     com.apimarketplace: DEBUG
+
+# Purge followers (auth.purge_log consumers) start a real thread that reads a table and
+# calls auth-service; in a test context that is noise. Disabled here, enabled by default.
+purge:
+  follower:
+    enabled: false

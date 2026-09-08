@@ -12,8 +12,8 @@ import UsageAnalyticsPanel from './components/UsageAnalyticsPanel';
 import { isCeMode, creditsToUsd } from '@/lib/format-cost';
 import { formatUtcDateTime } from '@/lib/utils/dateFormatters';
 import { BalanceBreakdownCard, TopUpModal } from '@/components/billing';
-import { useSubscription, useCreditBalance, usePaygTiers } from '@/lib/hooks/smart-hooks-complete';
-import { CREDIT_TIERS } from '@/lib/billing/pricing-constants';
+import { usePaygTiers } from '@/lib/hooks/smart-hooks-complete';
+import { useCreditWallet } from '@/lib/hooks/useCreditWallet';
 import { useCurrentOrgStore } from '@/lib/stores/current-org-store';
 import { cloudLinkService } from '@/lib/api/cloud-link.service';
 import { WorkspaceScopeSelect, ALL_WORKSPACES_SCOPE } from '@/components/settings/WorkspaceScopeSelect';
@@ -385,15 +385,18 @@ function QuotaPageInner() {
 
   // Wallet breakdown + plan info - used to render the bucket-aware balance
   // card and the monthly-cycle counter for paid subscribers.
-  const { subscription } = useSubscription();
-  const { balance: walletTotal, subBalance: walletSub, paygBalance: walletPayg } = useCreditBalance();
+  // Same hook as the header dial and the sidebar block. This page used to derive
+  // the allowance itself, which gave a FREE account no monthly grant here while
+  // the dial that links to this page showed it 1,000 - and skipped the owner-pays
+  // guard, so a guest saw the OWNER's balance measured against their OWN tier.
+  const {
+    balance: walletTotal,
+    subBalance: walletSub,
+    paygBalance: walletPayg,
+    allowance,
+  } = useCreditWallet();
   const { configured: paygConfigured } = usePaygTiers();
-  const planCode = (subscription as any)?.subscription?.planCode || null;
-  const creditTierIndex = (subscription as any)?.subscription?.creditTierIndex ?? 0;
-  const isPaidPlan = !!(planCode && planCode !== 'FREE');
-  const monthlyPlan = isPaidPlan && CREDIT_TIERS[creditTierIndex]
-    ? { allowance: CREDIT_TIERS[creditTierIndex] }
-    : undefined;
+  const monthlyPlan = allowance !== null ? { allowance } : undefined;
 
   const fetchData = useCallback(async () => {
     const requestSeq = ++requestSeqRef.current;

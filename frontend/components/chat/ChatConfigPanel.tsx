@@ -17,6 +17,7 @@ import {
   toNonBridgeSelectedModel,
 } from '@/hooks/useModels';
 import { useChatConfig, type ChatConfig } from '@/hooks/useChatConfig';
+import { track } from '@/lib/analytics/analytics';
 
 interface ChatConfigPanelProps {
   /** When provided, writes go to PUT /agents/{agentId}. */
@@ -62,6 +63,9 @@ const TURN_LIMIT_FIELDS: NumericField[] = [
  * Used from:
  *   - MessageComposer → AttachmentHandler Options tab (conversation scope)
  *   - CreateAgentModal "Advanced mode" block (agent scope)
+ *   - AgentChatDefaults, i.e. the Agents page "Settings" tab and Settings > Agents & Chat
+ *     (userDefault scope - the per-(user, workspace) defaults. Settings > Overview >
+ *     Preferences used to mount this too and now only links to those two surfaces.)
  *
  * Persistence is routed by `useChatConfig` based on whether `agentId` is provided.
  */
@@ -172,6 +176,7 @@ export function ChatConfigPanel({
                   providerLabel={t('compactionModelProviderLabel')}
                   modelLabel={t('compactionModelNameLabel')}
                   excludeBridgeProviders
+                  costProfile="chatConversation"
                 />
               ) : (
                 <p className="text-xs text-theme-secondary">{t('compactionModelPlatformDefault')}</p>
@@ -324,7 +329,10 @@ export function ChatConfigPanel({
           <SettingRow title={t('toolsModeLabel')} info={t('toolsModeInfo')}>
             <Select
               value={config.toolsMode === 'none' ? 'none' : 'all'}
-              onValueChange={(value) => updateConfig({ toolsMode: value })}
+              onValueChange={(value) => {
+                updateConfig({ toolsMode: value });
+                track('chat_config_updated', { setting: 'tools_mode', value });
+              }}
             >
               <SelectTrigger className="w-full sm:w-[200px]">
                 <SelectValue />
@@ -340,7 +348,10 @@ export function ChatConfigPanel({
           <SettingRow title={t('webSearchLabel')} info={t('webSearchInfo')}>
             <Switch
               checked={config.webSearch !== false}
-              onCheckedChange={(checked) => updateConfig({ webSearch: checked })}
+              onCheckedChange={(checked) => {
+                updateConfig({ webSearch: checked });
+                track('chat_config_updated', { setting: 'web_search', value: Boolean(checked) });
+              }}
               aria-label={t('webSearchLabel')}
             />
           </SettingRow>
@@ -524,7 +535,10 @@ export function ChatConfigPanel({
                 'all' so the trigger never renders blank. */}
             <Select
               value={config.toolsMode === 'none' ? 'none' : 'all'}
-              onValueChange={(value) => updateConfig({ toolsMode: value })}
+              onValueChange={(value) => {
+                updateConfig({ toolsMode: value });
+                track('chat_config_updated', { setting: 'tools_mode', value });
+              }}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />

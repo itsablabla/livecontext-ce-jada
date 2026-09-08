@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import type { ColumnDefinition, ColumnOrder } from '../types';
-import type { ViewConfig } from '../viewConfig';
+import { idIsHiddenBehindCheckbox, type ViewConfig } from '../viewConfig';
 
 export interface UseColumnManagementParams {
   viewConfig: ViewConfig;
@@ -37,10 +37,6 @@ export interface UseColumnManagementReturn {
    * Get deduplicated columns
    */
   getUniqueColumns: () => ColumnDefinition[];
-  /**
-   * Get dynamic columns for forms (excludes fixed columns)
-   */
-  getDynamicColumns: () => ColumnDefinition[];
   /**
    * Initialize column order from columns (if not already set)
    */
@@ -187,13 +183,21 @@ export function useColumnManagement({
 
     const fixedColumns = buildFixedColumns();
 
-    // Filter dynamic columns to exclude fixed fields
-    const dynamicColumns = columns.filter(col => {
-      const fixedFields = workflowContext
-        ? ['checkbox', 'id', 'array_index', 'value']
-        : ['checkbox', 'id', 'priority', 'created_at', 'array_index', 'value'];
-      return !fixedFields.includes(col.field);
-    });
+    // Drop only the data columns that the fixed set ALREADY renders, so the two
+    // never duplicate. Never filter on a hard-coded reserved-name list: during
+    // nested JSON navigation the columns are derived from the data itself, so a
+    // row genuinely carrying `id` (table rows), `value` or `array_index` would
+    // have its column silently deleted when the matching fixed column is off
+    // (e.g. showIdColumn={false} in the node Logs table).
+    const fixedFields = new Set(fixedColumns.map(col => col.field));
+    // At ROOT level outside workflow mode the grid renders the row id INSIDE the
+    // checkbox column (DataTableGrid returns null for both the `id` header and
+    // cell there), so an `id` column would only add an empty lane. Nested is the
+    // opposite case: `id` there belongs to the navigated data, not to the row.
+    if (idIsHiddenBehindCheckbox(viewConfig)) {
+      fixedFields.add('id');
+    }
+    const dynamicColumns = columns.filter(col => !fixedFields.has(col.field));
 
     // Combine all columns
     const allColumns = [...fixedColumns, ...dynamicColumns];
@@ -218,7 +222,7 @@ export function useColumnManagement({
     );
 
     return [...orderedColumns, ...remainingColumns];
-  }, [buildFixedColumns, columns, columnOrder, workflowContext]);
+  }, [buildFixedColumns, columns, columnOrder, workflowContext, viewConfig]);
 
   /**
    * Get deduplicated columns
@@ -229,14 +233,9 @@ export function useColumnManagement({
     );
   }, [getAllColumns]);
 
-  /**
-   * Get dynamic columns for forms (excludes fixed columns)
-   */
-  const getDynamicColumns = useCallback((): ColumnDefinition[] => {
-    return getUniqueColumns().filter(col =>
-      !['checkbox', 'id', 'priority', 'created_at', 'array_index', 'value'].includes(col.field)
-    );
-  }, [getUniqueColumns]);
+  // A second `getDynamicColumns` used to live here with its own reserved-name list. Nothing called
+  // it - the controller takes useTableExport's, which is driven by the view's real fixed set - and
+  // two implementations of one rule is how they drift apart.
 
   /**
    * Initialize column order from columns (if not already set)
@@ -331,7 +330,6 @@ export function useColumnManagement({
     // Functions
     getAllColumns,
     getUniqueColumns,
-    getDynamicColumns,
     initializeColumnOrder,
     reorderColumns,
     resetDragState,

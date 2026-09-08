@@ -21,7 +21,7 @@ class VectorEditionValidationTest {
     @DisplayName("cloud (vectorAllowed=false) rejects type=vector with the gate message, including case/whitespace variants")
     void cloudRejectsVectorTypeVariants() {
         for (String variant : List.of("vector", "VECTOR", "Vector", "  vector  ")) {
-            assertThat(ToolParameterUtils.validateVectorEdition(variant, false))
+            assertThat(ToolParameterUtils.validateVectorEdition(variant, false, null))
                     .as("variant '%s' must be rejected", variant)
                     .isEqualTo(VectorFeatureGate.DISABLED_MESSAGE);
         }
@@ -30,22 +30,22 @@ class VectorEditionValidationTest {
     @Test
     @DisplayName("cloud leaves non-vector types and null untouched")
     void cloudAcceptsNonVectorTypes() {
-        assertThat(ToolParameterUtils.validateVectorEdition("text", false)).isNull();
-        assertThat(ToolParameterUtils.validateVectorEdition("select", false)).isNull();
-        assertThat(ToolParameterUtils.validateVectorEdition(null, false)).isNull();
+        assertThat(ToolParameterUtils.validateVectorEdition("text", false, null)).isNull();
+        assertThat(ToolParameterUtils.validateVectorEdition("select", false, null)).isNull();
+        assertThat(ToolParameterUtils.validateVectorEdition(null, false, null)).isNull();
     }
 
     @Test
     @DisplayName("self-hosted (vectorAllowed=true) accepts vector")
     void selfHostedAcceptsVector() {
-        assertThat(ToolParameterUtils.validateVectorEdition("vector", true)).isNull();
+        assertThat(ToolParameterUtils.validateVectorEdition("vector", true, null)).isNull();
     }
 
     @Test
     @DisplayName("full validateColumnDefinition rejects a well-formed vector column on cloud (the edition gate fires before the dimension contract)")
     void fullValidationRejectsVectorOnCloud() {
         String error = ToolParameterUtils.validateColumnDefinition(
-                "embedding", "vector", Map.of("dimension", 1536), false);
+                "embedding", "vector", Map.of("dimension", 1536), false, null);
         assertThat(error).isEqualTo(VectorFeatureGate.DISABLED_MESSAGE);
     }
 }

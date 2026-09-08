@@ -14,6 +14,7 @@
  * one does not. An event that names no workflow keeps reaching everyone, which
  * is what the older dispatchers rely on.
  */
+import * as React from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -41,7 +42,18 @@ vi.mock('@/contexts/WorkflowLayoutDirectionContext', () => ({
   }),
 }));
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useWorkflowLoader } from '../useWorkflowLoader';
+
+/**
+ * The loader reads the canvas's query client to hand it to the importer (the interface
+ * format lookup shares the node's own cache entry), so it needs a provider - as the rest
+ * of the builder already did through `useWorkflowEventListeners`.
+ */
+function withQueryClient({ children }: { children: React.ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return React.createElement(QueryClientProvider, { client }, children);
+}
 
 function mountLoaderFor(workflowId: string) {
   const setNodes = vi.fn();
@@ -54,6 +66,7 @@ function mountLoaderFor(workflowId: string) {
       nodesRef: { current: [] },
       edgesRef: { current: [] },
     } as never),
+    { wrapper: withQueryClient },
   );
   return { setNodes, setEdges };
 }

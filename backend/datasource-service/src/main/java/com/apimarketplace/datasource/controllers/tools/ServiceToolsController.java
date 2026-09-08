@@ -112,7 +112,8 @@ public class ServiceToolsController {
         copyIfPresent(request, "allowedTableIds", credentials, "allowedTableIds");
         // Access mode keys for ToolAccessControl (read/write per resource)
         for (String am : List.of("tableAccessMode", "workflowAccessMode", "interfaceAccessMode",
-                "agentAccessMode", "applicationAccessMode", "skillAccessMode", "fileAccessMode")) {
+                "agentAccessMode", "applicationAccessMode", "skillAccessMode", "fileAccessMode",
+                "memoryAccessMode")) {
             copyIfPresent(request, am, credentials, am);
         }
 

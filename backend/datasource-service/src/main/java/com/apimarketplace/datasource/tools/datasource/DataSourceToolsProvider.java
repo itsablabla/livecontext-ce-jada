@@ -29,18 +29,15 @@ public class DataSourceToolsProvider implements ToolsProvider {
     private final DataSourceRowModule rowModule;
     private final DataSourceSchemaModule schemaModule;
     private final TablePublishModule publishModule;
-    private final com.apimarketplace.datasource.services.VectorFeatureGate vectorFeatureGate;
 
     public DataSourceToolsProvider(DataSourceTableModule tableModule,
                                     DataSourceRowModule rowModule,
                                     DataSourceSchemaModule schemaModule,
-                                    TablePublishModule publishModule,
-                                    com.apimarketplace.datasource.services.VectorFeatureGate vectorFeatureGate) {
+                                    TablePublishModule publishModule) {
         this.tableModule = tableModule;
         this.rowModule = rowModule;
         this.schemaModule = schemaModule;
         this.publishModule = publishModule;
-        this.vectorFeatureGate = vectorFeatureGate;
     }
 
     private static final List<String> VALID_ACTIONS = List.of(
@@ -156,11 +153,18 @@ public class DataSourceToolsProvider implements ToolsProvider {
             ToolParameter.builder()
                 .name("columns")
                 .type("array")
-                // Advertise vector only where the edition accepts it - an
-                // advertised-but-rejected type sends the agent into retries.
+                // Vector is advertised everywhere since 2026-09-03. It used to be advertised
+                // only where the edition accepted it, because an advertised-but-rejected type
+                // sends the agent into retries. That reasoning held while the answer was a
+                // property of the DEPLOYMENT and this schema is built once at boot, with no user
+                // in scope. It is now a property of the WORKSPACE'S PLAN, which this schema
+                // cannot know and must not guess: hiding the type from everyone to spare the
+                // subset who cannot afford it would also hide it from the ones who can. The
+                // retry problem is answered instead at execution, where VectorFeatureGate names
+                // the plan that unlocks it - a refusal an agent can act on and does not retry.
                 .description("Column schema [{name, type, display?, defaultValue?}]. Use alone for empty tables, or with data to set types. Column names must match data keys. Types: text, number, date, checkbox, select, multi_select, rating, sentiment, progress, file, image, email, phone, url"
                     + " (file and image hold the same value - the ref from files(action='get'), or a URL - see action='help' -> mediaColumns)"
-                    + (vectorFeatureGate.isVectorAllowed() ? ", vector" : ""))
+                    + ", vector")
                 .required(false)
                 .itemType("object")
                 .build(),
@@ -184,9 +188,7 @@ public class DataSourceToolsProvider implements ToolsProvider {
             ToolParameter.builder()
                 .name("similarity")
                 .type("object")
-                .description(vectorFeatureGate.isVectorAllowed()
-                    ? "Vector similarity search (for: query_rows). Format: {column: 'embedding', queryVector: [0.1,...], topK?: 5, threshold?: 0.8}. Use with vector columns for RAG/nearest-neighbor search. Can be combined with where for hybrid filtering."
-                    : "Not available on this deployment (self-hosted-only feature). Use where filters for querying.")
+                .description("Vector similarity search (for: query_rows). Format: {column: 'embedding', queryVector: [0.1,...], topK?: 5, threshold?: 0.8}. Use with vector columns for RAG/nearest-neighbor search. Can be combined with where for hybrid filtering. On managed cloud this is a paid capability: if the workspace's plan does not include it, the call is refused with a message naming the plan that does.")
                 .required(false)
                 .build(),
             intParam("limit", "Max results to return. Default 25 for list, 20 for query_rows. query_rows has NO offset - to page a large result, narrow with where instead of raising limit. (for: list, query_rows)", false, 25),

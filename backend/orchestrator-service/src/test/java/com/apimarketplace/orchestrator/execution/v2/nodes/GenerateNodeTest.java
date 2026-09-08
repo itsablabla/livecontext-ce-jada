@@ -69,7 +69,7 @@ class GenerateNodeTest {
     }
 
     private GenerateNode node(Map<String, Object> params) {
-        GenerateNode node = new GenerateNode("core:make_clip", params);
+        GenerateNode node = new GenerateNode("agent:make_clip", params);
         ServiceRegistry registry = mock(ServiceRegistry.class);
         when(registry.getGenerationExecutionService()).thenReturn(generationExecutionService);
         when(registry.getTemplateAdapter()).thenReturn(templateAdapter);
@@ -106,7 +106,7 @@ class GenerateNodeTest {
         @Test
         @DisplayName("no generation service wired -> node FAILS with an actionable message, never an NPE")
         void nullServiceFailsExplicitly() {
-            GenerateNode bare = new GenerateNode("core:make_clip", Map.of("model", "seedance-2.0-fast"));
+            GenerateNode bare = new GenerateNode("agent:make_clip", Map.of("model", "seedance-2.0-fast"));
 
             NodeExecutionResult result = bare.execute(context);
 
@@ -242,7 +242,7 @@ class GenerateNodeTest {
 
             node(params).execute(context);
 
-            verify(generationExecutionService).generate(eq("tenant-1"), eq("run-1"), eq("core:make_clip"),
+            verify(generationExecutionService).generate(eq("tenant-1"), eq("run-1"), eq("agent:make_clip"),
                 eq("seedance-2.0-fast"), paramsCaptor.capture(), eq("user"), any());
             assertEquals("hello", paramsCaptor.getValue().get("prompt"));
         }

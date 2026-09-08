@@ -82,9 +82,34 @@ public record WorkflowBoardCard(
      */
     java.math.BigDecimal costCredits,
     /**
-     * The workflow's cost budget in credits, or null when none is set. Lets the
-     * card paint the over-budget state (costCredits >= budgetCredits) without a
-     * second fetch.
+     * The workflow's spending cap in credits, or null when none is set.
+     *
+     * <p>Compare it against {@link #budgetPeriodSpent}, NEVER against
+     * {@link #costCredits}: a pinned workflow keeps one production run for
+     * months, so its lifetime cost passes the cap long before the period spend
+     * does, and painting the card red off the total announces a stop that has
+     * not happened.
      */
-    java.math.BigDecimal budgetCredits
+    java.math.BigDecimal budgetCredits,
+    /**
+     * What the governed runs have spent in the budget period currently open, in
+     * credits, already rolled over server-side. This is the figure the cap is
+     * compared against. Always sent, cap or no cap, so this field means
+     * the same thing here as in WorkflowSummary and
+     * ApplicationRunVersionSummary; whether a chip is worth drawing is decided
+     * on the client, once, for every surface.
+     */
+    java.math.BigDecimal budgetPeriodSpent,
+    /** monthly | weekly | cumulative - names the period above. */
+    String budgetPeriodMode,
+    /**
+     * When the open period rolls over and the allowance starts again, or
+     * {@code null} for a cap that never resets.
+     *
+     * <p>Computed server-side from the same rule the counter resets on. The
+     * client could derive it from the cadence alone, and that is exactly why it
+     * is sent instead: a second implementation of the calendar rule would agree
+     * until one of them was edited.
+     */
+    java.time.Instant budgetPeriodResetsAt
 ) {}

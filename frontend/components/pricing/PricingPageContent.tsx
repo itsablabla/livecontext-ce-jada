@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { TYPOGRAPHY } from '@/lib/typography';
 import { Zap, Database, Clock, Check, ArrowRight } from 'lucide-react';
 import PlanSelector from '@/components/pricing/PlanSelector';
+import ComparePlansLink from '@/components/pricing/ComparePlansLink';
 import { usePricingEvent } from '@/hooks/usePricingEvent';
 import TopUpModal from '@/components/billing/TopUpModal';
 import { usePaygTiers } from '@/lib/hooks/smart-hooks-complete';
@@ -23,9 +24,11 @@ import { Slider } from '@/components/ui/slider';
 import { ScheduledChangeAlert, DowngradeConfirmModal, BillingCycleChangeModal, CreditChangeModal } from '@/components/billing';
 import { unifiedApiService } from '@/lib/api/unified-api-service';
 import { useTranslations, useLocale } from 'next-intl';
-import { CREDIT_TIERS, BASE_PRICES, STARTER_MAX_CREDITS, calcPrice as calcPriceBase, formatTierLabel, getCreditCost, resolveMaxTierIndex, clampTierIndex, PLAN_FEATURE_KEYS } from '@/lib/billing/pricing-constants';
+import { CREDIT_TIERS, BASE_PRICES, STARTER_MAX_CREDITS, calcPrice as calcPriceBase, creditFactsFor, formatTierLabel, getCreditCost, resolveMaxTierIndex, clampTierIndex, CREDIT_EXAMPLES, CREDIT_EXAMPLES_FAQ_KEY, FAQ_KEYS } from '@/lib/billing/pricing-constants';
+import { planFeatureLabels } from '@/lib/billing/planFeatureLabels';
 import { formatUtcDate } from '@/lib/utils/dateFormatters';
 import { cloudLinkService, type CloudLinkStatus, CLOUD_NO_SUBSCRIPTION } from '@/lib/api/cloud-link.service';
+import { track } from '@/lib/analytics/analytics';
 
 // CE installs manage billing on the LINKED LiveContext Cloud account; the cloud web app lives
 // here (matches the hardcoded cloud host used elsewhere in CE, e.g. marketplace CategoryFilter).
@@ -44,28 +47,26 @@ export default function PricingPage() {
   const [fullTiersUnlocked, setFullTiersUnlocked] = useState(false);
   const creditAmount = CREDIT_TIERS[creditTierIndex];
 
+  // The entry pack expressed the way a reader thinks about it. Passed to every
+  // FAQ answer, to the worked examples inside one of them, and to the credits
+  // tooltip on each plan card, so no two of those can quote different figures.
+  // Built in pricing-constants, next to the numbers and the measurement they
+  // come from - and shared with the landing's cards for the same reason.
+  const creditFacts = React.useMemo(() => creditFactsFor(locale), [locale]);
+
   const calcPrice = (planId: string, cycle: 'monthly' | 'yearly') => {
     return calcPriceBase(planId, cycle, creditTierIndex);
   };
 
-  // Translate a plan's ordered feature keys into display strings. The 'creditsDynamic'
-  // sentinel is interpolated with the live slider amount; every other key is a static label.
+  // Translate a plan's ordered feature keys into display strings. The mapping
+  // (including which lines carry an info "i") is shared with the landing's plan
+  // cards, so the two cannot explain a feature on one page and not the other.
   const featuresFor = (planId: string): string[] =>
-    (PLAN_FEATURE_KEYS[planId] || []).map((key) => {
-      if (key === 'creditsDynamic') {
-        return tCards('features.creditsPerMonth', { credits: creditAmount.toLocaleString(getClientLocale()) });
-      }
-      // Free monthly credits carry an info tooltip explaining they run workflows
-      // only (chat/agents need a paid plan), via the "label||tooltip" convention.
-      if (key === 'creditsFree') {
-        return `${tCards('features.creditsFree')}||${tCards('features.creditsFreeTooltip')}`;
-      }
-      // Managed integration credentials for cloud-linked self-hosted installs carry
-      // an info tooltip (relay + per-call credit markup), same "label||tooltip" convention.
-      if (key === 'cePlatformCreds') {
-        return `${tCards('features.cePlatformCreds')}||${tCards('features.cePlatformCredsTooltip')}`;
-      }
-      return tCards(`features.${key}`);
+    planFeatureLabels(planId, {
+      tCards,
+      tPricing: t,
+      credits: creditAmount.toLocaleString(getClientLocale()),
+      creditFacts,
     });
 
   const [notification, setNotification] = useState<{
@@ -348,6 +349,20 @@ export default function PricingPage() {
   const [isPollingWebhook, setIsPollingWebhook] = useState(false);
   const [planBeforeCheckout, setPlanBeforeCheckout] = useState<string | null>(null);
 
+  // One page-view event per mount, once the subscription has resolved so
+  // current_plan is the real one (the query is not loading when signed out).
+  const pageViewTrackedRef = useRef(false);
+  React.useEffect(() => {
+    if (subscriptionLoading || pageViewTrackedRef.current) return;
+    pageViewTrackedRef.current = true;
+    track('pricing_page_viewed', {
+      current_plan: currentPlanCode,
+      cadence: billingCycle,
+      is_ce_mode: isCeMode,
+      is_authenticated: isAuthenticated,
+    });
+  }, [subscriptionLoading, currentPlanCode, billingCycle, isAuthenticated]);
+
   // Detect Stripe return from URL params - only trigger once
   React.useEffect(() => {
     const checkoutStatus = searchParams.get('checkout');
@@ -360,12 +375,18 @@ export default function PricingPage() {
       setIsPollingWebhook(true);
       setShowUpgradeModal(true);
       setUpgradeModalState('processing');
+      // Status + plan only: the Stripe session id never leaves the browser.
+      track('checkout_returned', { status: 'success', from_plan: currentPlan });
 
       // Clean up URL immediately (stay on same page, just remove query params)
       window.history.replaceState({}, '', window.location.pathname);
     } else if (checkoutStatus === 'cancelled') {
       // User cancelled checkout
       showToast('Checkout cancelled', 'info');
+      track('checkout_returned', {
+        status: 'cancelled',
+        from_plan: typedSubscription?.subscription?.planCode || 'FREE',
+      });
       // Clean up URL (stay on same page, just remove query params)
       window.history.replaceState({}, '', window.location.pathname);
     }
@@ -429,6 +450,7 @@ export default function PricingPage() {
       setUpgradeModalState('success');
       setIsPollingWebhook(false);
       setPlanBeforeCheckout(null);
+      track('upgrade_confirmed', { from_plan: planBeforeCheckout, to_plan: currentPlan });
     }
   }, [isPollingWebhook, planBeforeCheckout, typedSubscription?.subscription?.planCode]);
 
@@ -539,11 +561,23 @@ export default function PricingPage() {
   const proceedWithPlanSelection = React.useCallback(async (planId: string, billingCycle: 'monthly' | 'yearly'): Promise<{ success: boolean; message?: string; error?: string }> => {
     setIsProcessing(true);
 
+    // One checkout_started per outcome branch; codes + indexes only. The plan
+    // code is resolved inside the try (as before), so a mapping failure still
+    // lands in the existing catch.
+    let backendPlanCode = planId.toUpperCase();
+    const trackCheckout = (outcome: 'redirect' | 'free' | 'swap' | 'error') => {
+      track('checkout_started', {
+        plan_code: backendPlanCode,
+        billing_cycle: billingCycle,
+        credit_tier_index: creditTierIndex,
+        outcome,
+      });
+    };
+
     try {
       // Mapper l'ID du plan vers le code de plan backend de maniere dynamique
       const planMapping = getPlanMapping();
-      const backendPlanCode = planMapping[planId] || planId.toUpperCase();
-
+      backendPlanCode = planMapping[planId] || planId.toUpperCase();
       // Create Stripe checkout session or handle free plan
       const result = await createSubscription({
         planCode: backendPlanCode,
@@ -554,6 +588,7 @@ export default function PricingPage() {
       if (result) {
         // Check if it's the free plan
         if (result === 'FREE_PLAN_SELECTED' || planId === 'free') {
+          trackCheckout('free');
           showToast('Successfully downgraded to the free plan!', 'success');
 
           // Refresh typedSubscription after a short delay
@@ -567,6 +602,7 @@ export default function PricingPage() {
           };
         } else if (result === 'SWAP_IMMEDIAT') {
           // Immediate swap performed by the backend - show success in modal
+          trackCheckout('swap');
           setNewPlanCode(planId.toUpperCase());
           setUpgradeModalState('success');
 
@@ -586,6 +622,7 @@ export default function PricingPage() {
           if (checkoutUrl && typeof checkoutUrl === 'string') {
             // Show processing state in modal
             setUpgradeModalState('processing');
+            trackCheckout('redirect');
 
             // Redirect to Stripe Checkout after a short delay
             setTimeout(() => {
@@ -593,6 +630,7 @@ export default function PricingPage() {
             }, 500);
           } else {
             // Pas d'URL de checkout = swap immediat (upgrade ou credit tier change)
+            trackCheckout('swap');
             setNewPlanCode(planId.toUpperCase());
             if (showUpgradeModal) {
               setUpgradeModalState('success');
@@ -611,6 +649,7 @@ export default function PricingPage() {
         }
       } else {
         const errorMessage = 'Error: Unable to create payment session';
+        trackCheckout('error');
         setUpgradeModalState('error');
         setUpgradeError(errorMessage);
 
@@ -620,6 +659,7 @@ export default function PricingPage() {
         };
       }
     } catch (error) {
+      trackCheckout('error');
       // Show a user-friendly error
       let errorMessage = 'Error creating subscription';
 
@@ -649,10 +689,21 @@ export default function PricingPage() {
 
   // Fonction unifiee pour la selection des plans (simple et enterprise)
   const handlePlanSelect = React.useCallback(async (planId: string, billingCycle: 'monthly' | 'yearly'): Promise<{ success: boolean; message?: string; error?: string }> => {
+    // One pricing_plan_clicked per click, labelled with the bounded branch it took.
+    const trackPlanClick = (outcome: string) => {
+      track('pricing_plan_clicked', {
+        plan_id: planId,
+        billing_cycle: billingCycle,
+        current_plan: typedSubscription?.subscription?.planCode || 'FREE',
+        is_ce_mode: isCeMode,
+        outcome,
+      });
+    };
     try {
 
       // Verifier l'authentification
       if (!isAuthenticated) {
+        trackPlanClick('unauthenticated');
         await loginWithRedirect();
         return { success: false, error: 'Authentication required' };
       }
@@ -662,6 +713,7 @@ export default function PricingPage() {
       // Enterprise routes to contact in CE too (Team and below keep self-serve: Cloud checkout,
       // or the linked cloud account in CE).
       if (planId === 'enterprise') {
+        trackPlanClick('enterprise_contact');
         const message = tCards('enterprise.contactMessage');
         router.push(`/contact?category=other&message=${encodeURIComponent(message)}`);
         return { success: true, message: 'Redirecting to contact' };
@@ -672,6 +724,7 @@ export default function PricingPage() {
       // delegated to the cloud (open its pricing page) when linked, or to cloud-account to connect
       // first when not. No-op for Cloud (isCeMode is false), so its checkout flow is unchanged.
       if (isCeMode) {
+        trackPlanClick('ce_delegate');
         showToast(t('cePricing.manageOnCloud'), 'info');
         // Billing lives on the linked cloud account (Problem 2). If linked, open the cloud pricing
         // page in a NEW tab to manage/pay there (CE stays open); if not yet linked, send to
@@ -690,6 +743,7 @@ export default function PricingPage() {
       // Gestion speciale pour le plan gratuit
       if (planId === 'free') {
         if (currentPlan === 'FREE') {
+          trackPlanClick('already_free');
           showToast('You are already on the Free plan.', 'info');
           return { success: false, error: 'Already on free plan' };
         }
@@ -698,12 +752,14 @@ export default function PricingPage() {
 
       // Verifier si c'est le meme plan avec la meme cadence ET le meme credit tier
       if (currentPlan === planId.toUpperCase() && currentCadence === billingCycle && !isCreditTierChanged) {
+        trackPlanClick('same_plan');
         showToast('You are already on this plan with this billing cycle.', 'info');
         return { success: false, error: 'Same plan selected' };
       }
 
       // Same plan + same cadence + different credit tier → open credit change modal
       if (currentPlan === planId.toUpperCase() && currentCadence === billingCycle && isCreditTierChanged) {
+        trackPlanClick('credit_change_modal');
         const isTeam = planId.toUpperCase() === 'TEAM';
         const normalizedPlanId = planId.toLowerCase();
         const newCreditCost = getCreditCost(normalizedPlanId, creditTierIndex);
@@ -731,12 +787,14 @@ export default function PricingPage() {
       // Changement de cycle de facturation (même plan, cycle différent)
       if (currentPlan !== 'FREE' && currentPlan === planId.toUpperCase() && currentCadence !== billingCycle) {
         // Ouvrir la modal de changement de cycle
+        trackPlanClick('cycle_change_modal');
         setShowBillingCycleModal(true);
         return { success: true, message: 'Billing cycle modal opened' };
       }
 
       // Changement de plan ET de cycle (bloqué pour l'instant)
       if (currentPlan !== 'FREE' && currentPlan !== planId.toUpperCase() && currentCadence !== billingCycle) {
+        trackPlanClick('blocked_plan_and_cycle');
         showToast(
           `Cannot change both plan and billing cycle at once. Please first change your billing cycle, then upgrade/downgrade your plan.`,
           'error'
@@ -746,6 +804,7 @@ export default function PricingPage() {
 
       // Changement de plan ET de credit tier (bloqué - forcer en deux étapes)
       if (currentPlan !== 'FREE' && currentPlan !== planId.toUpperCase() && isCreditTierChanged) {
+        trackPlanClick('blocked_plan_and_credits');
         showToast(
           t('errors.cannotChangePlanAndCredits'),
           'error'
@@ -763,15 +822,18 @@ export default function PricingPage() {
         // C'est un upgrade
         if (currentPlan !== 'FREE') {
           // Afficher le modal explicatif pour tous les upgrades (monthly et yearly)
+          trackPlanClick('upgrade_modal');
           setNewPlanCode(planId);
           setShowUpgradeModal(true);
           return { success: true, message: 'Upgrade modal opened' };
         } else {
           // Upgrade from FREE, proceed directly
+          trackPlanClick('proceed');
           return await proceedWithPlanSelection(planId, billingCycle);
         }
       } else if (isDowngrade(currentPlan, normalizedPlanId)) {
         // C'est un downgrade - ouvrir la modal de confirmation
+        trackPlanClick('downgrade_modal');
         // Use calcPrice which includes base plan + credit cost for total price
         const targetPlanData = plans.find(p => p.id === planId);
         const targetName = targetPlanData?.name || normalizedPlanId;
@@ -787,6 +849,7 @@ export default function PricingPage() {
       }
 
       // Dans tous les autres cas, proceder directement
+      trackPlanClick('proceed');
       return await proceedWithPlanSelection(planId, billingCycle);
     } catch (error) {
       console.error('Error in handlePlanSelect:', error);
@@ -1140,7 +1203,14 @@ export default function PricingPage() {
             ))}
           </div>
 
-          <p className="max-w-5xl mx-auto mt-8 text-center text-sm text-theme-secondary transition-colors duration-300">
+          {/* The cards list each plan's features one plan at a time; this is the
+              same content read the other way, across plans. Under the LAST grid
+              so it answers a reader who has scrolled all five. */}
+          <div className="max-w-5xl mx-auto mt-8 flex justify-center">
+            <ComparePlansLink />
+          </div>
+
+          <p className="max-w-5xl mx-auto mt-4 text-center text-sm text-theme-secondary transition-colors duration-300">
             {t('billing.taxNote')}
           </p>
         </div>
@@ -1259,6 +1329,15 @@ export default function PricingPage() {
                 </p>
               </>
             )}
+
+            {/* Also here, and not only under the plan grid: this page is the one
+                place in the app the comparison opens from, and top-ups are read
+                by exactly the person weighing them against a plan. Leaving it in
+                the subscription branch alone put a reader who flipped to
+                pay-as-you-go one toggle away from any way to compare at all. */}
+            <div className="max-w-5xl mx-auto mt-8 flex justify-center">
+              <ComparePlansLink />
+            </div>
           </div>
         </section>
       )}
@@ -1320,41 +1399,50 @@ export default function PricingPage() {
             </h2>
 
             <div className="space-y-6">
-              <div className="p-6 border border-black/10 dark:border-white/20 rounded-2xl bg-transparent">
-                <h3 className="text-xl font-semibold text-theme-primary mb-4 transition-colors duration-300">
-                  {t('faq.exceedCredits.question')}
-                </h3>
-                <p className="text-theme-secondary leading-relaxed transition-colors duration-300">
-                  {t('faq.exceedCredits.answer')}
-                </p>
-              </div>
+              {FAQ_KEYS.map((key) => (
+                <div key={key} className="p-6 border border-black/10 dark:border-white/20 rounded-2xl bg-transparent">
+                  <h3 className="text-xl font-semibold text-theme-primary mb-4 transition-colors duration-300">
+                    {t(`faq.${key}.question`)}
+                  </h3>
+                  <p className="text-theme-secondary leading-relaxed transition-colors duration-300">
+                    {t(`faq.${key}.answer`, creditFacts)}
+                  </p>
+                  {/* The worked figures sit inside the answer that asks for
+                      them, rather than in a band of their own further up the
+                      page. Three examples and not one average: a plain
+                      exchange, a workflow an agent builds for you, and a single
+                      classification step differ by two orders of magnitude, so
+                      one number would be true of almost nobody. See
+                      CREDIT_EXAMPLES for the measurement behind each.
 
-              <div className="p-6 border border-black/10 dark:border-white/20 rounded-2xl bg-transparent">
-                <h3 className="text-xl font-semibold text-theme-primary mb-4 transition-colors duration-300">
-                  {t('faq.changePlans.question')}
-                </h3>
-                <p className="text-theme-secondary leading-relaxed transition-colors duration-300">
-                  {t('faq.changePlans.answer')}
-                </p>
-              </div>
-
-              <div className="p-6 border border-black/10 dark:border-white/20 rounded-2xl bg-transparent">
-                <h3 className="text-xl font-semibold text-theme-primary mb-4 transition-colors duration-300">
-                  {t('faq.payAsYouGo.question')}
-                </h3>
-                <p className="text-theme-secondary leading-relaxed transition-colors duration-300">
-                  {t('faq.payAsYouGo.answer')}
-                </p>
-              </div>
-
-              <div className="p-6 border border-black/10 dark:border-white/20 rounded-2xl bg-transparent">
-                <h3 className="text-xl font-semibold text-theme-primary mb-4 transition-colors duration-300">
-                  {t('faq.sharedStorage.question')}
-                </h3>
-                <p className="text-theme-secondary leading-relaxed transition-colors duration-300">
-                  {t('faq.sharedStorage.answer')}
-                </p>
-              </div>
+                      One column on a phone, three from sm up, and each cell is
+                      free to wrap: "1,500 classification steps" does not fit a
+                      narrow column on one line and must not force one. */}
+                  {key === CREDIT_EXAMPLES_FAQ_KEY && (
+                    <>
+                      <p className="mt-6 text-sm font-medium text-theme-primary">
+                        {t(`faq.${key}.examplesCaption`, creditFacts)}
+                      </p>
+                      <dl className="mt-3 grid sm:grid-cols-3 gap-6 sm:gap-8">
+                        {CREDIT_EXAMPLES.map((example) => (
+                          <div key={example.id} className="min-w-0">
+                            <dt className="text-lg sm:text-xl font-semibold text-theme-primary">
+                              {t(`faq.${key}.examples.${example.id}.count`, {
+                                count: example.perEntryPack.toLocaleString(locale),
+                              })}
+                            </dt>
+                            <dd className="text-sm text-theme-secondary mt-1">
+                              {t(`faq.${key}.examples.${example.id}.detail`, {
+                                credits: example.creditsEach.toLocaleString(locale),
+                              })}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         </div>

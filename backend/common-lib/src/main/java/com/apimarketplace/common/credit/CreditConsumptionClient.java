@@ -101,7 +101,7 @@ public class CreditConsumptionClient {
             headers.set("X-User-ID", userId);
         }
         OrgContextHeaderForwarder.forward(headers);
-        applyGatewaySignature(headers, userId);
+        applyGatewaySignature(headers);
         return headers;
     }
 
@@ -894,16 +894,43 @@ public class CreditConsumptionClient {
         return url;
     }
 
-    private void applyGatewaySignature(HttpHeaders headers, String userId) {
+    /**
+     * Sign the identity the request ACTUALLY carries, never the one the caller
+     * had in hand.
+     *
+     * <p>{@code GatewayAuthenticationFilter} recomputes the HMAC over the
+     * {@code X-User-ID} and {@code X-Organization-ID} headers it reads off the
+     * wire. So the only safe input here is those same headers, read back after
+     * every writer has run. The caller's {@code userId} argument is NOT that
+     * value: {@link #userHeaders} runs {@code OrgContextHeaderForwarder.forward}
+     * first, which copies {@code X-User-ID} off the inbound servlet request
+     * whenever the caller passed none. A method that signs a null user then
+     * ships {@code X-User-ID: 1} inherited from its own caller, and the filter
+     * rejects it 401 "Invalid gateway secret".
+     *
+     * <p>That is not hypothetical: it silently killed every
+     * {@code scope-commit} / {@code scope-release} in production, because those
+     * two pass {@code userId = null}. A platform-credential generation reserved
+     * its markup (signed with a real user), then failed to commit it (signed
+     * with an empty one), and the reserve sweeper refunded the customer for an
+     * asset the provider had already delivered.
+     *
+     * <p>The org id was already read from the headers for exactly this reason;
+     * the user id is now read the same way. The method takes NO identity
+     * argument, so there is nothing left to pass that could disagree with what
+     * is sent - the bug cannot be written again here.
+     */
+    private void applyGatewaySignature(HttpHeaders headers) {
         if (gatewaySecretKey == null || gatewaySecretKey.isBlank()) {
             return;
         }
         String timestamp = String.valueOf(System.currentTimeMillis());
+        String effectiveUserId = headers.getFirst("X-User-ID");
         String organizationId = headers.getFirst("X-Organization-ID");
         headers.set("X-Provider-ID", INTERNAL_PROVIDER_ID);
         headers.set("X-Gateway-Timestamp", timestamp);
         headers.set("X-Gateway-Secret", computeGatewaySignature(
-                INTERNAL_PROVIDER_ID, userId, organizationId, timestamp));
+                INTERNAL_PROVIDER_ID, effectiveUserId, organizationId, timestamp));
     }
 
     private String computeGatewaySignature(String providerId, String userId, String organizationId, String timestamp) {

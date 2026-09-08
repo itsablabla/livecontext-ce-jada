@@ -518,6 +518,121 @@ class OnboardingServiceTest {
         }
 
         @Test
+        @DisplayName("analytics: completion emits onboarding_completed with the personal org and NO step event (single producer, no double count)")
+        void completionEmitsCompletedNotStep() {
+            com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics =
+                    mock(com.apimarketplace.auth.analytics.AuthAnalyticsEmitter.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(onboardingService, "analytics", analytics);
+            UserOnboarding onboarding = new UserOnboarding(testUser, "TestDisplay");
+            when(userRepository.findByProviderId("f47ac10b-58cc-4372-a567-0e02b2c3d479")).thenReturn(Optional.of(testUser));
+            when(onboardingRepository.findByUserId(1L)).thenReturn(Optional.of(onboarding));
+            when(onboardingRepository.findByUserProviderId("f47ac10b-58cc-4372-a567-0e02b2c3d479")).thenReturn(Optional.of(onboarding));
+            when(onboardingRepository.save(any(UserOnboarding.class))).thenAnswer(inv -> inv.getArgument(0));
+            com.apimarketplace.auth.domain.Organization org =
+                    new com.apimarketplace.auth.domain.Organization("TestDisplay's Workspace", "testdisplay", true, testUser);
+            java.util.UUID orgId = java.util.UUID.randomUUID();
+            org.setId(orgId);
+            when(organizationService.createPersonalOrganization(eq(testUser), eq("TestDisplay"))).thenReturn(org);
+
+            OnboardingRequest request = new OnboardingRequest("TestDisplay");
+            request.setCurrentStep(3);
+
+            onboardingService.completeOnboarding("f47ac10b-58cc-4372-a567-0e02b2c3d479", request);
+
+            verify(analytics).onboardingCompleted(eq(1L), any(UserOnboarding.class), eq(orgId.toString()));
+            verify(analytics, never()).onboardingStepSaved(anyLong(), any());
+        }
+
+        @Test
+        @DisplayName("analytics: a retried completion emits onboarding_completed only once")
+        void retriedCompletionEmitsOnce() {
+            com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics =
+                    mock(com.apimarketplace.auth.analytics.AuthAnalyticsEmitter.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(onboardingService, "analytics", analytics);
+            UserOnboarding onboarding = new UserOnboarding(testUser, "TestDisplay");
+            when(userRepository.findByProviderId("f47ac10b-58cc-4372-a567-0e02b2c3d479")).thenReturn(Optional.of(testUser));
+            when(onboardingRepository.findByUserId(1L)).thenReturn(Optional.of(onboarding));
+            when(onboardingRepository.findByUserProviderId("f47ac10b-58cc-4372-a567-0e02b2c3d479")).thenReturn(Optional.of(onboarding));
+            when(onboardingRepository.save(any(UserOnboarding.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            OnboardingRequest request = new OnboardingRequest("TestDisplay");
+            onboardingService.completeOnboarding("f47ac10b-58cc-4372-a567-0e02b2c3d479", request);
+            onboardingService.completeOnboarding("f47ac10b-58cc-4372-a567-0e02b2c3d479", request);
+
+            verify(analytics, times(1)).onboardingCompleted(eq(1L), any(UserOnboarding.class), any());
+        }
+
+        @Test
+        @DisplayName("persona questions are persisted on save (additive: older answers untouched)")
+        void personaQuestionsPersisted() {
+            UserOnboarding onboarding = new UserOnboarding(testUser, "TestDisplay");
+            onboarding.setUseCases(java.util.List.of("lead-generation"));
+            when(userRepository.findByProviderId("f47ac10b-58cc-4372-a567-0e02b2c3d479")).thenReturn(Optional.of(testUser));
+            when(onboardingRepository.findByUserId(1L)).thenReturn(Optional.of(onboarding));
+            when(onboardingRepository.save(any(UserOnboarding.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            OnboardingRequest request = new OnboardingRequest("TestDisplay");
+            request.setPrimaryGoal("email-follow-ups");
+            request.setToolsUsed(java.util.List.of("gmail", "slack"));
+            request.setPreviousTool("none");
+            request.setReferralSource("search");
+            request.setCurrentStep(2);
+
+            OnboardingResponse response = onboardingService.saveOnboarding("f47ac10b-58cc-4372-a567-0e02b2c3d479", request);
+
+            assertThat(response.getPrimaryGoal()).isEqualTo("email-follow-ups");
+            assertThat(response.getToolsUsed()).containsExactly("gmail", "slack");
+            assertThat(response.getPreviousTool()).isEqualTo("none");
+            assertThat(response.getReferralSource()).isEqualTo("search");
+            assertThat(onboarding.getUseCases()).containsExactly("lead-generation");
+        }
+
+        @Test
+        @DisplayName("a step-1 re-save with the persona fields absent leaves the stored persona answers intact (resume)")
+        void resumeKeepsPersonaAnswers() {
+            UserOnboarding onboarding = new UserOnboarding(testUser, "TestDisplay");
+            onboarding.setPrimaryGoal("reporting");
+            onboarding.setToolsUsed(java.util.List.of("slack"));
+            onboarding.setPreviousTool("n8n");
+            onboarding.setReferralSource("github");
+            when(userRepository.findByProviderId("f47ac10b-58cc-4372-a567-0e02b2c3d479")).thenReturn(Optional.of(testUser));
+            when(onboardingRepository.findByUserId(1L)).thenReturn(Optional.of(onboarding));
+            when(onboardingRepository.save(any(UserOnboarding.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            OnboardingRequest request = new OnboardingRequest("TestDisplay");
+            request.setProfession("sales");
+            request.setCurrentStep(1);
+
+            OnboardingResponse response = onboardingService.saveOnboarding("f47ac10b-58cc-4372-a567-0e02b2c3d479", request);
+
+            assertThat(response.getPrimaryGoal()).isEqualTo("reporting");
+            assertThat(response.getToolsUsed()).containsExactly("slack");
+            assertThat(response.getPreviousTool()).isEqualTo("n8n");
+            assertThat(response.getReferralSource()).isEqualTo("github");
+            assertThat(response.getProfession()).isEqualTo("sales");
+        }
+
+        @Test
+        @DisplayName("analytics: a plain step save emits onboarding_step_completed with the step number")
+        void stepSaveEmitsStep() {
+            com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics =
+                    mock(com.apimarketplace.auth.analytics.AuthAnalyticsEmitter.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(onboardingService, "analytics", analytics);
+            UserOnboarding onboarding = new UserOnboarding(testUser, "TestDisplay");
+            when(userRepository.findByProviderId("f47ac10b-58cc-4372-a567-0e02b2c3d479")).thenReturn(Optional.of(testUser));
+            when(onboardingRepository.findByUserId(1L)).thenReturn(Optional.of(onboarding));
+            when(onboardingRepository.save(any(UserOnboarding.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            OnboardingRequest request = new OnboardingRequest("TestDisplay");
+            request.setCurrentStep(2);
+
+            onboardingService.saveOnboarding("f47ac10b-58cc-4372-a567-0e02b2c3d479", request);
+
+            verify(analytics).onboardingStepSaved(1L, 2);
+            verify(analytics, never()).onboardingCompleted(anyLong(), any(), any());
+        }
+
+        @Test
         @DisplayName("should reject complete when email not verified")
         void shouldRejectCompleteWhenEmailNotVerified() {
             testUser.setEmailVerified(false);

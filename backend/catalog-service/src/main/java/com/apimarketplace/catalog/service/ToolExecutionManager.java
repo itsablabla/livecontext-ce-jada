@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -47,6 +48,31 @@ public class ToolExecutionManager {
     private final ApiRepository apiRepository;
     private final CeCatalogCloudRelay ceCatalogCloudRelay;
 
+    /**
+     * Per-plan availability of the integration being called. Injected through a
+     * setter rather than the Lombok constructor so the eight tests that build this
+     * manager by hand keep compiling, and so a slice without auth-client simply
+     * gates nothing.
+     */
+    private CatalogPlanAccess catalogPlanAccess;
+
+    @Autowired(required = false)
+    public void setCatalogPlanAccess(CatalogPlanAccess catalogPlanAccess) {
+        this.catalogPlanAccess = catalogPlanAccess;
+    }
+
+    /**
+     * Product-analytics emitter for {@code api_call_completed}. Setter-injected for the
+     * same reason as {@link #setCatalogPlanAccess}: the hand-built test managers keep
+     * compiling, and a slice without the bean simply emits nothing.
+     */
+    private com.apimarketplace.catalog.service.analytics.ApiCallAnalytics apiCallAnalytics;
+
+    @Autowired(required = false)
+    public void setApiCallAnalytics(com.apimarketplace.catalog.service.analytics.ApiCallAnalytics apiCallAnalytics) {
+        this.apiCallAnalytics = apiCallAnalytics;
+    }
+
     public ToolExecutionResponse executeTool(String toolIdOrSlug,
                                              ToolExecutionRequest request,
                                              String userId,
@@ -54,6 +80,43 @@ public class ToolExecutionManager {
                                              String requestId) {
         ToolContextService.ToolContext context = toolContextService.loadToolContext(toolIdOrSlug)
                 .orElseThrow(() -> new ToolNotFoundException(toolIdOrSlug));
+
+        // Analytics envelope around the WHOLE execution, so every exit is counted
+        // once: the success envelope, the caught-exception envelope, the CE relay,
+        // and the refusals that are rethrown for the controller (credits, plan,
+        // credential selection). The emitter is best-effort and never throws.
+        long analyticsStart = System.currentTimeMillis();
+        ToolExecutionResponse response = null;
+        RuntimeException failure = null;
+        try {
+            response = executeResolvedTool(context, toolIdOrSlug, request, userId, orgId, requestId);
+            return response;
+        } catch (RuntimeException e) {
+            failure = e;
+            throw e;
+        } finally {
+            if (apiCallAnalytics != null) {
+                apiCallAnalytics.emit(context, request, userId, orgId, response, failure,
+                        System.currentTimeMillis() - analyticsStart);
+            }
+        }
+    }
+
+    private ToolExecutionResponse executeResolvedTool(ToolContextService.ToolContext context,
+                                                      String toolIdOrSlug,
+                                                      ToolExecutionRequest request,
+                                                      String userId,
+                                                      String orgId,
+                                                      String requestId) {
+        // Plan gate, before ANY billing or credential work: an integration the
+        // account's plan does not include must cost nothing to be refused, and the
+        // refusal must name the plan that would include it. Throws
+        // PlanUpgradeRequiredException -> HTTP 403. Placed ahead of the CE relay
+        // because the relay is a CE path, where the gate is off anyway.
+        if (catalogPlanAccess != null) {
+            catalogPlanAccess.assertAllowed(userId, context.getApiSlug(), context.getToolSlug(),
+                    context.getToolName());
+        }
 
         // CE cloud relay: when the install is cloud-linked, the admin selected the CLOUD
         // catalog source, and NO local platform credential exists for the integration of a
@@ -667,7 +730,7 @@ public class ToolExecutionManager {
      *
      * <p>Exists as a number rather than as prose because two callers have to be
      * sized on it and neither can afford to guess: the {@code generation} MCP
-     * tool's own budget and the {@code core:generate} node's read timeout. A
+     * tool's own budget and the {@code agent:generate} node's read timeout. A
      * caller that gives up before this elapses does not cancel anything. The
      * generation completes, the asset is stored and the reservation is
      * COMMITTED, while the caller is told the generation service could not be

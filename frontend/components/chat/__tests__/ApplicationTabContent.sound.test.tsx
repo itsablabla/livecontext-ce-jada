@@ -29,6 +29,7 @@ const announcePresenceRef = vi.hoisted(() => ({
 /** Last mute state the frame was handed. */
 const iframeMutedRef = vi.hoisted(() => ({ current: undefined as boolean | undefined }));
 
+vi.mock('@/i18n/navigation', () => ({ usePathname: () => '/app/workflow/wf-1' }));
 vi.mock('@/lib/api/orchestrator/publication.service', () => ({
   publicationService: { getShowcaseRender: vi.fn(), resetApplicationData: vi.fn() },
 }));

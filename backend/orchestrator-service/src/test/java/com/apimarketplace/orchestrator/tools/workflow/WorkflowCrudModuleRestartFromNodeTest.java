@@ -355,18 +355,23 @@ class WorkflowCrudModuleRestartFromNodeTest {
     }
 
     @Test
-    @DisplayName("An epoch the run does not have surfaces the backend's explanation")
+    @DisplayName("An epoch the run cannot replay surfaces the backend's explanation")
     void unknownEpochKeepsTheBackendExplanation() {
+        // The sentence is STUBBED here, so this test cannot notice the service rewording it -
+        // it is quoted from StepRerunService.resolveRequestedEpoch and has to be kept in step
+        // with it. The wording matters: the same refusal also covers a run whose epoch record
+        // was never written, and that caller DOES see the epoch in the listing.
         when(workflowRunRepository.findByRunIdPublic(RUN_ID)).thenReturn(Optional.of(run(TENANT_ID)));
         when(stepRerunService.rerunFromStep(eq(RUN_ID), eq(NODE), eq(false), any()))
-                .thenThrow(new IllegalArgumentException("Epoch 99 does not exist on this run for trigger trigger:start."));
+                .thenThrow(new IllegalArgumentException("Epoch 99 cannot be restarted on its own for "
+                        + "trigger trigger:start: this run kept no restorable record of it."));
 
         ToolExecutionResult result = restart(
                 Map.of("run_id", RUN_ID, "node", NODE, "epoch", 99), context(null));
 
         assertThat(result.success()).isFalse();
         assertThat(result.errorCode()).isEqualTo(ToolErrorCode.INVALID_PARAMETER_VALUE);
-        assertThat(result.error()).contains("does not exist on this run");
+        assertThat(result.error()).contains("no restorable record");
     }
 
     @SuppressWarnings("unchecked")

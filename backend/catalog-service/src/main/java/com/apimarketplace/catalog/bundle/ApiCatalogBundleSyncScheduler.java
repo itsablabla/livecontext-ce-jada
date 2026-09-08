@@ -1,6 +1,7 @@
 package com.apimarketplace.catalog.bundle;
 
 import com.apimarketplace.catalog.domain.ApiCatalogBundleSyncStatusEntity;
+import com.apimarketplace.catalog.repository.ApiCatalogBundleRepository;
 import com.apimarketplace.catalog.repository.ApiCatalogBundleSyncStatusRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +40,8 @@ import java.time.temporal.ChronoUnit;
 public class ApiCatalogBundleSyncScheduler {
 
     private final ApiCatalogBundleFetcher fetcher;
+    /** Reads this install's applied bundle identity, payload-free. */
+    private final ApiCatalogBundleService bundleService;
     private final ApiCatalogBundleVerifier verifier;
     private final ApiCatalogBundleApplier applier;
     private final ApiCatalogBundleSyncStatusRepository syncStatusRepo;
@@ -85,7 +88,20 @@ public class ApiCatalogBundleSyncScheduler {
             log.info("API catalog bundle sync: TOFU bootstrapped trust - pinned cloud signing key '{}'", boot.keyId());
         }
 
-        ApiCatalogBundleFetcher.FetchResult fetched = fetcher.fetchLatest();
+        // Send the checksum we already hold so an unchanged bundle comes back as
+        // a bodiless 304. Read it through the payload-free projection: asking
+        // "what do I have?" must not pull a stored payload into heap.
+        // Only go conditional once this install can serve the price re-offer
+        // locally. Until the active row carries its bundle's prices, fetch in
+        // full: a 304 would leave nothing to re-offer and would quietly stop
+        // pricing integrations whose provider key shows up later. That first
+        // full fetch stores the prices, so this is a one-time cost per install.
+        String knownChecksum = bundleService.getActiveBundleMetadata()
+                .filter(m -> m.getPricesStored() != null && m.getPricesStored() == 1)
+                .map(ApiCatalogBundleRepository.ActiveBundleMeta::getChecksum)
+                .orElse(null);
+
+        ApiCatalogBundleFetcher.FetchResult fetched = fetcher.fetchLatest(knownChecksum);
         switch (fetched.status()) {
             case FETCHED -> {
                 ApiCatalogBundleVerifier.Result v = verifier.verify(fetched.bundle());
@@ -115,6 +131,16 @@ public class ApiCatalogBundleSyncScheduler {
                     recordFailure("APPLY_FAILED",
                             e.getClass().getSimpleName() + ": " + e.getMessage());
                 }
+            }
+            case NOT_MODIFIED -> {
+                // The cloud confirmed our bundle is still the active one, so
+                // there is no catalog work to do. The price re-offer still runs,
+                // from the copy stored when the bundle was applied - that is what
+                // keeps a poll cheap WITHOUT deleting the behaviour that prices an
+                // integration whose provider key arrived after the bundle did.
+                // reofferStoredPrices writes the same OK status an ALREADY_APPLIED
+                // does, so the operator UI shows a healthy sync.
+                applier.reofferStoredPrices();
             }
             case NO_ACTIVE -> {
                 // Cloud has no active bundle yet - not a failure. Still record

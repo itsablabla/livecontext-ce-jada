@@ -238,6 +238,22 @@ export class RedisPublisher {
           timestamp: new Date().toISOString(),
         });
       }
+
+      // ask_user question card (bridge mirror of ConversationRedisStreamingCallback): the tool
+      // sets userQuestionRequested only while the question is still OPEN. When its park painted
+      // the card itself (approvalCardEmitted) the card is already on screen; otherwise it could
+      // not park at all and the card goes up here, non-blocking. Frontend discriminant: 'askUser'.
+      if (!cardAlreadyEmitted && metadata.userQuestionRequested && metadata.userQuestion
+          && metadata.userQuestion.toolCallId) {
+        await this._publish({
+          streamId: this.streamId,
+          askUser: {
+            toolCallId: metadata.userQuestion.toolCallId,
+            questions: metadata.userQuestion.questions || [],
+          },
+          timestamp: new Date().toISOString(),
+        });
+      }
     }
     await this._publish(event);
     // Buffer for snapshot replay (see publishToolCall) so reconnect renders completed tool cards.

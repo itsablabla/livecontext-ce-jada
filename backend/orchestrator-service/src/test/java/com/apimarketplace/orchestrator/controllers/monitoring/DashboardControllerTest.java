@@ -5,6 +5,7 @@ import com.apimarketplace.orchestrator.controllers.dto.ActiveAutomationDto;
 import com.apimarketplace.orchestrator.controllers.dto.HomeStatusDto;
 import com.apimarketplace.orchestrator.repository.NotificationReadStateRepository;
 import com.apimarketplace.orchestrator.services.ActiveAutomationsService;
+import com.apimarketplace.orchestrator.services.badge.BadgeService;
 import com.apimarketplace.orchestrator.services.notification.NotificationService;
 import com.apimarketplace.orchestrator.services.notification.NotificationsResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,6 +39,10 @@ class DashboardControllerTest {
     @Mock private TenantResolver tenantResolver;
     @Mock private NotificationService notificationService;
     @Mock private NotificationReadStateRepository readStateRepository;
+    // Home-status is also the trophy evaluator's trigger. Without this mock
+    // @InjectMocks leaves the field null and every test here NPEs on the poll
+    // hook - which is exactly what happened when the badge feature landed.
+    @Mock private BadgeService badgeService;
 
     @InjectMocks
     private DashboardController controller;
@@ -115,7 +120,7 @@ class DashboardControllerTest {
         // All-null record fields are fine for this test - we only verify the
         // controller does not transform / replace the upstream list.
         ActiveAutomationDto automation = new ActiveAutomationDto(
-                null, null, "test-wf", null, null, null, null, null, null, null, null);
+                null, null, "test-wf", null, null, null, null, null, null, null, null, null);
 
         when(tenantResolver.resolve(any(HttpServletRequest.class))).thenReturn("user-7");
         when(activeAutomationsService.getActiveAutomations("user-7", null, null))

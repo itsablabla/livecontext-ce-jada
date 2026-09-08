@@ -190,4 +190,26 @@ class StopOnErrorNodeTest {
             assertEquals("BUILD_ERR", node.getConfig().errorCode());
         }
     }
+
+    @Test
+    @DisplayName("reports errorMessage / errorCode under the plan's key names, while the OUTPUT keeps its declared snake_case")
+    @SuppressWarnings("unchecked")
+    void reportsResolvedParamsUnderPlanKeyNames() {
+        Core.StopOnErrorConfig config = new Core.StopOnErrorConfig("Critical failure", "ERR_001");
+        StopOnErrorNode node = new StopOnErrorNode("core:stop_on_error", config);
+
+        NodeExecutionResult result = node.execute(context);
+
+        Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+        // StopOnErrorConfig calls these errorMessage / errorCode. Reporting them as
+        // error_message / error_code gave the Params column two keys the plan does
+        // not have, which the alignment check reads as "configured but not reported".
+        assertEquals("Critical failure", params.get("errorMessage"));
+        assertEquals("ERR_001", params.get("errorCode"));
+        assertFalse(params.containsKey("error_message"));
+        assertFalse(params.containsKey("error_code"));
+        // The OUTPUT fields are a different contract and keep their declared names.
+        assertEquals("Critical failure", result.output().get("error_message"));
+        assertEquals("ERR_001", result.output().get("error_code"));
+    }
 }

@@ -660,6 +660,14 @@ public class ApiSubmissionOrchestrator {
         if (rateLimitsNode != null && !rateLimitsNode.isMissingNode() && !rateLimitsNode.isNull() && rateLimitsNode.isObject()) {
             api.setRateLimits(rateLimitsNode.toString());
         }
+        // errorPolicy is an ARRAY (ordered rules, first match wins), unlike every other
+        // API-level JSON block here: a non-array is dropped rather than stored, because the
+        // engine would ignore it at runtime and a stored-but-inert policy is exactly the kind
+        // of green-and-dead declaration this codebase keeps paying for.
+        JsonNode errorPolicyNode = data.path("errorPolicy");
+        if (errorPolicyNode != null && errorPolicyNode.isArray() && !errorPolicyNode.isEmpty()) {
+            api.setErrorPolicy(errorPolicyNode.toString());
+        }
 
         long currentTime = System.currentTimeMillis();
         api.setIsActive(true);

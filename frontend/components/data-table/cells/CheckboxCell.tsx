@@ -16,7 +16,7 @@ export function CheckboxCell({ value, onSaveAndExit }: VisualCellProps) {
         }}
         className={`h-5 w-5 rounded-md border-2 transition-all flex items-center justify-center ${
           checked
-            ? 'bg-black border-black text-white dark:bg-white dark:border-white dark:text-black'
+            ? 'bg-[var(--accent-primary)] border-[var(--accent-primary)] text-[var(--accent-foreground)]'
             : 'border-slate-300 dark:border-slate-600 bg-transparent hover:border-slate-500 dark:hover:border-slate-400'
         }`}
       >

@@ -9,6 +9,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.http.ResponseEntity;
 
 import java.util.Map;
@@ -141,6 +143,46 @@ class GlobalExceptionHandlerTest {
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
             assertThat(response.getBody()).containsEntry("error", "INTERNAL_ERROR");
             assertThat(response.getBody()).containsEntry("message", "An unexpected error occurred");
+        }
+    }
+
+    @Nested
+    @DisplayName("Async request timeout")
+    class AsyncTimeoutTests {
+
+        /**
+         * The public bundle download is this service's first
+         * {@code StreamingResponseBody} endpoint, so it is the first that can
+         * time out with part of the body already on the wire. Answering with a
+         * 500 JSON body there would try to set headers on a committed response,
+         * which surfaces as an unrelated container error and buries the real
+         * cause.
+         */
+        @Test
+        @DisplayName("On a committed response nothing is written: the truncated body is left as-is")
+        void committedResponseIsLeftAlone() {
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            response.setCommitted(true);
+
+            ResponseEntity<Map<String, Object>> result = handler.handleAsyncTimeout(
+                    new AsyncRequestTimeoutException(), response);
+
+            assertThat(result)
+                    .as("returning a body here would try to set headers on a committed response")
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("Before anything is sent the caller gets a 503 naming the timeout")
+        void uncommittedResponseGets503() {
+            ResponseEntity<Map<String, Object>> result = handler.handleAsyncTimeout(
+                    new AsyncRequestTimeoutException(), new MockHttpServletResponse());
+
+            assertThat(result).isNotNull();
+            assertThat(result.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+            assertThat(result.getBody())
+                    .containsEntry("success", false)
+                    .containsEntry("error", "ASYNC_TIMEOUT");
         }
     }
 }

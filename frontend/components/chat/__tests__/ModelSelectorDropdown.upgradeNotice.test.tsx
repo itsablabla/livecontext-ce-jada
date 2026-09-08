@@ -15,6 +15,11 @@ import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/lib/hooks/useModelCostBasis', () => ({
+  // The picker asks once for the credit-estimate basis; these tests are not
+  // about the estimate, and an unanswered basis renders no estimate at all.
+  useModelCostBasis: () => ({ basis: null, isLoading: false }),
+}));
 vi.mock('next/image', () => ({ default: () => null }));
 // The row reports only whether the verdict reached it; what it draws with that
 // is ModelInfo's own suite.

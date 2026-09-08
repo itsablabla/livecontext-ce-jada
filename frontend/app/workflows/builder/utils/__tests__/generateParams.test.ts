@@ -8,7 +8,7 @@ import {
 } from '../generateParams';
 
 /**
- * Plan round trip and price-size derivation for the `core:generate` node.
+ * Plan round trip and price-size derivation for the `agent:generate` node.
  *
  * <p>The round trip matters because a stringified number would change what the
  * platform bills the run on, and a dropped parameter would silently change what

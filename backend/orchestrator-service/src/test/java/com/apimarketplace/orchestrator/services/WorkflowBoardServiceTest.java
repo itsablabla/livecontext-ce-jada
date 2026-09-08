@@ -272,6 +272,109 @@ class WorkflowBoardServiceTest {
             assertThat(response.columns().get("paused")).hasSize(1);
             assertThat(response.columns().get("needsReview")).hasSize(1);
         }
+
+        // ─── Spending cap on the card ───
+        //
+        // The card compares the cap against the PERIOD spend, never against the
+        // production run's lifetime cost: a pinned workflow keeps one run for
+        // months, so its total crosses the cap long before the period does.
+
+        @Test
+        @DisplayName("carries the period spend of the period currently open")
+        void carriesCurrentPeriodSpend() {
+            WorkflowEntity wf = mockWorkflow("w1", 3);
+            wf.setBudgetCredits(new java.math.BigDecimal("10"));
+            wf.setBudgetPeriodMode("monthly");
+            setPeriodSpend(wf, new java.math.BigDecimal("4"),
+                    com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                            .periodStart("monthly", java.time.Instant.now()));
+            WorkflowRunEntity run = mockRunWithWorkflow(wf, "run-1", RunStatus.WAITING_TRIGGER);
+
+            when(workflowService.listWorkflows(TENANT, null, null)).thenReturn(List.of(wf));
+            when(runRepository.countByWorkflowIds(anyCollection())).thenReturn(Collections.emptyList());
+            when(runRepository.findProductionRunsBatch(anyCollection())).thenReturn(List.of(run));
+            when(signalWaitRepository.findRunIdsWithPendingApprovals(anyCollection())).thenReturn(List.of());
+
+            WorkflowBoardCard card = boardService.buildBoard(TENANT, null, null)
+                    .columns().get("production").get(0);
+            assertThat(card.budgetCredits()).isEqualByComparingTo("10");
+            assertThat(card.budgetPeriodSpent()).isEqualByComparingTo("4");
+            assertThat(card.budgetPeriodMode()).isEqualTo("monthly");
+        }
+
+        @Test
+        @DisplayName("a spend recorded in an EXPIRED period reads as zero, so the card is not stuck red")
+        void expiredPeriodSpendReadsAsZero() {
+            // This is the regression the whole period model exists for: under the
+            // old lifetime rule a workflow that hit its cap once was marked over
+            // budget for good, with no reset in sight.
+            WorkflowEntity wf = mockWorkflow("w1", 3);
+            wf.setBudgetCredits(new java.math.BigDecimal("10"));
+            wf.setBudgetPeriodMode("monthly");
+            setPeriodSpend(wf, new java.math.BigDecimal("50"),
+                    com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                            .periodStart("monthly", java.time.Instant.now())
+                            .minus(40, java.time.temporal.ChronoUnit.DAYS));
+            WorkflowRunEntity run = mockRunWithWorkflow(wf, "run-1", RunStatus.WAITING_TRIGGER);
+
+            when(workflowService.listWorkflows(TENANT, null, null)).thenReturn(List.of(wf));
+            when(runRepository.countByWorkflowIds(anyCollection())).thenReturn(Collections.emptyList());
+            when(runRepository.findProductionRunsBatch(anyCollection())).thenReturn(List.of(run));
+            when(signalWaitRepository.findRunIdsWithPendingApprovals(anyCollection())).thenReturn(List.of());
+
+            WorkflowBoardCard card = boardService.buildBoard(TENANT, null, null)
+                    .columns().get("production").get(0);
+            assertThat(card.budgetPeriodSpent()).isEqualByComparingTo("0");
+        }
+
+        @Test
+        @DisplayName("ships the date the allowance starts again, so a card can say WHEN")
+        void shipsTheResetDate() {
+            // Untested, this is a field the mapper can simply stop filling: the
+            // popover then silently degrades from "starts again on Oct 01" to no
+            // sentence at all, which is the one thing it exists to say.
+            WorkflowEntity wf = mockWorkflow("w1", 3);
+            setPeriodSpend(wf, new java.math.BigDecimal("4"),
+                    com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                            .periodStart("monthly", java.time.Instant.now()));
+            WorkflowRunEntity run = mockRunWithWorkflow(wf, "run-1", RunStatus.WAITING_TRIGGER);
+
+            when(workflowService.listWorkflows(TENANT, null, null)).thenReturn(List.of(wf));
+            when(runRepository.countByWorkflowIds(anyCollection())).thenReturn(Collections.emptyList());
+            when(runRepository.findProductionRunsBatch(anyCollection())).thenReturn(List.of(run));
+            when(signalWaitRepository.findRunIdsWithPendingApprovals(anyCollection())).thenReturn(List.of());
+
+            WorkflowBoardCard card = boardService.buildBoard(TENANT, null, null)
+                    .columns().get("production").get(0);
+            assertThat(card.budgetPeriodResetsAt())
+                    .isEqualTo(com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                            .nextPeriodStart("monthly", java.time.Instant.now()));
+        }
+
+        @Test
+        @DisplayName("an uncapped workflow still ships its spend: one field, one meaning, on every card DTO")
+        void uncappedStillShipsPeriodSpend() {
+            // This field used to be nulled when no cap was set, which gave one
+            // name two meanings: WorkflowSummary and ApplicationRunVersionSummary
+            // always send the figure, so the same workflow read differently
+            // depending on which surface asked, and the two disagreed on screen.
+            // Whether a chip is worth DRAWING is a rendering question, answered
+            // once on the client (budgetChipHasContent) for every surface.
+            WorkflowEntity wf = mockWorkflow("w1", 3);
+            setPeriodSpend(wf, new java.math.BigDecimal("500"),
+                    com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                            .periodStart("monthly", java.time.Instant.now()));
+            WorkflowRunEntity run = mockRunWithWorkflow(wf, "run-1", RunStatus.WAITING_TRIGGER);
+
+            when(workflowService.listWorkflows(TENANT, null, null)).thenReturn(List.of(wf));
+            when(runRepository.countByWorkflowIds(anyCollection())).thenReturn(Collections.emptyList());
+            when(runRepository.findProductionRunsBatch(anyCollection())).thenReturn(List.of(run));
+            when(signalWaitRepository.findRunIdsWithPendingApprovals(anyCollection())).thenReturn(List.of());
+
+            WorkflowBoardCard card = boardService.buildBoard(TENANT, null, null)
+                    .columns().get("production").get(0);
+            assertThat(card.budgetPeriodSpent()).isEqualByComparingTo("500");
+        }
     }
 
     @Nested
@@ -1065,6 +1168,24 @@ class WorkflowBoardServiceTest {
             throw new RuntimeException(e);
         }
         return wf;
+    }
+
+    /**
+     * The period columns are DB-managed ({@code insertable=false, updatable=false})
+     * and deliberately have no setters, so a test seeds them the same way this
+     * file already seeds the JPA-generated id.
+     */
+    private static void setPeriodSpend(WorkflowEntity wf, java.math.BigDecimal spent, java.time.Instant start) {
+        try {
+            var spentField = WorkflowEntity.class.getDeclaredField("budgetPeriodSpent");
+            spentField.setAccessible(true);
+            spentField.set(wf, spent);
+            var startField = WorkflowEntity.class.getDeclaredField("budgetPeriodStartedAt");
+            startField.setAccessible(true);
+            startField.set(wf, start);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /** An APPLICATION-type board row carrying a {@code sourcePublicationId} (acquired/published app). */

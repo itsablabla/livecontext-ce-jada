@@ -973,7 +973,9 @@ class WorkflowRunQueryControllerTest {
             UUID wf = UUID.randomUUID();
             com.apimarketplace.orchestrator.controllers.dto.ApplicationRunVersionSummary summary =
                 new com.apimarketplace.orchestrator.controllers.dto.ApplicationRunVersionSummary(
-                    "run-9", Instant.parse("2026-06-01T00:00:00Z"), 4);
+                    "run-9", Instant.parse("2026-06-01T00:00:00Z"), 4,
+                    new java.math.BigDecimal("500"), "monthly", new java.math.BigDecimal("12"),
+                    Instant.parse("2026-07-01T00:00:00Z"));
             org.mockito.Mockito.when(applicationRunVersionBatchService.resolve(Set.of(wf), "org-1", "user-1"))
                 .thenReturn(Map.of(wf, summary));
 

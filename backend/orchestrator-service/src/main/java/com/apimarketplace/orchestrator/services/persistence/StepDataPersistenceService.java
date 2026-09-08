@@ -587,18 +587,17 @@ public class StepDataPersistenceService {
                 resolvedParamsMap = (Map<String, Object>) resolvedParamsMap.get("parameters");
             }
 
-            Map<String, Object> copied = new HashMap<>();
-            resolvedParamsMap.forEach((k, v) -> {
-                if (v instanceof String str) {
-                    // Filter invalid templates, unresolved expressions, and JS artifacts
-                    if (str.startsWith("INVALID_TEMPLATE:") || str.contains("${")
-                            || "[object Object]".equals(str)) {
-                        return;
-                    }
-                }
-                copied.put(k, v);
-            });
-            return copied;
+            // Every reported parameter is kept, including the ones that did not
+            // resolve. This used to DROP any string starting with
+            // "INVALID_TEMPLATE:", containing "${" or equal to "[object Object]",
+            // which produced the worst possible outcome for the reader: the
+            // parameter they configured simply was not in the run's Params column,
+            // indistinguishable from one they never set. Two of the three patterns
+            // also hit legitimate values (a code node's JS template literal, a shell
+            // command, an HTTP body all contain "${"), so real configuration went
+            // missing as well. The inspector now labels an unresolved value as such;
+            // deciding what is worth showing is its job, not this writer's.
+            return new HashMap<>(resolvedParamsMap);
         }
         return Collections.emptyMap();
     }

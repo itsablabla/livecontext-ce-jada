@@ -7,7 +7,7 @@ import {
   Bot, ChevronDown, ChevronRight, Check, Search, X, Loader2, Info, Workflow,
   Webhook, Copy, Pencil, ArrowRight, ArrowLeft, User, Settings,
   Puzzle, MessageCircle, Code, ExternalLink, Palette, Clock, Globe, Zap, Plus,
-  AppWindow, Table, Monitor, FileText, ShieldCheck, Sparkles, Trash2
+  AppWindow, Table, Monitor, FileText, ShieldCheck, Sparkles, Trash2, Brain
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,7 +26,7 @@ import { useVisibleModels, getModelsCache, isEmptySelectedModel, toNonBridgeSele
 import { ModelPicker } from '@/components/ai/ModelPicker';
 import { useMcpApis, fetchApiTools, ApiTool } from '@/app/workflows/builder/hooks/useMcpData';
 import { apiClient } from '@/lib/api/api-client';
-import { getAllowedIds, buildToolsConfigPayload, isGenerationEnabled, getGrant, getFileAccessMode, GRANT_FAMILIES, type ResourceGrant } from '@/lib/agents/toolsConfigAccess';
+import { getAllowedIds, buildToolsConfigPayload, isGenerationEnabled, getGrant, getFileAccessMode, getMemoryAccessMode, GRANT_FAMILIES, type ResourceGrant } from '@/lib/agents/toolsConfigAccess';
 import { initialTurnLimits, buildChangedTurnLimits } from '@/lib/agents/agentTurnLimits';
 import { initialCompaction, buildChangedCompaction } from '@/lib/agents/agentCompaction';
 import { Switch } from '@/components/ui/switch';
@@ -185,6 +185,7 @@ interface AgentData {
     agentAccessMode?: 'read' | 'write';
     applicationAccessMode?: 'read' | 'write';
     skillAccessMode?: 'read' | 'write';
+    memoryAccessMode?: 'read' | 'write';
   } | null;
 }
 
@@ -471,6 +472,7 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
   // Files read/write (axis 2). No grant axis - applies to the agent's file access
   // whether scoped or full. 'read' blocks create_folder/move_to_folder. Default 'write'.
   const [fileAccessMode, setFileAccessMode] = useState<'read' | 'write'>('write');
+  const [memoryAccessMode, setMemoryAccessMode] = useState<'read' | 'write'>('write');
   const [resourceAccessPopoverOpen, setResourceAccessPopoverOpen] = useState(false);
   const [resourceSearchQuery, setResourceSearchQuery] = useState('');
   // Which resource families are expanded. CREATE (or no toolsConfig): expand all - the user
@@ -1048,6 +1050,10 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
       // Files: default 'write' when absent (getFileAccessMode), so an edit of a
       // pre-fileAccessMode agent shows R/W (its current backend behavior).
       setFileAccessMode(getFileAccessMode(tc));
+      // Memory: same rule. Reading it back is what stops an edit from resetting a
+      // recall-only agent to full write access, since the payload builder rebuilds
+      // the whole tools_config from this state.
+      setMemoryAccessMode(getMemoryAccessMode(tc));
     }
   }, [isEditMode, agent?.toolsConfig]);
 
@@ -1406,6 +1412,7 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
         applicationAccessMode,
         skillAccessMode,
         fileAccessMode,
+        memoryAccessMode,
       });
 
       const payload: any = {
@@ -1874,6 +1881,7 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
                   disabled={modelsLoading}
                   providerLabel={t('modelProviderLabel')}
                   modelLabel={t('modelNameLabel')}
+                  costProfile="agentConversation"
                 />
 
                 {/* Credit Budget */}
@@ -2184,6 +2192,38 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
                       </div>
                     </PopoverContent>
                   </Popover>
+                </div>
+
+                {/* Long-term memory read/write axis. Standalone rather than attached to a
+                    picker like skills or files: memory has no id list to scope, only this
+                    axis. What the agent saves lands in every agent's context in the
+                    workspace, so the choice belongs next to the other capability switches
+                    rather than buried in an advanced panel. */}
+                <div>
+                  <label className="flex items-center gap-1.5 text-sm font-medium text-theme-primary mb-2">
+                    {t('memoryAccessLabel')}
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3.5 w-3.5 text-theme-secondary cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p className="text-xs">{t('memoryAccessInfo')}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setMemoryAccessMode(prev => (prev === 'read' ? 'write' : 'read'))}
+                    className="flex h-auto min-h-[44px] w-full items-center justify-between rounded-xl border border-theme bg-[var(--bg-primary)] px-4 py-3 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Brain className="w-4 h-4 text-theme-secondary" />
+                      <span>{memoryAccessMode === 'read' ? t('memoryAccessRead') : t('memoryAccessWrite')}</span>
+                    </div>
+                    <Switch checked={memoryAccessMode === 'write'} presentational />
+                  </button>
                 </div>
 
                 {/* Web Search toggle */}
@@ -2844,6 +2884,7 @@ export const CreateAgentModal: React.FC<CreateAgentModalProps> = ({
                               providerLabel={tc('compactionModelProviderLabel')}
                               modelLabel={tc('compactionModelNameLabel')}
                               excludeBridgeProviders
+                              costProfile="chatConversation"
                             />
                           ) : (
                             <p className="text-xs text-theme-secondary">{tc('compactionModelPlatformDefault')}</p>

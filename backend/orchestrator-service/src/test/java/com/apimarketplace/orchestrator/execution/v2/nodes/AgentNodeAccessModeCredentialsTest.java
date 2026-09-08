@@ -49,6 +49,7 @@ class AgentNodeAccessModeCredentialsTest {
         toolsConfig.put("applicationAccessMode", "write");
         toolsConfig.put("skillAccessMode", "read");
         toolsConfig.put("fileAccessMode", "read");
+        toolsConfig.put("memoryAccessMode", "read");
         when(agentConfigResolver.getToolsConfig(eq(entityId), eq("tenant-1"), isNull()))
             .thenReturn(toolsConfig);
         when(agentClient.executeAgent(any(AgentExecutionRequestDto.class)))
@@ -75,6 +76,9 @@ class AgentNodeAccessModeCredentialsTest {
         assertThat(credentials).containsEntry("applicationAccessMode", "write");
         assertThat(credentials).containsEntry("skillAccessMode", "read");
         assertThat(credentials).containsEntry("fileAccessMode", "read");
+        // Workflow agents run down this path, not the chat one, so a mode forwarded
+        // only in chat would leave every scheduled and workflow run unrestricted.
+        assertThat(credentials).containsEntry("memoryAccessMode", "read");
     }
 
     @Test

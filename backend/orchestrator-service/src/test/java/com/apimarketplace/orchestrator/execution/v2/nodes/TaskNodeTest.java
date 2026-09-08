@@ -531,7 +531,49 @@ class TaskNodeTest {
             assertFalse(result.isSuccess());
             Map<String, Object> params = resolvedParamsOf(result);
             assertNotNull(params, "resolved_params must be present on failure");
-            assertEquals(taskId.toString(), params.get("task_id"));
+            // `taskId`, not `task_id`: the reported parameters use the same name
+            // the plan and the builder form do, so the Params column can label it.
+            assertEquals(taskId.toString(), params.get("taskId"));
+            assertFalse(params.containsKey("task_id"), "the snake_case alias must not come back");
+        }
+
+
+        @Test
+        @DisplayName("get_task reports taskId under the plan's key name on the SUCCESS path too, not only when it fails")
+        void reportsTaskIdOnSuccess() {
+            UUID taskId = UUID.randomUUID();
+            Core.TaskConfig config = new Core.TaskConfig(
+                "get_task", taskId.toString(), null, null, null, null, null, null, null, null, null);
+            TaskNode node = buildNode(config);
+            when(mockAgentClient.getTaskForWorkflow("tenant-1", taskId))
+                .thenReturn(Map.of("id", taskId.toString(), "status", "pending"));
+
+            NodeExecutionResult result = node.execute(context);
+
+            assertTrue(result.isSuccess());
+            Map<String, Object> params = resolvedParamsOf(result);
+            // The failure path is already covered above; a rename that only touched
+            // the success path would have gone unnoticed, and the success path is
+            // the one a reader opens most.
+            assertEquals(taskId.toString(), params.get("taskId"));
+            assertFalse(params.containsKey("task_id"));
+        }
+
+        @Test
+        @DisplayName("create_task reports the configured taskContext, which used to be sent to agent-service and never shown")
+        void reportsTaskContext() {
+            Core.TaskConfig config = new Core.TaskConfig(
+                "create_task", null, "Write the report", "Use the Q3 numbers", "high",
+                null, null, null, null, null, Map.of("quarter", "Q3"));
+            TaskNode node = buildNode(config);
+            when(mockAgentClient.createTaskForWorkflow(eq("tenant-1"), any()))
+                .thenReturn(Map.of("id", UUID.randomUUID().toString()));
+
+            NodeExecutionResult result = node.execute(context);
+
+            assertTrue(result.isSuccess());
+            Map<String, Object> params = resolvedParamsOf(result);
+            assertEquals(Map.of("quarter", "Q3"), params.get("taskContext"));
         }
     }
 }

@@ -38,6 +38,11 @@ public final class ToolServiceTopology {
     private static final Map<String, ServiceKey> TOOL_OWNER = Map.of(
             "agent", ServiceKey.AGENT,
             "skill", ServiceKey.AGENT,
+            // memory sits beside skill in agent-service, which is also where the
+            // injected memory block is built - so recall costs no cross-service call.
+            "memory", ServiceKey.AGENT,
+            // ask_user parks inside agent-service's approval gate, so it is executed there.
+            "ask_user", ServiceKey.AGENT,
             "table", ServiceKey.DATASOURCE,
             "interface", ServiceKey.INTERFACE,
             "catalog", ServiceKey.CATALOG,

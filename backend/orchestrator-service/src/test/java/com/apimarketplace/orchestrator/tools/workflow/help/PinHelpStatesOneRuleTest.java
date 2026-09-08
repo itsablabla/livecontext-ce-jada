@@ -57,8 +57,7 @@ class PinHelpStatesOneRuleTest {
         WorkflowHelpProvider provider = new WorkflowHelpProvider(
                 mock(com.apimarketplace.orchestrator.service.NodeLibraryService.class),
                 mock(com.apimarketplace.orchestrator.service.NodeHelpFormatter.class),
-                mock(com.apimarketplace.orchestrator.services.generation.GenerationExecutionService.class),
-                mock(com.apimarketplace.common.web.AppEditionProvider.class));
+                mock(com.apimarketplace.orchestrator.services.generation.GenerationExecutionService.class));
         collectStrings(provider.getHelp("pin"), sink);
         return sink.toString();
     }

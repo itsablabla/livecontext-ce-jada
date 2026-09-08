@@ -105,6 +105,21 @@ export interface StreamEventData {
     /** Publication id - only for application:acquire, used to open the install modal. */
     applicationId?: string;
   };
+  /**
+   * A question the agent put to the user (ask_user tool). Channel-agnostic payload: the
+   * chat card is one renderer of it. `blocking`/`gateKey` as on the two other cards.
+   */
+  askUser?: {
+    toolCallId: string;
+    questions: Array<{
+      header: string;
+      question: string;
+      options: Array<{ label: string; description?: string }>;
+      multiSelect?: boolean;
+    }>;
+    blocking?: boolean;
+    gateKey?: string;
+  };
   credentialRequired?: boolean;
   serviceApproval?: {
     services: Array<{
@@ -259,6 +274,13 @@ export function mapV2EventToV1(
         toolAuthorization: (data.toolAuthorization as StreamEventData['toolAuthorization']) || undefined,
       };
 
+    case 'ask_user_required':
+      return {
+        type: 'ask_user_required',
+        askUser: (data.askUser as StreamEventData['askUser']) || undefined,
+        streamId,
+      };
+
     case 'pending_action_cancelled':
       return {
         type: 'pending_action_cancelled',
@@ -304,6 +326,7 @@ export function detectStreamEventType(data: Record<string, unknown>): string {
   if ('toolName' in data && 'toolId' in data && 'arguments' in data) return 'tool_call';
   if ('credentialType' in data) return 'credential_required';
   if ('toolAuthorization' in data) return 'tool_authorization_required';
+  if ('askUser' in data) return 'ask_user_required';
   if ('services' in data && 'reason' in data) return 'service_approval_required';
   // CompactionDone carries conversationId but no title - match its own discriminator pair.
   if ('turnsCoveredCount' in data && 'summarizerModel' in data) return 'compaction_done';

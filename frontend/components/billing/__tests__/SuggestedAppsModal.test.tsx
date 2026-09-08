@@ -65,7 +65,12 @@ describe('SuggestedAppsModal', () => {
     mockPush.mockReset();
     mockApiGet.mockReset();
     mockGetSuggested.mockReset();
-    mockApiGet.mockResolvedValue({ interests: ['sales-crm'], useCases: [], profession: 'sales' });
+    mockApiGet.mockResolvedValue({
+      interests: ['sales-crm'],
+      useCases: [],
+      profession: 'sales',
+      primaryGoal: 'lead-generation',
+    });
   });
 
   afterEach(() => {
@@ -73,9 +78,12 @@ describe('SuggestedAppsModal', () => {
     sessionStorage.clear();
   });
 
-  it('arms on the onboarding flag, waits for the gift latch, fetches and opens with suggestions', async () => {
+  // Also the regression for the removed hand-off: this modal used to wait for
+  // a `lc:welcome-gift-done` event from the credit-gift modal that ran before
+  // it. That modal is gone, so a modal still waiting would arm and then never
+  // open - a silent disappearance, since nothing errors and nothing logs.
+  it('arms on the onboarding flag alone, fetches and opens with suggestions', async () => {
     sessionStorage.setItem('lc_show_app_suggestions', '1');
-    sessionStorage.setItem('lc_welcome_gift_done', '1'); // gift already finished
     mockGetSuggested.mockResolvedValue({ count: 1, publications: [SAMPLE_APP] });
 
     renderModal();
@@ -88,33 +96,13 @@ describe('SuggestedAppsModal', () => {
       interests: ['sales-crm'],
       useCases: [],
       profession: 'sales',
+      primaryGoal: 'lead-generation',
       limit: 4,
     });
   });
 
-  it('opens only after the welcome-gift-done event when no latch is present', async () => {
-    sessionStorage.setItem('lc_show_app_suggestions', '1'); // no latch
-    mockGetSuggested.mockResolvedValue({ count: 1, publications: [SAMPLE_APP] });
-
-    renderModal();
-
-    // Without the gift-done signal the query must not fire and nothing shows.
-    await waitFor(() => expect(sessionStorage.getItem('lc_show_app_suggestions')).toBeNull());
-    expect(mockGetSuggested).not.toHaveBeenCalled();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-
-    // The gift modal finishes → suggestions appear. Re-dispatch inside waitFor so
-    // the signal is not lost to the arm→listener registration race.
-    await waitFor(() => {
-      window.dispatchEvent(new Event('lc:welcome-gift-done'));
-      expect(mockGetSuggested).toHaveBeenCalled();
-    });
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
-  });
-
   it('closes the modal when a suggested card is clicked (card Link handles navigation)', async () => {
     sessionStorage.setItem('lc_show_app_suggestions', '1');
-    sessionStorage.setItem('lc_welcome_gift_done', '1');
     mockGetSuggested.mockResolvedValue({ count: 1, publications: [SAMPLE_APP] });
 
     renderModal();
@@ -127,7 +115,6 @@ describe('SuggestedAppsModal', () => {
 
   it('"Browse the marketplace" CTA navigates to the marketplace and closes', async () => {
     sessionStorage.setItem('lc_show_app_suggestions', '1');
-    sessionStorage.setItem('lc_welcome_gift_done', '1');
     mockGetSuggested.mockResolvedValue({ count: 1, publications: [SAMPLE_APP] });
 
     renderModal();
@@ -141,7 +128,6 @@ describe('SuggestedAppsModal', () => {
 
   it('stays hidden when the backend returns no suggestions', async () => {
     sessionStorage.setItem('lc_show_app_suggestions', '1');
-    sessionStorage.setItem('lc_welcome_gift_done', '1');
     mockGetSuggested.mockResolvedValue({ count: 0, publications: [] });
 
     renderModal();
@@ -151,7 +137,6 @@ describe('SuggestedAppsModal', () => {
   });
 
   it('does not arm or fetch without the onboarding flag', async () => {
-    sessionStorage.setItem('lc_welcome_gift_done', '1');
     mockGetSuggested.mockResolvedValue({ count: 1, publications: [SAMPLE_APP] });
 
     renderModal();

@@ -2,6 +2,7 @@ package com.apimarketplace.storage.web;
 
 import com.apimarketplace.common.storage.AdoptRunContextFields;
 import com.apimarketplace.storage.domain.FileRef;
+import com.apimarketplace.storage.service.file.ClientStreamCopier;
 import com.apimarketplace.storage.service.file.DownloadStream;
 import com.apimarketplace.storage.service.file.FileStorageService;
 import com.apimarketplace.storage.service.file.StorageStreamingMetrics;
@@ -252,23 +253,8 @@ public class InternalFileController {
                 final long advertisedLength = ds.contentLength();
 
                 StreamingResponseBody body = out -> {
-                    try (StorageStreamingMetrics.StreamSpan span = streamingMetrics.startStream();
-                         DownloadStream s = ds) {
-                        try {
-                            s.stream().transferTo(out);
-                            if (advertisedLength > 0) {
-                                streamingMetrics.recordBytes(advertisedLength);
-                            }
-                        } catch (IOException e) {
-                            streamingMetrics.recordClientDisconnect();
-                            logger.debug("Client disconnected mid-stream: key={} ({})",
-                                key, e.getMessage());
-                            throw e;
-                        } catch (RuntimeException e) {
-                            streamingMetrics.recordStreamError();
-                            throw e;
-                        }
-                    }
+                    ClientStreamCopier.copy(ds, out, advertisedLength, streamingMetrics,
+                            "internal key=" + key);
                 };
 
                 ResponseEntity.BodyBuilder builder = ResponseEntity.ok()

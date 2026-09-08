@@ -71,7 +71,7 @@ function triggerDataToAuthConfig(data: WebhookTriggerData): Record<string, strin
 
 const WebhookInfoTooltip = ({ title, description, outputsLabel, outputs }: WebhookInfoTooltipProps) => {
   const [isOpen, setIsOpen] = React.useState(false);
-  const { buttonRef, popoverPosition } = usePopoverPosition(isOpen, 280);
+  const { buttonRef, popoverStyle } = usePopoverPosition(isOpen, 288);
 
   return (
     <div className="relative inline-flex">
@@ -93,8 +93,8 @@ const WebhookInfoTooltip = ({ title, description, outputsLabel, outputs }: Webho
             onClick={() => setIsOpen(false)}
           />
           <div
-            className="fixed z-[9999] w-72 p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-lg"
-            style={{ top: popoverPosition.top, left: popoverPosition.left }}
+            className="fixed z-[9999] p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-lg"
+            style={popoverStyle}
           >
             <div className="flex items-start justify-between gap-2 mb-2">
               <span className="font-medium text-sm text-slate-700 dark:text-slate-200">

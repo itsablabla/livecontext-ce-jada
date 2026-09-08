@@ -18,18 +18,30 @@ let pathname = '/app/chat';
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 vi.mock('@/i18n/navigation', () => ({ usePathname: () => pathname, useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => ({ get: () => null }) }));
-vi.mock('@/hooks/useConversationHistory', () => ({
-  useConversationHistory: () => ({
+// The sidebar reads its own list hook, which is `useConversationList` +
+// `useConversationMutations` and nothing else - no message store. Mocking those
+// two rather than the sidebar hook itself keeps the real merge (shared cache +
+// server rows, de-duplicated and ordered) under test.
+vi.mock('@/hooks/conversation/useConversationList', () => ({
+  useConversationList: () => ({
     conversations: [],
     loading: false,
     error: null,
     hasMore: false,
-    selectConversation: vi.fn(),
-    loadMessages: vi.fn(),
-    deleteConversation: vi.fn(),
     loadMoreConversations: vi.fn(),
     loadConversationById: vi.fn(),
-    clearMessages: vi.fn(),
+    forceRefreshConversations: vi.fn(),
+    setConversations: vi.fn(),
+  }),
+}));
+vi.mock('@/hooks/conversation/useConversationMutations', () => ({
+  useConversationMutations: () => ({
+    loading: false,
+    error: null,
+    createConversation: vi.fn(),
+    updateConversation: vi.fn(),
+    deleteConversation: vi.fn(),
+    clearError: vi.fn(),
   }),
 }));
 vi.mock('@/contexts/UnifiedAppContext', () => ({
@@ -97,15 +109,15 @@ describe('ConversationSidebar - navigation block is height-capped so Chats stays
     // The capped block contains the full nav group: the first entry (Projects) and the
     // last entry (Files) both live inside it.
     expect(within(navBlock!).getByText('sidebar.projects')).toBeInTheDocument();
-    expect(within(navBlock!).getByText('sidebar.nav.files')).toBeInTheDocument();
+    expect(within(navBlock!).getByText('nav.files')).toBeInTheDocument();
   });
 
   it('keeps Home and Marketplace FIXED above the capped block (not inside it)', () => {
     const { container } = render(<ConversationSidebar onConversationSelect={vi.fn()} onNewChat={vi.fn()} onNavigate={vi.fn()} />);
 
     const navBlock = findNavBlock(container)!;
-    const home = screen.getByText('sidebar.home');
-    const marketplace = screen.getByText('sidebar.marketplace');
+    const home = screen.getByText('nav.newChat');
+    const marketplace = screen.getByText('nav.marketplace');
 
     // Both render, but OUTSIDE the scrollable/height-capped group so they never scroll away.
     expect(home).toBeInTheDocument();

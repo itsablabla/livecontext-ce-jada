@@ -125,6 +125,10 @@ public class GenerationInputResolver {
             // provider would have accepted.
             if (tooLargeToInline(present, entry.getKey(), errors)) continue;
 
+            // The element's own metadata travels with the file here too. A one-file slot on an
+            // array endpoint is still an element, and an element without its type is refused.
+            writeItemConstants(binding, 0, request, errors);
+
             switch (binding.encoding()) {
                 case DATA_URL -> download(storageKey, tenantId, entry.getKey(), errors)
                         .ifPresent(bytes -> GenerationRequestBuilder.setByPath(request, binding.path(),
@@ -192,6 +196,26 @@ public class GenerationInputResolver {
                 GenerationRequestBuilder.setByPath(request, shiftLastIndex(binding.mimePath(), i),
                         mimeOf(files.get(i), null), errors);
             }
+            writeItemConstants(binding, i, request, errors);
+        }
+    }
+
+    /**
+     * Write the fields that belong BESIDE one file, moved to that file's position.
+     *
+     * <p>Some providers take an object per array element rather than a bare value, and the object
+     * carries fields the file cannot supply - the element's type, and what the file is FOR. Those
+     * cannot be the endpoint's ordinary constants: those are written once, at a fixed path, whether
+     * or not a file was given, so an absent file would leave an element with a type and no value.
+     * Written from here they exist only for files that are actually present, and they shift exactly
+     * as the file's own path does, so element 2's type lands beside element 2's value.
+     */
+    private void writeItemConstants(GenerationSpec.ParamBinding binding, int index,
+                                     Map<String, Object> request, List<String> errors) {
+        if (binding.itemConstants().isEmpty()) return;
+        for (Map.Entry<String, Object> constant : binding.itemConstants().entrySet()) {
+            GenerationRequestBuilder.setByPath(request,
+                    shiftLastIndex(constant.getKey(), index), constant.getValue(), errors);
         }
     }
 

@@ -16,6 +16,8 @@
  *   const result = await apiClient.post('/data-sources', { name: 'test' });
  */
 
+import { track } from '@/lib/analytics/analytics';
+
 export interface ApiClientConfig {
   baseUrl?: string;
   timeout?: number;
@@ -63,6 +65,53 @@ export class ApiError extends Error {
   ) {
     super(message);
     this.name = 'ApiError';
+  }
+}
+
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Reduces a request path to a bounded shape for analytics: the query string is
+ * dropped and every UUID or all-digit segment becomes `:id`, so the emitted
+ * value never carries a resource identifier.
+ */
+export function normalizeApiPath(url: string): string {
+  const path = url.split(/[?#]/, 1)[0];
+  // Ids are masked anywhere; past the first two static segments only plain
+  // route words (lowercase letters, digits, hyphens) survive, so a name-bearing
+  // segment (a credential name, a file name, a table slug) is masked too.
+  const ROUTE_WORD = /^[a-z0-9-]+$/;
+  let seen = 0;
+  return path
+    .split('/')
+    .map((segment) => {
+      if (segment === '') return segment;
+      seen += 1;
+      if (UUID_SEGMENT.test(segment) || /^\d+$/.test(segment)) return ':id';
+      if (seen > 2 && !ROUTE_WORD.test(segment)) return ':id';
+      return segment;
+    })
+    .join('/');
+}
+
+/**
+ * Counts a request that failed for good (after every retry). Wrapped so that
+ * analytics can never mask the original error.
+ */
+function reportRequestFailure(error: unknown, method: string, path: string): void {
+  try {
+    if (!(error instanceof ApiError)) return;
+    // 401s arrive in bursts (pre-bootstrap, deactivated account) and are
+    // session state, not product friction: they would only drown the signal.
+    if (error.status === 401) return;
+    track('api_request_failed', {
+      status: error.status,
+      error_code: error.code ?? null,
+      method,
+      path: normalizeApiPath(path),
+    });
+  } catch {
+    // Analytics must never interfere with the request outcome.
   }
 }
 
@@ -406,10 +455,28 @@ class ApiClient {
   }
 
   /**
-   * Make HTTP request with retry logic.
-   * On 401, attempts a single token refresh + retry before giving up.
+   * Make HTTP request with retry logic. Every terminal failure (after retries,
+   * or a client error that is never retried) is counted for analytics before
+   * it is rethrown unchanged.
    */
   private async request<T>(
+    method: string,
+    path: string,
+    body?: any,
+    options: RequestOptions = {}
+  ): Promise<T> {
+    try {
+      return await this.requestWithRetry<T>(method, path, body, options);
+    } catch (error) {
+      reportRequestFailure(error, method, path);
+      throw error;
+    }
+  }
+
+  /**
+   * On 401, attempts a single token refresh + retry before giving up.
+   */
+  private async requestWithRetry<T>(
     method: string,
     path: string,
     body?: any,

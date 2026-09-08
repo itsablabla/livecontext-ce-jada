@@ -4,10 +4,11 @@
  */
 
 import { apiClient } from './api-client';
-import type { Message } from './conversation.types';
+import type { ConversationKind, Message } from './conversation.types';
 
 // Re-export types from conversation.types for convenience
-export type { Conversation, Message, MessageAttachment, ConversationResponse, CompactionMarker } from './conversation.types';
+export type { Conversation, ConversationKind, Message, MessageAttachment, ConversationResponse, CompactionMarker } from './conversation.types';
+export { conversationKind, conversationRoute } from './conversation.types';
 
 /**
  * API service for conversation management
@@ -27,7 +28,14 @@ export class ConversationApiService {
    */
   async getConversations(
     page = 0,
-    size = 10
+    size = 10,
+    /**
+     * Narrow the listing to one kind. The server filters in the QUERY, which is the only place it
+     * can be done correctly: a page is chosen by recency, so narrowing the returned page answers
+     * "the studio conversations among the 20 most recent" and shows nothing to anyone whose recent
+     * activity is chat.
+     */
+    kind?: ConversationKind
   ) {
     try {
       // getAuthToken: returning an empty list because the provider was not installed YET made a
@@ -41,10 +49,10 @@ export class ConversationApiService {
       if (!token) {
         return { content: [] as unknown[], totalElements: 0, totalPages: 0, number: page, size };
       }
-      console.log(`🌐 [API CALL] GET /conversations?page=${page}&size=${size} - timestamp: ${new Date().toISOString()}`);
-      const response = await apiClient.get(
-        `/conversations`, { params: { page: page.toString(), size: size.toString() } }
-      );
+      console.log(`🌐 [API CALL] GET /conversations?page=${page}&size=${size}${kind ? `&kind=${kind}` : ''} - timestamp: ${new Date().toISOString()}`);
+      const params: Record<string, string> = { page: page.toString(), size: size.toString() };
+      if (kind) params.kind = kind;
+      const response = await apiClient.get(`/conversations`, { params });
       return response;
     } catch (error) {
       console.error(`❌ [API ERROR] GET /conversations?page=${page}&size=${size} - error:`, error);
@@ -153,6 +161,11 @@ export class ConversationApiService {
     provider: string;
     workflowId?: string;
     chatConfig?: Record<string, unknown>;
+    /**
+     * What to create. Omit for an ordinary chat, which is what every caller before the studio
+     * wanted. The server refuses an unknown value with a 400 rather than quietly making a chat.
+     */
+    kind?: ConversationKind;
   }) {
     try {
       const response = await apiClient.post('/conversations', conversationData);
@@ -433,10 +446,22 @@ export class ConversationApiService {
       toolCalls?: string;
       toolCallId?: string;
       toolName?: string;
-    }
+    },
+    /**
+     * Passed straight to the client. The one caller that sets anything is the studio, which turns
+     * retries OFF: writing a message CREATES a row, so a retry after a 5xx that arrived late
+     * duplicates it. In a chat a duplicate is noise; in a studio thread a second copy of the
+     * request envelope reads as a turn whose answer never came, which is the "this may have been
+     * charged" warning shown over a generation nobody paid for.
+     *
+     * <p>Optional so the chat path keeps the client default: there, losing a message to a
+     * transient failure is the worse of the two outcomes.
+     */
+    options?: { retries?: number },
   ) {
     try {
-      const response = await apiClient.post(`/conversations/${conversationId}/messages`, messageData);
+      const response = await apiClient.post(
+        `/conversations/${conversationId}/messages`, messageData, options);
       return response;
     } catch (error) {
       console.error('Error adding message:', error);
@@ -622,6 +647,31 @@ export class ConversationApiService {
         gateKey,
         approved,
       });
+    return res?.parkedCallReleased === true;
+  }
+
+  /**
+   * Submit the answers to a question card raised by the agent (ask_user tool).
+   *
+   * @param toolCallId - the ask_user call that raised the card (its identity)
+   * @param gateKey - set only while the agent is HOLDING that call; releasing it makes the
+   *                  answers the tool result of the turn still running
+   * @param answers - one entry per question: the header it answers, the labels picked, and
+   *                  free text when the user typed their own answer
+   * @returns whether a held call was actually released - see approveToolAuthorization. False
+   *          means the caller must send the answers as the user's next message.
+   */
+  async answerAskUser(conversationId: string, toolCallId: string, gateKey: string | undefined,
+                      answers: Array<{ header: string; selected: string[]; freeText?: string }>): Promise<boolean> {
+    const res = await apiClient.post<{ parkedCallReleased?: boolean }>(
+      `/conversations/${conversationId}/ask-user/answer`, { toolCallId, gateKey, answers });
+    return res?.parkedCallReleased === true;
+  }
+
+  /** The user chose not to answer a question card. Clears it; no resume. */
+  async dismissAskUser(conversationId: string, toolCallId: string, gateKey?: string): Promise<boolean> {
+    const res = await apiClient.post<{ parkedCallReleased?: boolean }>(
+      `/conversations/${conversationId}/ask-user/dismiss`, { toolCallId, gateKey });
     return res?.parkedCallReleased === true;
   }
 

@@ -25,6 +25,18 @@ public class OnboardingRequest {
 
     private String experienceLevel; // beginner, intermediate, advanced
 
+    @Size(max = 100)
+    private String primaryGoal;     // what to automate first (bounded option)
+
+    @Size(max = 30)
+    private List<@Size(max = 100) String> toolsUsed; // tool slugs the user already uses
+
+    @Size(max = 50)
+    private String previousTool;    // none, zapier-make, n8n, custom-code, other-platform
+
+    @Size(max = 50)
+    private String referralSource;  // how they heard about us
+
     private int currentStep; // For partial save (resume capability)
 
     private boolean skip; // If user wants to skip onboarding
@@ -115,5 +127,37 @@ public class OnboardingRequest {
                 ", currentStep=" + currentStep +
                 ", skip=" + skip +
                 '}';
+    }
+
+    public String getPrimaryGoal() {
+        return primaryGoal;
+    }
+
+    public void setPrimaryGoal(String primaryGoal) {
+        this.primaryGoal = primaryGoal;
+    }
+
+    public List<String> getToolsUsed() {
+        return toolsUsed;
+    }
+
+    public void setToolsUsed(List<String> toolsUsed) {
+        this.toolsUsed = toolsUsed;
+    }
+
+    public String getPreviousTool() {
+        return previousTool;
+    }
+
+    public void setPreviousTool(String previousTool) {
+        this.previousTool = previousTool;
+    }
+
+    public String getReferralSource() {
+        return referralSource;
+    }
+
+    public void setReferralSource(String referralSource) {
+        this.referralSource = referralSource;
     }
 }

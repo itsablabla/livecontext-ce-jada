@@ -3,6 +3,7 @@ package com.apimarketplace.orchestrator.execution.v2.adhoc;
 import com.apimarketplace.common.web.TenantResolver;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
 import com.apimarketplace.orchestrator.execution.v2.engine.CoreNodeBuilder;
+import com.apimarketplace.orchestrator.execution.v2.engine.ExecutionNodeFactory;
 import com.apimarketplace.orchestrator.execution.v2.engine.ExecutionContext;
 import com.apimarketplace.orchestrator.execution.v2.engine.ExecutionServiceInjector;
 import com.apimarketplace.orchestrator.execution.v2.nodes.ExecutionNode;
@@ -14,10 +15,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -111,6 +115,14 @@ public class AdHocNodeExecutionService {
     static final String RUN_ID_PREFIX = "adhoc-";
 
     private final CoreNodeBuilder coreNodeBuilder;
+    /**
+     * Builds the AI nodes, of which exactly one can run standalone: {@code generate}.
+     * It is here rather than in {@link CoreNodeBuilder} because it is addressed as
+     * {@code agent:<label>}, so a synthetic plan has to file it under {@code agents}
+     * for the engine's own builder to produce it - which is the whole point of this
+     * class building nodes through the engine rather than reimplementing them.
+     */
+    private final ExecutionNodeFactory executionNodeFactory;
     private final ExecutionServiceInjector serviceInjector;
     private final OutputSchemaMapper outputSchemaMapper;
 
@@ -133,10 +145,12 @@ public class AdHocNodeExecutionService {
     });
 
     public AdHocNodeExecutionService(CoreNodeBuilder coreNodeBuilder,
+                                     ExecutionNodeFactory executionNodeFactory,
                                      ExecutionServiceInjector serviceInjector,
                                      OutputSchemaMapper outputSchemaMapper,
                                      NodeCreditGate nodeCreditGate) {
         this.coreNodeBuilder = coreNodeBuilder;
+        this.executionNodeFactory = executionNodeFactory;
         this.serviceInjector = serviceInjector;
         this.outputSchemaMapper = outputSchemaMapper;
         this.nodeCreditGate = nodeCreditGate;
@@ -453,6 +467,12 @@ public class AdHocNodeExecutionService {
         WorkflowPlan plan = syntheticPlan(request, planId);
         Map<String, ExecutionNode> nodeMap = new HashMap<>();
         coreNodeBuilder.createCoreNodes(nodeMap, plan, Map.of());
+        // The synthetic plan files the node under `cores` or under `agents`
+        // depending on its type, and only one of the two lists is ever
+        // populated, so running both builders produces exactly one node. Called
+        // with no tenant: the only agent type that reaches here is `generate`,
+        // which references no agent entity to resolve.
+        executionNodeFactory.createAgentNodes(nodeMap, plan);
         serviceInjector.injectServices(nodeMap);
 
         if (nodeMap.isEmpty()) {
@@ -463,14 +483,27 @@ public class AdHocNodeExecutionService {
                             + "or table(...) instead. If this IS a core node, its configuration produced nothing "
                             + "the engine could build.");
         }
-        if (nodeMap.size() > 1) {
-            // Defensive: the plan holds exactly one core, so more than one node means a builder
-            // fanned out. Better to refuse than to pick one arbitrarily.
+        // Count NODES, not keys. A node is deliberately registered under more
+        // than one key when its label does not normalize to itself: the agent
+        // builder adds an alias under the raw lowercased label so an edge
+        // written either way finds it. Both keys hold the SAME instance, so a
+        // key count reads "Make Clip" as two nodes and refuses a request that
+        // is perfectly well formed - with a message about expansion that names
+        // nothing the caller can change. Only the default single-word label
+        // survived that, which is why it was not noticed until generate was
+        // routed through the agent builder.
+        Set<ExecutionNode> distinct =
+                Collections.newSetFromMap(new IdentityHashMap<>());
+        distinct.addAll(nodeMap.values());
+        if (distinct.size() > 1) {
+            // Defensive: the plan holds exactly one node definition, so more than one
+            // distinct node means a builder fanned out. Better to refuse than to pick
+            // one arbitrarily.
             throw new IllegalStateException(
-                    "Node type '" + request.nodeType() + "' expanded into " + nodeMap.size() + " nodes; "
+                    "Node type '" + request.nodeType() + "' expanded into " + distinct.size() + " nodes; "
                             + "only single-node types can run standalone.");
         }
-        return nodeMap.values().iterator().next();
+        return distinct.iterator().next();
     }
 
     /**
@@ -503,7 +536,13 @@ public class AdHocNodeExecutionService {
         planData.put("name", "ad-hoc " + request.nodeType());
         planData.put("triggers", List.of());
         planData.put("steps", List.of());
-        planData.put("cores", List.of(core));
+        // Filed under the list its type actually lives in. `generate` is an AI
+        // node addressed as `agent:<label>`; among the cores it still parses but
+        // no builder produces a node for it, so the caller would be told the node
+        // "cannot run standalone" - which it can.
+        boolean isAgentNode = AdHocNodeTypeResolver.AGENT_TYPES.contains(request.nodeType());
+        planData.put("cores", isAgentNode ? List.of() : List.of(core));
+        planData.put("agents", isAgentNode ? List.of(core) : List.of());
         planData.put("edges", List.of());
 
         return WorkflowPlan.fromMap(planData, planId, request.tenantId());

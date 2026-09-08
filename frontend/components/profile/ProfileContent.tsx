@@ -11,6 +11,7 @@ import { orchestratorApi } from '@/lib/api';
 import { dmApi } from '@/lib/api/dm-api';
 import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
 import { PublicationCard, PublicationCardSkeleton } from '@/components/marketplace/PublicationCard';
+import { ProfileBadgeStrip } from '@/components/badges/ProfileBadgeStrip';
 import type { PublicProfile } from '@/lib/api/services/user-api.service';
 
 interface ProfileContentProps {
@@ -138,6 +139,9 @@ export default function ProfileContent({ handle }: ProfileContentProps) {
           </div>
         </div>
       </header>
+
+      {/* ===== Trophies ===== */}
+      <ProfileBadgeStrip userId={profile.userId} />
 
       {/* ===== Published apps ===== */}
       <section className="flex flex-1 flex-col">

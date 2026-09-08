@@ -62,6 +62,7 @@ public class CrudExecutorService {
     private final DataSourceService dataSourceService;
     private final StorageBreakdownService breakdownService;
     private final ColumnValueCoercer columnValueCoercer;
+    private final MediaCellHydrator mediaCellHydrator;
     private final DataSourceColumnRepository columnRepository;
     private final SqlSanitizer sqlSanitizer;
     private final DatasourceRowEventPublisher rowEventPublisher;
@@ -71,6 +72,7 @@ public class CrudExecutorService {
     public CrudExecutorService(CrudRepository crudRepository, VectorRepository vectorRepository,
                                DataSourceService dataSourceService,
                                StorageBreakdownService breakdownService, ColumnValueCoercer columnValueCoercer,
+                               MediaCellHydrator mediaCellHydrator,
                                DataSourceColumnRepository columnRepository, SqlSanitizer sqlSanitizer,
                                DatasourceRowEventPublisher rowEventPublisher,
                                com.apimarketplace.datasource.services.VectorFeatureGate vectorFeatureGate,
@@ -80,6 +82,7 @@ public class CrudExecutorService {
         this.dataSourceService = dataSourceService;
         this.breakdownService = breakdownService;
         this.columnValueCoercer = columnValueCoercer;
+        this.mediaCellHydrator = mediaCellHydrator;
         this.columnRepository = columnRepository;
         this.sqlSanitizer = sqlSanitizer;
         this.rowEventPublisher = rowEventPublisher;
@@ -160,18 +163,18 @@ public class CrudExecutorService {
         // Identify vector columns from mappingSpec
         Map<String, ColumnMappingSpec> vectorColumns = getVectorColumns(dataSource);
 
-        // Edition gate (managed cloud): vector columns should not exist here -
+        // Plan gate (shared cloud): vector columns should not exist here -
         // every creation path rejects them - but a legacy/cloned table could
         // still carry one. Writing scalar rows to such a table stays allowed;
         // supplying a VALUE for a vector column is refused explicitly rather
         // than silently dropped or stored as a float[] blob in the JSONB.
-        if (!vectorColumns.isEmpty() && !vectorFeatureGate.isVectorAllowed()) {
+        if (!vectorColumns.isEmpty() && !vectorFeatureGate.isVectorAllowed(tenantId)) {
             for (CreateRowRequest.RowData row : request.getRows()) {
                 if (row.columns() == null) continue;
                 for (String vecCol : vectorColumns.keySet()) {
                     if (row.columns().get(vecCol) != null) {
                         return CrudResult.failure(CrudOperation.CREATE_ROW,
-                            com.apimarketplace.datasource.services.VectorFeatureGate.DISABLED_MESSAGE);
+                            vectorFeatureGate.deniedMessage(tenantId));
                     }
                 }
             }
@@ -261,7 +264,7 @@ public class CrudExecutorService {
         // Emit row_created events - picked up AFTER_COMMIT by DatasourceRowEventListener
         // and dispatched to trigger-service (fire-and-forget). Published before the commit
         // so each new row fans out to every matching datasource trigger subscription.
-        publishCreatedEvents(dataSource.id(), tenantId, dataSource.organizationId(), insertedIds);
+        publishCreatedEvents(dataSource, tenantId, dataSource.organizationId(), insertedIds);
 
         String message = String.format("Created %d row(s) in datasource '%s'", insertedIds.size(), dataSource.name());
         if (!warnings.isEmpty()) {
@@ -291,7 +294,8 @@ public class CrudExecutorService {
         for (CreateColumnRequest.ColumnDefinition col : request.getColumns()) {
             String validationError = com.apimarketplace.datasource.tools.datasource.ToolParameterUtils
                 .validateColumnDefinition(col.name(), col.type(), col.display(),
-                    vectorFeatureGate.isVectorAllowed());
+                    vectorFeatureGate.isVectorAllowed(tenantId),
+                    () -> vectorFeatureGate.deniedMessage(tenantId));
             if (validationError != null) {
                 return CrudResult.failure(CrudOperation.CREATE_COLUMN, validationError);
             }
@@ -417,7 +421,8 @@ public class CrudExecutorService {
         List<Map<String, Object>> rows = hasMore ? rawRows.subList(0, limit) : rawRows;
 
         // Flatten the data JSONB column into top-level fields
-        List<Map<String, Object>> flattenedRows = flattenRows(rows);
+        List<Map<String, Object>> flattenedRows =
+            mediaCellHydrator.hydrateRows(flattenRows(rows), dataSource.mappingSpec());
 
         return CrudResult.success(
             CrudOperation.READ_ROW,
@@ -430,11 +435,11 @@ public class CrudExecutorService {
      * Execute a vector similarity search, optionally combined with WHERE filters (hybrid search).
      */
     private CrudResult executeSimilaritySearch(ReadRowRequest request, DataSource dataSource, String tenantId) {
-        // Edition gate (managed cloud): defense in depth for the read side -
+        // Plan gate (shared cloud): defense in depth for the read side -
         // even a legacy/cloned table with stored vectors is not searchable.
-        if (!vectorFeatureGate.isVectorAllowed()) {
+        if (!vectorFeatureGate.isVectorAllowed(tenantId)) {
             return CrudResult.failure(CrudOperation.READ_ROW,
-                com.apimarketplace.datasource.services.VectorFeatureGate.DISABLED_MESSAGE);
+                vectorFeatureGate.deniedMessage(tenantId));
         }
 
         SimilarityQueryDto similarity = request.getSimilarity();
@@ -489,7 +494,8 @@ public class CrudExecutorService {
         );
 
         // Flatten rows and include distance score
-        List<Map<String, Object>> flattenedRows = flattenRows(rawRows);
+        List<Map<String, Object>> flattenedRows =
+            mediaCellHydrator.hydrateRows(flattenRows(rawRows), dataSource.mappingSpec());
 
         return CrudResult.success(
             CrudOperation.READ_ROW,
@@ -562,17 +568,17 @@ public class CrudExecutorService {
             return CrudResult.failure(CrudOperation.UPDATE_ROW, "No columns to update");
         }
 
-        // Edition gate (managed cloud): update_rows is a vector WRITE path -
+        // Plan gate (shared cloud): update_rows is a vector WRITE path -
         // setting a vector column's value would store an embedding, the exact
         // operation the create-row gate blocks. Same rule, same message:
         // scalar updates on a legacy vector table stay allowed; supplying a
         // vector VALUE is refused before any coercion or DML.
         Map<String, ColumnMappingSpec> vectorColumns = getVectorColumns(dataSource);
-        if (!vectorColumns.isEmpty() && !vectorFeatureGate.isVectorAllowed()) {
+        if (!vectorColumns.isEmpty() && !vectorFeatureGate.isVectorAllowed(tenantId)) {
             for (String vecCol : vectorColumns.keySet()) {
                 if (request.getSet().get(vecCol) != null) {
                     return CrudResult.failure(CrudOperation.UPDATE_ROW,
-                        com.apimarketplace.datasource.services.VectorFeatureGate.DISABLED_MESSAGE);
+                        vectorFeatureGate.deniedMessage(tenantId));
                 }
             }
             vectorColumns = Map.of(); // no vector values supplied → plain scalar update
@@ -612,7 +618,7 @@ public class CrudExecutorService {
         // event emission can expose `previous_row` for each row_updated event.
         // We resolve ids independently of vectorUpdates because events always need them.
         List<Long> affectedItemIds = crudRepository.findIdsMatching(dataSource.id(), tenantId, where);
-        Map<Long, Map<String, Object>> beforeSnapshots = snapshotRowsById(dataSource.id(), tenantId, affectedItemIds);
+        Map<Long, Map<String, Object>> beforeSnapshots = snapshotRowsById(dataSource, tenantId, affectedItemIds);
 
         int affectedRows;
         if (request.getSet().isEmpty()) {
@@ -640,7 +646,7 @@ public class CrudExecutorService {
 
         // Emit row_updated events - uses the pre-captured before snapshots plus
         // a fresh read of the current row state for `row`.
-        publishUpdatedEvents(dataSource.id(), tenantId, dataSource.organizationId(), affectedItemIds, beforeSnapshots);
+        publishUpdatedEvents(dataSource, tenantId, dataSource.organizationId(), affectedItemIds, beforeSnapshots);
 
         String message = String.format("Updated %d row(s) in datasource '%s'", affectedRows, dataSource.name());
         if (!warnings.isEmpty()) {
@@ -668,7 +674,7 @@ public class CrudExecutorService {
         // Capture last-known snapshots BEFORE the delete so row_deleted events can
         // expose `row` = pre-delete state (the row is gone after the DML runs).
         List<Long> affectedIds = crudRepository.findIdsMatching(dataSource.id(), tenantId, where);
-        Map<Long, Map<String, Object>> lastKnown = snapshotRowsById(dataSource.id(), tenantId, affectedIds);
+        Map<Long, Map<String, Object>> lastKnown = snapshotRowsById(dataSource, tenantId, affectedIds);
 
         int deletedRows = crudRepository.deleteRows(
             dataSource.id(),
@@ -681,7 +687,7 @@ public class CrudExecutorService {
             breakdownService.increment(tenantId, "DATATABLES", 0, -deletedRows);
         }
 
-        publishDeletedEvents(dataSource.id(), tenantId, dataSource.organizationId(), affectedIds, lastKnown);
+        publishDeletedEvents(dataSource, tenantId, dataSource.organizationId(), affectedIds, lastKnown);
 
         return CrudResult.success(
             CrudOperation.DELETE_ROW,
@@ -764,19 +770,12 @@ public class CrudExecutorService {
      * the search path still works via seq scan.
      */
     private void publishVectorIndexEvent(Long dataSourceId, Map<String, Object> display) {
-        Map<String, Object> d = display != null ? display : Map.of();
-        Object dimRaw = d.get("dimension");
-        int dimension = dimRaw instanceof Number n ? n.intValue() : 0;
-        if (dimension <= 0 && dimRaw instanceof String s) {
-            try { dimension = Integer.parseInt(s.trim()); } catch (NumberFormatException ignored) { }
-        }
-        if (dimension <= 0) {
+        var event = com.apimarketplace.datasource.events.VectorColumnCreatedEvent.forColumn(dataSourceId, display);
+        if (event.isEmpty()) {
             log.warn("Vector column created without usable dimension on datasource {} - HNSW index skipped", dataSourceId);
             return;
         }
-        String metric = d.get("metric") instanceof String m ? m : "cosine";
-        eventPublisher.publishEvent(
-            new com.apimarketplace.datasource.events.VectorColumnCreatedEvent(dataSourceId, dimension, metric));
+        eventPublisher.publishEvent(event.get());
     }
 
     private long estimateRowDataSize(List<CreateRowRequest.RowData> rows) {
@@ -800,53 +799,58 @@ public class CrudExecutorService {
      * Snapshot rows by id, returning a map id → flattened row. Used by UPDATE/DELETE
      * to capture before-state for trigger events.
      */
-    private Map<Long, Map<String, Object>> snapshotRowsById(Long dataSourceId, String tenantId, List<Long> ids) {
+    private Map<Long, Map<String, Object>> snapshotRowsById(DataSource dataSource, String tenantId, List<Long> ids) {
         if (ids == null || ids.isEmpty()) return Map.of();
         Map<Long, Map<String, Object>> out = new LinkedHashMap<>();
-        for (Map<String, Object> raw : crudRepository.findRowsByIds(dataSourceId, tenantId, ids)) {
+        for (Map<String, Object> raw : crudRepository.findRowsByIds(dataSource.id(), tenantId, ids)) {
             Long id = toLong(raw.get("id"));
             if (id == null) continue;
             out.put(id, flattenRow(raw));
         }
+        // A row that FIRES a workflow must look like a row a workflow READS. This snapshot becomes
+        // the table trigger's row / previous_row, so leaving it in the stored text form would make
+        // the same cell an object on one path and a string on the other: the file-taking parameter
+        // the docs point at would work after find_rows and fail after a table trigger.
+        mediaCellHydrator.hydrateRows(out.values(), dataSource.mappingSpec());
         return out;
     }
 
-    private void publishCreatedEvents(Long dataSourceId, String tenantId,
+    private void publishCreatedEvents(DataSource dataSource, String tenantId,
                                       String organizationId, List<Long> insertedIds) {
         if (rowEventPublisher == null || insertedIds == null || insertedIds.isEmpty()) return;
-        Map<Long, Map<String, Object>> snapshots = snapshotRowsById(dataSourceId, tenantId, insertedIds);
+        Map<Long, Map<String, Object>> snapshots = snapshotRowsById(dataSource, tenantId, insertedIds);
         for (Long id : insertedIds) {
             Map<String, Object> row = snapshots.get(id);
             if (row == null) continue;
             try {
-                rowEventPublisher.publishCreated(dataSourceId, id, tenantId, organizationId, row);
+                rowEventPublisher.publishCreated(dataSource.id(), id, tenantId, organizationId, row);
             } catch (Exception e) {
                 log.warn("Failed to publish row_created event for datasource={} row={}: {}",
-                        dataSourceId, id, e.getMessage());
+                        dataSource.id(), id, e.getMessage());
             }
         }
     }
 
-    private void publishUpdatedEvents(Long dataSourceId, String tenantId,
+    private void publishUpdatedEvents(DataSource dataSource, String tenantId,
                                       String organizationId,
                                       List<Long> ids,
                                       Map<Long, Map<String, Object>> beforeSnapshots) {
         if (rowEventPublisher == null || ids == null || ids.isEmpty()) return;
-        Map<Long, Map<String, Object>> afterSnapshots = snapshotRowsById(dataSourceId, tenantId, ids);
+        Map<Long, Map<String, Object>> afterSnapshots = snapshotRowsById(dataSource, tenantId, ids);
         for (Long id : ids) {
             Map<String, Object> after = afterSnapshots.get(id);
             Map<String, Object> before = beforeSnapshots.get(id);
             if (after == null) continue; // row no longer exists (concurrent delete) - skip
             try {
-                rowEventPublisher.publishUpdated(dataSourceId, id, tenantId, organizationId, after, before);
+                rowEventPublisher.publishUpdated(dataSource.id(), id, tenantId, organizationId, after, before);
             } catch (Exception e) {
                 log.warn("Failed to publish row_updated event for datasource={} row={}: {}",
-                        dataSourceId, id, e.getMessage());
+                        dataSource.id(), id, e.getMessage());
             }
         }
     }
 
-    private void publishDeletedEvents(Long dataSourceId, String tenantId,
+    private void publishDeletedEvents(DataSource dataSource, String tenantId,
                                       String organizationId,
                                       List<Long> ids,
                                       Map<Long, Map<String, Object>> lastKnown) {
@@ -855,10 +859,10 @@ public class CrudExecutorService {
             Map<String, Object> row = lastKnown.get(id);
             if (row == null) continue;
             try {
-                rowEventPublisher.publishDeleted(dataSourceId, id, tenantId, organizationId, row);
+                rowEventPublisher.publishDeleted(dataSource.id(), id, tenantId, organizationId, row);
             } catch (Exception e) {
                 log.warn("Failed to publish row_deleted event for datasource={} row={}: {}",
-                        dataSourceId, id, e.getMessage());
+                        dataSource.id(), id, e.getMessage());
             }
         }
     }

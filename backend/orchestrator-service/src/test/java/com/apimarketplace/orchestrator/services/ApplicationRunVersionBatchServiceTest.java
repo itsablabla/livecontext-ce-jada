@@ -54,9 +54,20 @@ class ApplicationRunVersionBatchServiceTest {
         return run;
     }
 
-    /** A scope-projection row: [id, pinnedVersion, tenantId, organizationId]. */
+    /**
+     * A scope-projection row:
+     * [id, pinnedVersion, tenantId, organizationId, cap, periodMode, periodSpent, periodStart].
+     * The four budget columns ride along so an application card can show its
+     * spend without a second request.
+     */
     private static Object[] scopeRow(UUID id, Integer pinned, String tenantId, String orgId) {
-        return new Object[]{id, pinned, tenantId, orgId};
+        return scopeRow(id, pinned, tenantId, orgId, null, null, null, null);
+    }
+
+    private static Object[] scopeRow(UUID id, Integer pinned, String tenantId, String orgId,
+                                     java.math.BigDecimal cap, String periodMode,
+                                     java.math.BigDecimal periodSpent, Instant periodStart) {
+        return new Object[]{id, pinned, tenantId, orgId, cap, periodMode, periodSpent, periodStart};
     }
 
     @Test
@@ -157,5 +168,85 @@ class ApplicationRunVersionBatchServiceTest {
 
         assertThat(out.get(mine).pinnedVersion()).isEqualTo(3);
         assertThat(out).doesNotContainKey(theirs);
+    }
+
+    // ─── The positional projection. Both budget figures are BigDecimal, so a
+    //     swapped index is invisible to the type system: only distinct VALUES,
+    //     asserted per field, can catch it. Every existing call site passed
+    //     nulls for these four columns, which meant the mapping this card
+    //     depends on was covered by nothing at all. ───
+
+    @Test
+    @DisplayName("maps each budget column to its own field, with values that expose a swap")
+    void budgetColumnsMapPositionallyToTheRightFields() {
+        UUID wf = UUID.randomUUID();
+        Instant started = Instant.parse("2026-09-05T00:00:00Z");
+        Instant periodStart = com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                .periodStart("weekly", Instant.now());
+        WorkflowRunEntity run = appRun(wf, "run-b1", started);
+        when(runRepository.findApplicationRunsBatch(List.of(wf))).thenReturn(List.of(run));
+        when(epochRepository.getLatestEpochStartedAtByRunIds(List.of("run-b1"))).thenReturn(Map.of());
+        when(workflowRepository.findPinnedVersionScopeRows(anyCollection()))
+                .thenReturn(List.<Object[]>of(scopeRow(wf, 4, "owner", ORG,
+                        new java.math.BigDecimal("250"), "weekly",
+                        new java.math.BigDecimal("37"), periodStart)));
+
+        ApplicationRunVersionSummary summary = service.resolve(List.of(wf), ORG, USER).get(wf);
+
+        assertThat(summary.budgetCredits())
+                .as("the cap, not the spend")
+                .isEqualByComparingTo("250");
+        assertThat(summary.budgetPeriodSpent())
+                .as("the spend, not the cap")
+                .isEqualByComparingTo("37");
+        assertThat(summary.budgetPeriodMode()).isEqualTo("weekly");
+        // The date the allowance starts again, from the same rule the counter
+        // resets on. Untested, the mapper can simply stop filling it and the
+        // application card's popover loses its only concrete promise.
+        assertThat(summary.budgetPeriodResetsAt())
+                .isEqualTo(com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                        .nextPeriodStart("weekly", Instant.now()));
+    }
+
+    @Test
+    @DisplayName("rolls an expired period over server-side, so a card cannot show last month as this month")
+    void expiredPeriodRollsOverBeforeItReachesTheCard() {
+        // The stored figure is only reset when the next cost is recorded, so a
+        // workflow that stopped spending keeps last period's number in the
+        // column indefinitely. Shipping it raw would show a card sitting at its
+        // cap for a workflow that is free to run.
+        UUID wf = UUID.randomUUID();
+        Instant started = Instant.parse("2026-09-05T00:00:00Z");
+        WorkflowRunEntity run = appRun(wf, "run-b2", started);
+        when(runRepository.findApplicationRunsBatch(List.of(wf))).thenReturn(List.of(run));
+        when(epochRepository.getLatestEpochStartedAtByRunIds(List.of("run-b2"))).thenReturn(Map.of());
+        when(workflowRepository.findPinnedVersionScopeRows(anyCollection()))
+                .thenReturn(List.<Object[]>of(scopeRow(wf, 4, "owner", ORG,
+                        new java.math.BigDecimal("100"), "monthly",
+                        new java.math.BigDecimal("100"),
+                        Instant.now().minus(70, java.time.temporal.ChronoUnit.DAYS))));
+
+        ApplicationRunVersionSummary summary = service.resolve(List.of(wf), ORG, USER).get(wf);
+
+        assertThat(summary.budgetPeriodSpent()).isEqualByComparingTo("0");
+        assertThat(summary.budgetCredits()).isEqualByComparingTo("100");
+    }
+
+    @Test
+    @DisplayName("an unknown period mode reports as monthly, never as the never-resets mode")
+    void unknownModeNormalisesToMonthly() {
+        // Falling back to cumulative would turn a typo into a lifetime cap, and
+        // the workflow would stop for good rather than for a month.
+        UUID wf = UUID.randomUUID();
+        WorkflowRunEntity run = appRun(wf, "run-b3", Instant.parse("2026-09-05T00:00:00Z"));
+        when(runRepository.findApplicationRunsBatch(List.of(wf))).thenReturn(List.of(run));
+        when(epochRepository.getLatestEpochStartedAtByRunIds(List.of("run-b3"))).thenReturn(Map.of());
+        when(workflowRepository.findPinnedVersionScopeRows(anyCollection()))
+                .thenReturn(List.<Object[]>of(scopeRow(wf, 1, "owner", ORG,
+                        new java.math.BigDecimal("10"), "quarterly",
+                        new java.math.BigDecimal("2"), Instant.now())));
+
+        assertThat(service.resolve(List.of(wf), ORG, USER).get(wf).budgetPeriodMode())
+                .isEqualTo("monthly");
     }
 }

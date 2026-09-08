@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
-import { loadPosthog } from '../posthogLoader';
+import { currentPosthog, loadPosthog } from '../posthogLoader';
 
 describe('loadPosthog', () => {
   beforeEach(() => {
@@ -42,5 +42,28 @@ describe('loadPosthog', () => {
     ph.capture('evt', { a: 1 });
 
     expect((window as unknown as { posthog: unknown[] }).posthog).toContainEqual(['capture', 'evt', { a: 1 }]);
+  });
+
+  describe('currentPosthog (live client resolution)', () => {
+    it('returns null on a bare window', () => {
+      expect(currentPosthog()).toBeNull();
+    });
+
+    it('returns the initialised stub before array.js loads (queued calls still flush)', () => {
+      const stub = loadPosthog('https://us.i.posthog.com') as unknown as {
+        init: (t: string, c: Record<string, unknown>) => void;
+      };
+      stub.init('phc_test', { api_host: 'https://us.i.posthog.com' });
+      expect(currentPosthog()).toBe(stub);
+    });
+
+    it('follows the swap when array.js replaces window.posthog with the real SDK (regression)', () => {
+      const stub = loadPosthog('https://us.i.posthog.com');
+      const real = { capture: () => undefined, __loaded: true };
+      (window as unknown as { posthog: unknown }).posthog = real;
+
+      expect(currentPosthog()).toBe(real);
+      expect(currentPosthog()).not.toBe(stub);
+    });
   });
 });

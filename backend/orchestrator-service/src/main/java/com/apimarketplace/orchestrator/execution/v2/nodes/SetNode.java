@@ -59,9 +59,12 @@ public class SetNode extends BaseNode {
 
         // Build resolved_params early so every exit path can include it
         Map<String, Object> earlyResolvedParams = new LinkedHashMap<>();
-        earlyResolvedParams.put("keep_only_set", keepOnlySet);
-        earlyResolvedParams.put("input_expression", inputExpression);
-        earlyResolvedParams.put("assignment_count", assignments.size());
+        earlyResolvedParams.put("keepOnlySet", keepOnlySet);
+        // `input` on both exit paths: the early one carries the expression the
+        // node was configured with, the success one the data it resolved to. Two
+        // names for one setting is the drift this alignment work removes.
+        earlyResolvedParams.put("input", inputExpression);
+        earlyResolvedParams.put("assignmentCount", assignments.size());
 
         if (assignments.isEmpty()) {
             Map<String, Object> failOutput = Map.of("resolved_params", earlyResolvedParams);
@@ -129,7 +132,7 @@ public class SetNode extends BaseNode {
             // assignment so the user sees exactly what the node was given and what it produced.
             Map<String, Object> resolvedParams = new LinkedHashMap<>();
             resolvedParams.put("input", inputData);
-            resolvedParams.put("keep_only_set", keepOnlySet);
+            resolvedParams.put("keepOnlySet", keepOnlySet);
             for (Map.Entry<String, Object> e : resolvedFields.entrySet()) {
                 resolvedParams.put(e.getKey(), e.getValue());
             }

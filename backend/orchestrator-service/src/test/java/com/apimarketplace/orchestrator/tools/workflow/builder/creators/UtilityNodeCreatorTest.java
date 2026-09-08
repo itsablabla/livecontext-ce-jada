@@ -300,7 +300,7 @@ class UtilityNodeCreatorTest {
     }
 
     @Test
-    @DisplayName("media: missing 'operation' -> MISSING_PARAMETER failure listing the seven operations")
+    @DisplayName("media: missing 'operation' -> MISSING_PARAMETER failure listing every operation")
     void mediaMissingOperationListsOperations() {
         ToolExecutionResult r = creator.executeAddMedia(session, baseMediaParams());
 
@@ -617,6 +617,150 @@ class UtilityNodeCreatorTest {
         assertThat(r.success()).isFalse();
         assertThat(r.errorCode()).isEqualTo(ToolErrorCode.MISSING_PARAMETER);
         assertThat(r.error()).contains("'image' is");
+    }
+
+    // ---- media v3: subtitles ----------------------------------------------
+
+    @Test
+    @DisplayName("media: subtitles missing 'video' -> MISSING_PARAMETER naming the param and showing the cue shape")
+    void mediaSubtitlesMissingVideoFails() {
+        Map<String, Object> p = baseMediaParams();
+        p.put("operation", "subtitles");
+        p.put("cues", List.of(Map.of("start_seconds", 0, "end_seconds", 2.4, "text", "It starts here")));
+
+        ToolExecutionResult r = creator.executeAddMedia(session, p);
+
+        assertThat(r.success()).isFalse();
+        assertThat(r.errorCode()).isEqualTo(ToolErrorCode.MISSING_PARAMETER);
+        assertThat(r.error()).contains("'video' is");
+    }
+
+    @Test
+    @DisplayName("media: subtitles missing 'cues' -> MISSING_PARAMETER showing start_seconds/end_seconds/text")
+    void mediaSubtitlesMissingCuesFails() {
+        Map<String, Object> p = baseMediaParams();
+        p.put("operation", "subtitles");
+        p.put("video", "{{core:reel.output.file}}");
+
+        ToolExecutionResult r = creator.executeAddMedia(session, p);
+
+        assertThat(r.success()).isFalse();
+        assertThat(r.errorCode()).isEqualTo(ToolErrorCode.MISSING_PARAMETER);
+        assertThat(r.error()).contains("'cues' is required")
+            .contains("start_seconds").contains("end_seconds").contains("text");
+    }
+
+    @Test
+    @DisplayName("media: subtitles with an EMPTY cues array -> MISSING_PARAMETER, not a node captioning nothing")
+    void mediaSubtitlesEmptyCuesFails() {
+        Map<String, Object> p = baseMediaParams();
+        p.put("operation", "subtitles");
+        p.put("video", "{{core:reel.output.file}}");
+        p.put("cues", List.of());
+
+        ToolExecutionResult r = creator.executeAddMedia(session, p);
+
+        assertThat(r.success()).isFalse();
+        assertThat(r.errorCode()).isEqualTo(ToolErrorCode.MISSING_PARAMETER);
+    }
+
+    @Test
+    @DisplayName("media: subtitles beyond 600 cues -> INVALID_PARAMETER_VALUE naming the cap")
+    void mediaSubtitlesTooManyCuesFails() {
+        List<Map<String, Object>> cues = new java.util.ArrayList<>();
+        for (int i = 0; i < 601; i++) {
+            cues.add(Map.of("start_seconds", i, "end_seconds", i + 0.5, "text", "line " + i));
+        }
+        Map<String, Object> p = baseMediaParams();
+        p.put("operation", "subtitles");
+        p.put("video", "{{core:reel.output.file}}");
+        p.put("cues", cues);
+
+        ToolExecutionResult r = creator.executeAddMedia(session, p);
+
+        assertThat(r.success()).isFalse();
+        assertThat(r.errorCode()).isEqualTo(ToolErrorCode.INVALID_PARAMETER_VALUE);
+        assertThat(r.error()).contains("600").contains("601");
+    }
+
+    @Test
+    @DisplayName("media: subtitles success stores video/cues and every look option under 'params'")
+    void mediaSubtitlesSuccessStoresConfigUnderParams() {
+        List<Map<String, Object>> cues = List.of(
+            Map.of("start_seconds", 0, "end_seconds", 2.4, "text", "It starts here"));
+        Map<String, Object> p = baseMediaParams();
+        p.put("operation", "subtitles");
+        p.put("video", "{{core:reel.output.file}}");
+        p.put("cues", cues);
+        p.put("style", "classic");
+        p.put("font_family", "DejaVu Sans");
+        p.put("font_size_percent", 3.4);
+        p.put("position_percent", 89);
+        p.put("text_color", "#FFFFFF");
+        p.put("outline_color", "#000000");
+
+        ToolExecutionResult r = creator.executeAddMedia(session, p);
+
+        assertThat(r.success()).as(r.error()).isTrue();
+        assertThat(firstCoreParams())
+            .containsEntry("operation", "subtitles")
+            .containsEntry("video", "{{core:reel.output.file}}")
+            .containsEntry("cues", cues)
+            .containsEntry("style", "classic")
+            .containsEntry("font_family", "DejaVu Sans")
+            .containsEntry("font_size_percent", 3.4)
+            .containsEntry("position_percent", 89)
+            .containsEntry("text_color", "#FFFFFF")
+            .containsEntry("outline_color", "#000000");
+    }
+
+    @Test
+    @DisplayName("media: subtitles accepts an EXPRESSION for cues - a caption track is often computed upstream")
+    void mediaSubtitlesTemplatedCuesAccepted() {
+        Map<String, Object> p = baseMediaParams();
+        p.put("operation", "subtitles");
+        p.put("video", "{{core:reel.output.file}}");
+        p.put("cues", "{{core:build_cues.output.result.cues}}");
+
+        ToolExecutionResult r = creator.executeAddMedia(session, p);
+
+        assertThat(r.success()).as(r.error()).isTrue();
+        assertThat(firstCoreParams()).containsEntry("cues", "{{core:build_cues.output.result.cues}}");
+    }
+
+    @Test
+    @DisplayName("media: a BLANK cues expression is still refused, and the error offers the computed form")
+    void mediaSubtitlesBlankCuesExpressionFails() {
+        Map<String, Object> p = baseMediaParams();
+        p.put("operation", "subtitles");
+        p.put("video", "{{core:reel.output.file}}");
+        p.put("cues", "   ");
+
+        ToolExecutionResult r = creator.executeAddMedia(session, p);
+
+        assertThat(r.success()).isFalse();
+        assertThat(r.errorCode()).isEqualTo(ToolErrorCode.MISSING_PARAMETER);
+        assertThat(r.error()).contains("or an expression resolving to one")
+            .contains("{{core:build_cues.output.result.cues}}");
+    }
+
+    @Test
+    @DisplayName("media: aliases subtitle/captions/caption resolve to the canonical 'subtitles' operation")
+    void mediaSubtitlesAliasesResolve() {
+        for (String alias : List.of("subtitle", "captions", "caption")) {
+            session.getCores().clear();
+            Map<String, Object> p = baseMediaParams();
+            p.put("operation", alias);
+            p.put("video", "{{core:reel.output.file}}");
+            p.put("cues", List.of(Map.of("start_seconds", 0, "end_seconds", 2.4, "text", "It starts here")));
+
+            ToolExecutionResult r = creator.executeAddMedia(session, p);
+
+            assertThat(r.success()).as("alias '" + alias + "': " + r.error()).isTrue();
+            assertThat(firstCoreParams().get("operation"))
+                .as("alias '" + alias + "' must be stored as its canonical operation")
+                .isEqualTo("subtitles");
+        }
     }
 
     // ---- wait: duration validation (D5 audit split MISSING vs INVALID) -----

@@ -763,14 +763,15 @@
       "id": "media",
       "name": "Media",
       "category": "action",
-      "description": "Probe, mux, mix, extract, concat, frame-grab, or overlay audio/video/image files via the platform's ffmpeg sidecar. Config lives in the generic params map with the contract field names; every param accepts a {{...}} template expression, and every file param also accepts a literal FileRef object",
+      "description": "Probe, mux, mix, extract, concat, frame-grab, overlay, or caption audio/video/image files via the platform's ffmpeg sidecar. Config lives in the generic params map with the contract field names; every param accepts a {{...}} template expression, and every file param also accepts a literal FileRef object",
       "parameters": [
-        { "name": "operation", "type": "string", "required": true, "enum": ["probe", "mux_audio", "mix", "extract_audio", "concat", "frame", "overlay"], "status": "aligned", "notes": "probe = inspect a media file (JSON report, no output file); mux_audio = put ONE audio track onto ONE video; mix = blend up to 8 audio tracks (optionally onto a video); extract_audio = pull the audio out of a video; concat = glue 1-8 videos back to back into one mp4 (single input = trim/speed edit); frame = extract ONE still image from a video; overlay = burn an image (logo, watermark) onto a video" },
+        { "name": "operation", "type": "string", "required": true, "enum": ["probe", "mux_audio", "mix", "extract_audio", "concat", "frame", "overlay", "subtitles"], "status": "aligned", "notes": "probe = inspect a media file (JSON report, no output file); mux_audio = put ONE audio track onto ONE video; mix = blend up to 8 audio tracks (optionally onto a video); extract_audio = pull the audio out of a video; concat = glue 1-8 videos back to back into one mp4 (single input = trim/speed edit); frame = extract ONE still image from a video; overlay = burn an image (logo, watermark) onto a video; subtitles = burn timed captions into the picture" },
         { "name": "input", "type": "string", "status": "aligned", "notes": "probe/extract_audio/frame only. Template expression referencing a WHOLE FileRef output, e.g. {{core:download.output.file}}, or a literal FileRef object" },
-        { "name": "video", "type": "string", "status": "aligned", "notes": "mux_audio (required), mix (optional), overlay (required). FileRef expression for the video; with mix, present = mp4 output (video stream copied), absent = audio-only output" },
+        { "name": "video", "type": "string", "status": "aligned", "notes": "mux_audio (required), mix (optional), overlay (required), subtitles (required). FileRef expression for the video; with mix, present = mp4 output (video stream copied), absent = audio-only output" },
         { "name": "audio", "type": "string", "status": "aligned", "notes": "mux_audio only (required). FileRef expression for the audio track" },
         { "name": "tracks", "type": "array", "itemType": "object", "status": "aligned", "notes": "mix only (required, 1-8 items). See Track nested type; each track's source is a FileRef expression" },
         { "name": "inputs", "type": "array", "itemType": "object", "status": "aligned", "notes": "concat only (required, 1-8 items, order = playback order). See ConcatInput nested type; each item's source is a FileRef expression or literal FileRef" },
+        { "name": "cues", "type": "array", "itemType": "object", "status": "aligned", "notes": "subtitles only (required, 1-600 items). See SubtitleCue nested type. Cues must be ascending and NON-OVERLAPPING: an overlap is refused, not reordered, because two cues over the same instant are drawn on top of each other" },
         { "name": "transition", "type": "string", "enum": ["cut", "crossfade"], "default": "cut", "status": "aligned", "notes": "concat only. crossfade needs >= 2 inputs (video xfade + audio acrossfade)" },
         { "name": "transition_seconds", "type": "number", "default": 0.5, "status": "aligned", "notes": "concat crossfade only, 0.1-5.0. Must be strictly smaller than every clip's effective duration" },
         { "name": "target_width", "type": "number", "status": "aligned", "notes": "concat only, 16-4096, BOTH with target_height or NEITHER (even values, rounded down). Default: first input's dimensions; non-matching clips are fitted and padded, never stretched" },
@@ -786,6 +787,12 @@
         { "name": "opacity", "type": "number", "default": 1.0, "status": "aligned", "notes": "overlay only, 0-1" },
         { "name": "start_seconds", "type": "number", "status": "aligned", "notes": "overlay only, >= 0. Overlay visible only from this second; absent = from the start" },
         { "name": "end_seconds", "type": "number", "status": "aligned", "notes": "overlay only, > start_seconds. Overlay visible only up to this second; absent = to the end" },
+        { "name": "style", "type": "string", "enum": ["tiktok", "classic"], "default": "tiktok", "status": "aligned", "notes": "subtitles only. tiktok = big, bold, uppercase, above the middle; classic = smaller, mixed case, near the bottom. Every size in a preset is a percent of the video HEIGHT, so one style reads the same at any resolution" },
+        { "name": "font_family", "type": "string", "status": "aligned", "notes": "subtitles only. Font family name; omit it to use the renderer's guaranteed default. A family the renderer cannot find is REFUSED, never silently substituted" },
+        { "name": "font_size_percent", "type": "number", "status": "aligned", "notes": "subtitles only, 1-20. Caption size as a percent of the video HEIGHT, overriding the style preset" },
+        { "name": "position_percent", "type": "number", "status": "aligned", "notes": "subtitles only, 0-100. Distance of the captions from the TOP of the frame, overriding the style preset" },
+        { "name": "text_color", "type": "string", "default": "#FFFFFF", "status": "aligned", "notes": "subtitles only. Caption fill colour as a hex string" },
+        { "name": "outline_color", "type": "string", "default": "#000000", "status": "aligned", "notes": "subtitles only. Caption outline colour as a hex string; the outline is what keeps captions readable over a bright shot" },
         { "name": "volume", "type": "number", "default": 100, "status": "aligned", "notes": "mux_audio: new-audio volume percent 0-400" },
         { "name": "offset_seconds", "type": "number", "default": 0, "status": "aligned", "notes": "mux_audio: audio starts at t=offset (>= 0)" },
         { "name": "trim_start_seconds", "type": "number", "status": "aligned", "notes": "mux_audio/extract_audio: use only this segment of the audio (>= 0)" },
@@ -801,7 +808,7 @@
         { "name": "output_format", "type": "string", "enum": ["mp3", "wav", "aac"], "default": "mp3", "status": "aligned", "notes": "extract_audio and video-less mix only; a mix WITH video is always mp4" }
       ],
       "outputs": [
-        { "name": "file", "type": "object", "status": "aligned", "action": "keep", "notes": "FileRef of the produced media file (mux_audio, mix, extract_audio, concat, overlay = video/audio; frame = image; absent for probe)" },
+        { "name": "file", "type": "object", "status": "aligned", "action": "keep", "notes": "FileRef of the produced media file (mux_audio, mix, extract_audio, concat, overlay, subtitles = video/audio; frame = image; absent for probe)" },
         { "name": "duration_seconds", "type": "number", "status": "aligned", "action": "keep", "notes": "Duration of the result (or of the probed file) in seconds. Not set for frame (a still image has no duration)" },
         { "name": "timestamp_seconds", "type": "number", "status": "aligned", "action": "keep", "notes": "frame only: the ACTUAL timestamp the still was taken at, after the default-to-middle and end-clamp rules" },
         { "name": "size_bytes", "type": "number", "status": "aligned", "action": "keep", "notes": "probe only: file size in bytes" },
@@ -834,6 +841,11 @@
           { "name": "trim_start_seconds", "type": "number", "notes": ">= 0. Use the clip only FROM this second" },
           { "name": "trim_end_seconds", "type": "number", "notes": "> trim_start_seconds. Use the clip only UP TO this second" },
           { "name": "speed", "type": "number", "default": 1.0, "notes": "0.5-2.0, pitch-preserving (video setpts + audio atempo)" }
+        ],
+        "SubtitleCue": [
+          { "name": "start_seconds", "type": "number", "required": true, "notes": ">= 0. When the caption appears, in seconds from the start of the video" },
+          { "name": "end_seconds", "type": "number", "required": true, "notes": "> start_seconds. When the caption disappears" },
+          { "name": "text", "type": "string", "required": true, "notes": "The line shown, non-empty and at most 240 characters. Split a longer line across consecutive cues" }
         ]
       }
     },

@@ -50,7 +50,7 @@ export function GenerationHistoryList({
 }: GenerationHistoryListProps) {
   const t = useTranslations('generationHistory');
   // The dialog's own words for a format, so "Image" reads the same on both screens.
-  const tGeneration = useTranslations('generationModal');
+  const tGeneration = useTranslations('generation');
 
   const [page, setPage] = React.useState(0);
   const [kind, setKind] = React.useState<string | null>(null);

@@ -1792,6 +1792,12 @@ public class AgentAsyncCompletionService {
                 switch (agentType.toLowerCase()) {
                     case "classify", "guardrail" -> {
                         req.setIterationCount(1);
+                        // Single-shot executions carry no loop stop reason: derive the
+                        // canonical one from the outcome, exactly like the inline path
+                        // (AgentNode.buildMinimalObservabilityRequest), so the async row
+                        // is classifiable too.
+                        req.setStopReason(com.apimarketplace.orchestrator.execution.v2.nodes.AgentNode
+                            .deriveSingleShotStopReason(status));
                         String workerSystemPrompt = readString(rawResult, "systemPrompt");
                         String workerUserPrompt = readString(rawResult, "userPrompt");
                         if (workerSystemPrompt != null && !workerSystemPrompt.isBlank()) {

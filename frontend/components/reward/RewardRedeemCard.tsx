@@ -94,7 +94,7 @@ export function RewardRedeemCard({ prefilledCode = '' }: { prefilledCode?: strin
         <Button
           onClick={() => void handleRedeem()}
           disabled={submitting || code.trim().length === 0}
-          variant="contrast"
+          variant="default"
           size="sm"
           className="gap-1"
         >

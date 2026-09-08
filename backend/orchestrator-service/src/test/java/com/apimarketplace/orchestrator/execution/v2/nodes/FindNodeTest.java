@@ -487,6 +487,14 @@ class FindNodeTest {
                 "FindNode must preserve the selected user credential id for catalog resolution");
             assertEquals("run-1", ids.get("__workflowRunId__"),
                 "__workflowRunId__ must propagate so the catalog billing scope is built with RUN priority");
+            // Product-analytics attribution rides beside billing but never through
+            // the billing step key (__nodeId__), which shapes what is charged.
+            assertEquals(context.plan() != null ? context.plan().getId() : null, ids.get("__workflowId__"),
+                "__workflowId__ attributes api_call_completed to the workflow");
+            assertEquals("table:get_data", ids.get("__analyticsNodeId__"),
+                "__analyticsNodeId__ attributes api_call_completed to the node");
+            assertEquals(null, ids.get("__nodeId__"),
+                "__nodeId__ is the billing step key and must stay unset");
         }
     }
 }

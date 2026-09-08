@@ -29,8 +29,11 @@ export interface ConversationData {
 }
 
 interface UIState {
-  sidebarOpen: boolean;
-  sidebarCollapsed: boolean;
+  // NOTE: the sidebar's open/collapsed state deliberately does NOT live here.
+  // It used to, in parallel with SidebarContext - two stores for one sidebar,
+  // and this copy was the one nothing rendered from: it was never persisted,
+  // never restored, and the shell reads the other one. Anything that needs it
+  // reads SidebarContext, which owns it and persists it.
   isNavigatingToNewChat: boolean;
   isProfileOpen: boolean;
   showModelSelector: boolean;
@@ -69,8 +72,6 @@ interface UnifiedAppContextType {
   state: AppState;
 
   // UI State setters
-  setSidebarOpen: (open: boolean) => void;
-  setSidebarCollapsed: (collapsed: boolean) => void;
   setIsNavigatingToNewChat: (navigating: boolean) => void;
   setIsProfileOpen: (open: boolean) => void;
   setShowModelSelector: (show: boolean) => void;
@@ -105,8 +106,6 @@ interface UnifiedAppContextType {
 // ============== INITIAL STATE ==============
 
 const initialUIState: UIState = {
-  sidebarOpen: false,
-  sidebarCollapsed: false,
   isNavigatingToNewChat: false,
   isProfileOpen: false,
   showModelSelector: false,
@@ -165,7 +164,7 @@ export function UnifiedAppProvider({ children }: { children: ReactNode }) {
           selectedTools: parsed.selectedTools || prev.selectedTools,
           mode: parsed.mode || prev.mode,
           selectedCategory: parsed.selectedCategory || prev.selectedCategory,
-          // Don't restore: sidebarOpen, sidebarCollapsed, currentConversationId, isNavigatingToNewChat
+          // Don't restore: currentConversationId, isNavigatingToNewChat
         }));
       } catch (error) {
         console.error('[UnifiedAppContext] Error loading state from localStorage:', error);
@@ -264,14 +263,6 @@ export function UnifiedAppProvider({ children }: { children: ReactNode }) {
   const sortByDate = useCallback((convs: ConversationData[]) => sortByRecency(convs), []);
 
   // ============== UI STATE SETTERS ==============
-
-  const setSidebarOpen = useCallback((open: boolean) => {
-    setState(prev => ({ ...prev, sidebarOpen: open }));
-  }, []);
-
-  const setSidebarCollapsed = useCallback((collapsed: boolean) => {
-    setState(prev => ({ ...prev, sidebarCollapsed: collapsed }));
-  }, []);
 
   const setIsNavigatingToNewChat = useCallback((navigating: boolean) => {
     setState(prev => ({ ...prev, isNavigatingToNewChat: navigating }));
@@ -390,8 +381,6 @@ export function UnifiedAppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<UnifiedAppContextType>(() => ({
     state,
     // UI
-    setSidebarOpen,
-    setSidebarCollapsed,
     setIsNavigatingToNewChat,
     setIsProfileOpen,
     setShowModelSelector,
@@ -414,7 +403,7 @@ export function UnifiedAppProvider({ children }: { children: ReactNode }) {
     resetState,
   }), [
     state,
-    setSidebarOpen, setSidebarCollapsed, setIsNavigatingToNewChat,
+    setIsNavigatingToNewChat,
     setIsProfileOpen, setShowModelSelector, setShowToolSelector,
     setSelectedModel, setReasoningEffort, setSelectedTools, setMode,
     setToolSearchQuery, setSelectedCategory,

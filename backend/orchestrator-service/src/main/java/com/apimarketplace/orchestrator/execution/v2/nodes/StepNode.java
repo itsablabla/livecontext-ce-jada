@@ -170,6 +170,14 @@ public class StepNode extends BaseNode {
             if (context.runId() != null) {
                 billingIdentifiers.put("__workflowRunId__", context.runId());
             }
+            // Analytics attribution (NOT billing): which workflow and which node
+            // made this API call. The gateway forwards them as X-Lc-Workflow-Id /
+            // X-Lc-Node-Id; `__nodeId__` is intentionally left unset because it
+            // feeds the billing step key.
+            if (context.plan() != null && context.plan().getId() != null) {
+                billingIdentifiers.put("__workflowId__", context.plan().getId());
+            }
+            billingIdentifiers.put("__analyticsNodeId__", nodeId);
             // Propagate the workflow author's explicit credential choice
             // (CredentialSection.tsx UI toggle, persisted on Step). The gateway
             // forwards these markers to the catalog as `credentialSource` /
@@ -442,6 +450,22 @@ public class StepNode extends BaseNode {
             case "create-column" -> "CREATE_COLUMN";
             default -> "MCP";
         };
+    }
+
+    /**
+     * A table operation is a built-in node wearing a step's clothes: its
+     * {@code toolId} is the synthetic {@code crud/<op>}, which names no catalog
+     * endpoint, so it is counted as a node type. Everything else is a real
+     * catalog endpoint and its identifier travels untouched - see
+     * {@link ExecutionNode#usageKey()} for why it is not split here.
+     */
+    @Override
+    public String usageKey() {
+        if (stepConfig == null || stepConfig.isCrudStep()) {
+            return "node:table";
+        }
+        String toolId = stepConfig.id();
+        return (toolId == null || toolId.isBlank()) ? null : "tool:" + toolId;
     }
 
     public Step getStepConfig() {

@@ -5,6 +5,8 @@ import { useSearchParams, usePathname } from 'next/navigation';
 import { samePageUrl, showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
 import { AgentTable } from '@/components/AgentTable';
 import { SkillTab } from '@/components/SkillTab';
+import { MemoryTab } from '@/components/MemoryTab';
+import { AgentChatDefaults } from '@/components/settings/AgentChatDefaults';
 import { AuthenticatedView } from './AuthenticatedView';
 import { AgentFleetCanvas } from '@/components/agent-fleet/AgentFleetCanvas';
 import { AgentMetricsDashboard } from '@/components/agent-fleet/AgentMetricsDashboard';
@@ -16,7 +18,9 @@ const tabFromView = (view: string | null): LocalTab =>
   view === 'fleet' ? 'fleet'
     : view === 'metrics' ? 'metrics'
       : view === 'skills' ? 'skills'
-        : 'agents';
+        : view === 'memory' ? 'memory'
+          : view === 'settings' ? 'settings'
+            : 'agents';
 
 /**
  * AgentView - Agent and Skill list view with tabs (inspired by marketplace)
@@ -36,7 +40,7 @@ export function AgentView() {
 
   const handleTabChange = useCallback((tab: LocalTab) => {
     // 'agents' is the default - keep its URL clean (no ?view=). Every other tab
-    // (skills/fleet/metrics) is encoded in the URL so it stays the single source
+    // (skills/memory/fleet/metrics/settings) is encoded in the URL so it stays the single source
     // of truth and is deep-linkable. It is a change of ADDRESS on the page already on
     // screen, and going back to the default removes the last param - which a router push of
     // the bare pathname cannot do when the page was loaded at it. That is the "nothing
@@ -63,7 +67,9 @@ export function AgentView() {
       <div className="pb-8">
         {activeTab === 'agents' && <AgentTable />}
         {activeTab === 'skills' && <SkillTab />}
+        {activeTab === 'memory' && <MemoryTab />}
         {activeTab === 'metrics' && <AgentMetricsDashboard />}
+        {activeTab === 'settings' && <AgentChatDefaults headingLevel="h2" />}
       </div>
     </AuthenticatedView>
   );

@@ -49,13 +49,12 @@ class DataSourceToolsProviderTest {
     @Mock private DataSourceRowModule rowModule;
     @Mock private DataSourceSchemaModule schemaModule;
     @Mock private TablePublishModule publishModule;
-    @Mock private VectorFeatureGate vectorFeatureGate;
 
     private DataSourceToolsProvider provider;
 
     @BeforeEach
     void setUp() {
-        provider = new DataSourceToolsProvider(tableModule, rowModule, schemaModule, publishModule, vectorFeatureGate);
+        provider = new DataSourceToolsProvider(tableModule, rowModule, schemaModule, publishModule);
     }
 
     private ToolExecutionResult exec(Map<String, Object> params) {
@@ -91,7 +90,6 @@ class DataSourceToolsProviderTest {
         @Test
         @DisplayName("getTools() returns exactly one tool named 'table' requiring auth")
         void singleTool() {
-            when(vectorFeatureGate.isVectorAllowed()).thenReturn(false);
             List<AgentToolDefinition> tools = provider.getTools();
             assertThat(tools).hasSize(1);
             assertThat(tools.get(0).name()).isEqualTo("table");
@@ -103,7 +101,6 @@ class DataSourceToolsProviderTest {
         @Test
         @DisplayName("the action parameter advertises exactly the valid actions as an enum")
         void actionEnum() {
-            when(vectorFeatureGate.isVectorAllowed()).thenReturn(false);
             var actionParam = provider.getTools().get(0).parameters().stream()
                     .filter(p -> "action".equals(p.name())).findFirst().orElseThrow();
             assertThat(actionParam.enumValues()).containsExactlyInAnyOrder(
@@ -115,7 +112,6 @@ class DataSourceToolsProviderTest {
         @Test
         @DisplayName("the tool exposes all expected parameters")
         void allParams() {
-            when(vectorFeatureGate.isVectorAllowed()).thenReturn(false);
             List<String> names = provider.getTools().get(0).parameters().stream().map(p -> p.name()).toList();
             assertThat(names).containsExactlyInAnyOrder(
                     "action", "table_id", "name", "description", "data", "rows", "columns",
@@ -129,7 +125,6 @@ class DataSourceToolsProviderTest {
             // Regression guard: 'where' used to say only "Format: {column, operator, value}" - the
             // agent could not know the operator vocabulary, that ordering operators compare as TEXT
             // (lexicographic), or that 'data.' prefixes are unnecessary, without a help round-trip.
-            when(vectorFeatureGate.isVectorAllowed()).thenReturn(false);
             String whereDesc = provider.getTools().get(0).parameters().stream()
                     .filter(p -> "where".equals(p.name()))
                     .findFirst().orElseThrow().description();
@@ -147,7 +142,6 @@ class DataSourceToolsProviderTest {
             // Regression guard: the action description was a 40-char "See help for details." stub -
             // 13 actions with zero guidance. It must name each group's key params and the
             // delete-ALL-rows idiom (delete_rows requires a where; there is no truncate action).
-            when(vectorFeatureGate.isVectorAllowed()).thenReturn(false);
             String actionDesc = provider.getTools().get(0).parameters().stream()
                     .filter(p -> "action".equals(p.name()))
                     .findFirst().orElseThrow().description();
@@ -157,30 +151,35 @@ class DataSourceToolsProviderTest {
                     .contains("operator:'IS NOT NULL'");
         }
 
+        /**
+         * This schema is built ONCE at boot, by an interface method that takes no user, so it
+         * cannot vary by plan and must not pretend to. It used to vary by EDITION, which it could
+         * answer; describing the capability to everyone and refusing at execution is what replaced
+         * that. Hiding the type from all cloud accounts would also hide it from the ones paying
+         * for it.
+         */
         @Test
-        @DisplayName("when vector is allowed, columns advertises the vector type and similarity is a real search")
-        void vectorAllowedDescriptions() {
-            when(vectorFeatureGate.isVectorAllowed()).thenReturn(true);
+        @DisplayName("the vector type and a real similarity contract are advertised to every deployment")
+        void vectorIsAlwaysAdvertised() {
             var tool = provider.getTools().get(0);
             String columnsDesc = tool.parameters().stream().filter(p -> "columns".equals(p.name()))
                     .findFirst().orElseThrow().description();
             String similarityDesc = tool.parameters().stream().filter(p -> "similarity".equals(p.name()))
                     .findFirst().orElseThrow().description();
+
             assertThat(columnsDesc).contains(", vector");
             assertThat(similarityDesc).contains("queryVector");
+            assertThat(similarityDesc).doesNotContain("Not available on this deployment");
         }
 
         @Test
-        @DisplayName("when vector is NOT allowed, columns hides the type and similarity says unavailable")
-        void vectorDisabledDescriptions() {
-            when(vectorFeatureGate.isVectorAllowed()).thenReturn(false);
-            var tool = provider.getTools().get(0);
-            String columnsDesc = tool.parameters().stream().filter(p -> "columns".equals(p.name()))
+        @DisplayName("similarity warns that it is paid on cloud, so a refusal is not a surprise")
+        void similarityNamesTheCost() {
+            String similarityDesc = provider.getTools().get(0).parameters().stream()
+                    .filter(p -> "similarity".equals(p.name()))
                     .findFirst().orElseThrow().description();
-            String similarityDesc = tool.parameters().stream().filter(p -> "similarity".equals(p.name()))
-                    .findFirst().orElseThrow().description();
-            assertThat(columnsDesc).doesNotContain(", vector");
-            assertThat(similarityDesc).contains("Not available on this deployment");
+
+            assertThat(similarityDesc).contains("plan");
         }
     }
 

@@ -34,6 +34,14 @@ public class ConversationDto {
 
     private String provider;
 
+    /**
+     * What the conversation is: {@code chat} or {@code studio}.
+     *
+     * <p>Read on the create path, echoed back on every read, and REFUSED on the update path when it
+     * names a different kind than the row already has - see {@code ConversationKind}.
+     */
+    private String kind;
+
     private String workflowId;
 
     private String agentId;
@@ -274,6 +282,14 @@ public class ConversationDto {
 
     public void setShareMode(String shareMode) {
         this.shareMode = shareMode;
+    }
+
+    public String getKind() {
+        return kind;
+    }
+
+    public void setKind(String kind) {
+        this.kind = kind;
     }
 
     public Boolean getMemoryEnabled() {

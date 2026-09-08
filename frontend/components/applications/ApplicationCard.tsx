@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Package, CheckCircle, Clock, XCircle, Sparkles, Star, Volume2, VolumeX } from 'lucide-react';
+import { BudgetChip } from '@/components/budget/BudgetChip';
+import { budgetChipHasContent } from '@/components/budget/budgetPeriod';
 import { useTranslations } from 'next-intl';
 import type { WorkflowPublication } from '@/lib/api/orchestrator/types';
 import { ShowcasePreview } from '@/components/marketplace/ShowcasePreview';
@@ -87,6 +89,14 @@ interface ApplicationCardProps {
    * triggers fire). {@code undefined} = not yet loaded.
    */
   pinnedVersion?: number | null;
+  /** Spending cap in credits, null/undefined when the app is uncapped (the default). */
+  budgetCredits?: number | null;
+  /** How the cap resets: monthly | weekly | cumulative. */
+  budgetPeriodMode?: string | null;
+  /** Spent by the governed runs in the period open right now, already rolled over server-side. */
+  budgetPeriodSpent?: number | null;
+  /** When the allowance starts again (ISO-8601 UTC), or null when it never does. */
+  budgetPeriodResetsAt?: string | null;
   /** Whether this app is in the user's personal favorites. */
   isFavorite?: boolean;
   /**
@@ -107,7 +117,7 @@ interface ApplicationCardProps {
   relations?: WorkflowRelations;
 }
 
-export function ApplicationCard({ publication, source, isSelected, onToggleSelect, onCardClick, applicationRunId, acquiredAt, pinnedVersion, isFavorite, onToggleFavorite, workflowId, relations }: ApplicationCardProps) {
+export function ApplicationCard({ publication, source, isSelected, onToggleSelect, onCardClick, applicationRunId, acquiredAt, pinnedVersion, budgetCredits, budgetPeriodMode, budgetPeriodSpent, budgetPeriodResetsAt, isFavorite, onToggleFavorite, workflowId, relations }: ApplicationCardProps) {
   const t = useTranslations('marketplace');
   const tApp = useTranslations('applications');
   // How this app is previewed (own run vs the publisher's frozen showcase, local vs cloud)
@@ -346,6 +356,20 @@ export function ApplicationCard({ publication, source, isSelected, onToggleSelec
             </span>
           )}
         </div>
+
+        {/* What this app is costing, on its own row so it never competes with the
+            publisher line for width. Renders nothing until a production fire has
+            spent something, so a freshly installed app stays clean. */}
+        {budgetChipHasContent(budgetPeriodSpent, budgetCredits) && (
+          <div className="flex items-center pt-0.5 text-xs">
+            <BudgetChip
+              spent={budgetPeriodSpent}
+              cap={budgetCredits}
+              periodMode={budgetPeriodMode}
+              resetsAt={budgetPeriodResetsAt}
+            />
+          </div>
+        )}
 
         {/* Sub-workflow neighbourhood of the app's own workflow. Renders nothing unless there is
             one, so the row disappears entirely for the vast majority of apps. Requires BOTH a

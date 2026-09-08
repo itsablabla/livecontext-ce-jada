@@ -293,41 +293,42 @@ function BillingPageInner() {
             </div>
           )}
 
-          {/* Footer actions - 3-way */}
-          <div className="flex flex-wrap gap-3 pt-4 border-t border-theme">
-            {isFree ? (
+          {/* Footer actions - 3-way. The RULE lives inside each branch, not around
+              them: every action here is owner-only or plan-conditional, so a shared
+              wrapper painted a bare border with nothing under it for a cancelling
+              subscriber, and for any member who cannot act on the plan. */}
+          {isFree ? (
+            <div className="flex flex-wrap gap-3 pt-4 border-t border-theme">
               <Link href="/app/settings/pricing">
                 <Button size="sm" className="h-8 px-3">
                   <ArrowUpRight className="h-4 w-4 mr-1" />
                   {t('summary.upgradePlan')}
                 </Button>
               </Link>
-            ) : cancelAtPeriodEnd ? null : (
-              <>
-                <OwnerOnlyBillingAction hideWhenNotOwner>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleOpenPortal}
-                    className="h-8 px-3"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5 mr-1" />
-                    {t('actions.manageStripe')}
-                  </Button>
-                </OwnerOnlyBillingAction>
-                <OwnerOnlyBillingAction hideWhenNotOwner>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setShowCancellationModal(true)}
-                    className="h-8 px-3 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                  >
-                    {t('actions.cancel')}
-                  </Button>
-                </OwnerOnlyBillingAction>
-              </>
-            )}
-          </div>
+            </div>
+          ) : cancelAtPeriodEnd ? null : (
+            <OwnerOnlyBillingAction hideWhenNotOwner>
+              <div className="flex flex-wrap gap-3 pt-4 border-t border-theme">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleOpenPortal}
+                  className="h-8 px-3"
+                >
+                  <ExternalLink className="h-3.5 w-3.5 mr-1" />
+                  {t('actions.manageStripe')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowCancellationModal(true)}
+                  className="h-8 px-3 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                >
+                  {t('actions.cancel')}
+                </Button>
+              </div>
+            </OwnerOnlyBillingAction>
+          )}
         </section>
 
         {/* ── Card 2 - Invoices ─────────────────────────────────────── */}

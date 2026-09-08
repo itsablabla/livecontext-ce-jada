@@ -8,6 +8,7 @@ import com.apimarketplace.trigger.client.TriggerClient;
 import com.apimarketplace.trigger.client.dto.ScheduledExecutionDto;
 import com.apimarketplace.trigger.client.dto.StandaloneScheduleRequest;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -97,8 +98,11 @@ public class ScheduleOverviewController {
     public ResponseEntity<?> toggle(
             @RequestHeader("X-User-ID") String tenantId,
             @RequestHeader("X-Organization-ID") String organizationId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole,
             @PathVariable UUID scheduleId,
             @RequestBody Map<String, Boolean> body) {
+        ResponseEntity<?> denied = refuseViewer(orgRole, organizationId, tenantId, "pause or resume a schedule");
+        if (denied != null) return denied;
         boolean enabled = Boolean.TRUE.equals(body.get("enabled"));
         ScheduledExecutionDto result = triggerClient.toggleSchedule(scheduleId, enabled, organizationId, tenantId);
         if (result == null) {
@@ -114,8 +118,11 @@ public class ScheduleOverviewController {
     public ResponseEntity<?> create(
             @RequestHeader("X-User-ID") String tenantId,
             @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole,
             @RequestHeader(value = "X-User-Plan", required = false) String userPlan,
             @RequestBody StandaloneScheduleRequest request) {
+        ResponseEntity<?> denied = refuseViewer(orgRole, organizationId, tenantId, "create a schedule");
+        if (denied != null) return denied;
         // No pre-check on limit here - trigger-service's create path dedups
         // by (tenantId, sourceNodeId) BEFORE checking the limit, so a refresh
         // at-limit returns the existing row instead of 400. Pre-checking here
@@ -149,8 +156,11 @@ public class ScheduleOverviewController {
     public ResponseEntity<?> update(
             @RequestHeader("X-User-ID") String tenantId,
             @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole,
             @PathVariable UUID scheduleId,
             @RequestBody StandaloneScheduleRequest request) {
+        ResponseEntity<?> denied = refuseViewer(orgRole, organizationId, tenantId, "edit a schedule");
+        if (denied != null) return denied;
         ScheduledExecutionDto result = triggerClient.updateStandaloneSchedule(tenantId, scheduleId, request, organizationId);
         if (result == null) {
             return ResponseEntity.notFound().build();
@@ -194,12 +204,38 @@ public class ScheduleOverviewController {
     public ResponseEntity<?> delete(
             @RequestHeader("X-User-ID") String tenantId,
             @RequestHeader("X-Organization-ID") String organizationId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole,
             @PathVariable UUID scheduleId) {
+        ResponseEntity<?> denied = refuseViewer(orgRole, organizationId, tenantId, "delete a schedule");
+        if (denied != null) return denied;
         boolean archived = triggerClient.archiveScheduleById(scheduleId, "USER_DELETED", organizationId, tenantId);
         if (!archived) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(Map.of("success", true));
+    }
+
+    /**
+     * Refuse an org VIEWER, returning the 403 body when they must be stopped and null when
+     * they may proceed.
+     *
+     * <p>Applied to EVERY write on this controller, which is the whole point. It was first
+     * added to {@code toggle} alone, on the reasoning that pausing a schedule stops a
+     * workspace's automation running - and that argument covers {@code create},
+     * {@code update} and especially {@code delete}, which archives the row permanently. A
+     * gate on one of four writes in the same file is not a gate. The frontend's
+     * {@code canMutate} hides the buttons, which is not a boundary either.
+     *
+     * <p>Only applies inside an organization workspace; a personal workspace has no roles.
+     */
+    private static ResponseEntity<?> refuseViewer(String orgRole, String organizationId,
+                                                  String tenantId, String action) {
+        if (organizationId != null && orgRole != null && "VIEWER".equalsIgnoreCase(orgRole.trim())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("success", false, "reason", "VIEWER_ROLE",
+                            "error", "VIEWER role cannot modify schedules"));
+        }
+        return null;
     }
 
     public record ScheduleOverviewResponse(

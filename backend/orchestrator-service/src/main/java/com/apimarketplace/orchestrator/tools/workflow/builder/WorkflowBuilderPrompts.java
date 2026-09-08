@@ -382,6 +382,9 @@ public final class WorkflowBuilderPrompts {
                   body: '{"query": "{{trigger:form.output.query}}"}'
                 }, connect_after='Form')
                 HTTP Request = raw HTTP call. Output: {{core:call_api.output.body}}, {{core:call_api.output.status_code}}.
+                url also accepts endpoint and uri; authType accepts auth_type; bodyType accepts body_type;
+                  authConfig accepts auth_config; queryParams accepts query_params. Send only ONE spelling
+                  of a field per call: two of them in one modify is refused with an error naming both.
                 """;
             case "add_approval", "approval", "user_approval" -> """
                 workflow(action='add_node', type='approval', label='Manager Review', params={
@@ -389,11 +392,20 @@ public final class WorkflowBuilderPrompts {
                   timeoutMs: 86400000
                 }, connect_after='Submit')
                 Approval = pause workflow until a human approves/rejects.
-                contextTemplate (REQUIRED): the message shown to the approver so they see WHAT they are
-                  approving. Literal text plus {{...}} expressions; resolved at pause time. Omitting it is
-                  only a warning - the run still proceeds, but the approver sees no context.
+                contextTemplate (STRONGLY RECOMMENDED, never blocking): the message shown to the approver
+                  so they see WHAT they are approving. Literal text plus {{...}} expressions; resolved at
+                  pause time. Omitting it only raises a warning - the node is created and the run proceeds,
+                  but the approver sees no context.
                 Optional: timeoutMs (ms before the timeout port fires, default 86400000 = 24h),
                   requiredApprovals (default 1), approverRoles (array).
+                These parameters also accept other spellings, on add_node AND on modify:
+                  timeout_ms and timeout for timeoutMs, required_approvals, approver_roles and roles,
+                  context_template, continuation_mode. They all reach the same field. Send only ONE of
+                  them per call: two spellings of the same field in one modify is refused with an error
+                  naming both, because there is no way to tell which value you meant. On modify, send these
+                  parameters FLAT (params={timeout_ms: 3600000}); wrapped in the whole approval
+                  object (params={approval: {timeout_ms: ...}}) an alias is stored as sent and the
+                  field keeps its old value, with no error.
                 Optional continuationMode ('all_items' | 'per_item', default 'all_items') - only
                   matters when this approval runs inside a split (one approval per item).
                   'all_items': downstream steps start once, after every item's approval is decided.
@@ -444,14 +456,16 @@ public final class WorkflowBuilderPrompts {
             case "add_exit", "exit" -> "workflow(action='add_node', type='exit', label='Exit', connect_after='...') - End execution along this branch. Other parallel branches (fork, split) continue normally. TERMINAL: NO outgoing edges allowed - never connect this as `from` (including to a merge). To rejoin a branch into a merge, route the predecessor of the Exit to the merge instead, or drop the Exit.";
             case "add_response", "response" -> "workflow(action='add_node', type='response', label='Reply', params={message: '{{agent:analyzer.output.response}}'}, connect_after='Analyzer') - Send a chat message back to the user (chat trigger only).";
             case "add_data_input", "data_input" -> "workflow(action='add_node', type='data_input', label='Inject Config', params={data: {key: 'value'}}, connect_after='...') - Inject static or dynamic data mid-workflow.";
-            case "add_download", "download_file" -> "workflow(action='add_node', type='download_file', label='Get Image', params={url: '{{mcp:fetch.output.image_url}}'}, connect_after='Fetch') - Download a file from URL. Output: canonical FileRef under {{core:get_image.output.file}} (drop into <img src=\"{{photo}}\"/> via variable_mapping for marketplace + share preview).";
+            case "add_download", "download_file" -> "workflow(action='add_node', type='download_file', label='Get Image', params={url: '{{mcp:fetch.output.image_url}}'}, connect_after='Fetch') - Download a file from URL. Output: canonical FileRef under {{core:get_image.output.file}} (drop into <img src=\"{{photo}}\"/> via variable_mapping for marketplace + share preview). url also accepts source, link, file_url, href and src; filename accepts file_name and output. Send only ONE spelling of a field per call: two of them in one modify is refused with an error naming both.";
             case "add_media", "media" -> """
                 workflow(action='add_node', type='media', label='Add Music', params={operation: 'mux_audio', video: '{{interface:card.output.video}}', audio: '{{core:dl.output.file}}', volume: 80}, connect_after='Card')
                 Media = audio/video processing on the optional renderer component (the node FAILS at run time when it is absent). Operations:
                 probe (read metadata as flat fields), mux_audio (ONE audio track onto ONE video), mix (1-8 tracks, optional video, ducking),
                 extract_audio (audio out of a video), concat (glue 1-8 videos into one mp4, per-clip trim/speed, cut|crossfade transitions;
                 a SINGLE input = trim/speed edit), frame (ONE still image, default the MIDDLE of the video, output timestamp_seconds),
-                overlay (burn an image/watermark onto a video: position, margin_px, width_percent, opacity, start/end window).
+                overlay (burn an image/watermark onto a video: position, margin_px, width_percent, opacity, start/end window),
+                subtitles (burn timed captions INTO the picture: cues=[{start_seconds, end_seconds, text}] ascending and non-overlapping,
+                style tiktok|classic - caption LAST, the captions cannot be removed afterwards).
                 File params (input/video/audio/image/tracks[].source/inputs[].source) take the WHOLE FileRef output of an upstream node
                 ('{{core:dl.output.file}}') or a literal FileRef object - never .path or a URL. Details: workflow(action='help', topics=['media']).
                 """;
@@ -468,8 +482,11 @@ public final class WorkflowBuilderPrompts {
                 means 'platform' for this node, so check runs_on in that help first: where it says own_key_only the platform does not resell
                 that provider here and an unstated node fails on its first run).
                 A node may also carry credential_id, which names WHICH of the owner's provider keys it runs on. You cannot choose one:
-                only the owner sees their keys. Keep it exactly as you found it when you rewrite a node, and never invent one.
-                Output: the asset as a whole FileRef under {{core:make_clip.output.file}}, plus model, kind, provider, billed_quantity and
+                only the owner sees their keys. add_node and modify accept it so you can carry one across a rewrite - keep it exactly as
+                you found it, and never invent one.
+                Generate is an AI node: it is keyed agent:<label>, not core:<label>. A {{core:make_clip...}} reference to it resolves to
+                nothing, silently, because an unresolved template is an empty string rather than an error.
+                Output: the asset as a whole FileRef under {{agent:make_clip.output.file}}, plus model, kind, provider, billed_quantity and
                 billed_unit. Every run is charged and a per-second or per-character model costs more for a longer request; the node fails
                 rather than continue when no asset comes back. Details: workflow(action='help', topics=['generate']).
                 """;
@@ -600,7 +617,7 @@ public final class WorkflowBuilderPrompts {
             case "add_sftp", "sftp", "file_transfer" -> """
                 workflow(action='add_node', type='sftp', label='Upload Report', params={
                   host: 'files.example.com', username: 'uploader', authMethod: 'password',
-                  operation: 'upload', remotePath: '/reports/daily.csv', localContent: '{{core:generate.output.csv}}'
+                  operation: 'upload', remotePath: '/reports/daily.csv', localContent: '{{core:build_report.output.csv}}'
                 }, connect_after='...')
                 SFTP - file operations on remote servers. Operations: list, download, upload, delete, rename, mkdir.
                 Outputs: {{core:<label>.output.success}} (all ops); {{core:<label>.output.files}} (list); {{core:<label>.output.file}} (download - canonical FileRef, usable directly in <img src> / <a href> via variable_mapping); {{core:<label>.output.uploaded_size}} (upload); {{core:<label>.output.new_path}} (rename).

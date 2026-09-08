@@ -133,6 +133,42 @@ function stubLayout(panelSize: { width: number; height: number }) {
   return () => { Element.prototype.getBoundingClientRect = original; };
 }
 
+
+/**
+ * jsdom's CSS parser (cssstyle) understands `calc()` but silently DROPS `min()`:
+ * writing `max-width: min(calc(100vw - 1rem), 374px)` reads back as the empty
+ * string, and the card ends up with no `style` attribute at all. That erases the
+ * anchor cap these tests exist to pin, and - worse - it makes the "no cap" case
+ * indistinguishable from every capped one, so an assertion of `''` would pass
+ * even for a panel that IS capped.
+ *
+ * Recording the value as it is WRITTEN keeps the assertion end to end (component,
+ * to DOM write, to the string a browser would receive) instead of retreating to
+ * re-asserting the component's own formula. The real declaration is still written
+ * through, so nothing else in the suite changes behaviour.
+ */
+const writtenMaxWidth = new WeakMap<CSSStyleDeclaration, string>();
+function stubMinAwareMaxWidth(): () => void {
+  const proto = CSSStyleDeclaration.prototype;
+  const original = Object.getOwnPropertyDescriptor(proto, 'maxWidth');
+  Object.defineProperty(proto, 'maxWidth', {
+    configurable: true,
+    get(this: CSSStyleDeclaration) {
+      const written = writtenMaxWidth.get(this);
+      if (written !== undefined) return written;
+      return (original?.get?.call(this) as string | undefined) ?? '';
+    },
+    set(this: CSSStyleDeclaration, value: string) {
+      writtenMaxWidth.set(this, value ?? '');
+      original?.set?.call(this, value);
+    },
+  });
+  return () => {
+    if (original) Object.defineProperty(proto, 'maxWidth', original);
+    else delete (proto as unknown as Record<string, unknown>).maxWidth;
+  };
+}
+
 /** An element standing in for the application container the panel centres on. */
 function makeAnchor({ width, left }: { width: number; left: number }): HTMLElement {
   const el = document.createElement('div');
@@ -254,6 +290,7 @@ function pointerDrag(dx: number, dy: number, { release = true, pointerId = PRIMA
 }
 
 let restoreLayout: () => void = () => {};
+let restoreMaxWidth: () => void = () => {};
 let originalScrollIntoView: unknown;
 let originalViewport = { width: 0, height: 0 };
 
@@ -289,10 +326,12 @@ beforeEach(() => {
   originalViewport = { width: window.innerWidth, height: window.innerHeight };
   setViewport(PHONE);
   restoreLayout = stubLayout(PANEL);
+  restoreMaxWidth = stubMinAwareMaxWidth();
 });
 
 afterEach(() => {
   setViewport(originalViewport);
+  restoreMaxWidth();
   restoreLayout();
   (Element.prototype as unknown as Record<string, unknown>).scrollIntoView = originalScrollIntoView;
   vi.unstubAllGlobals();

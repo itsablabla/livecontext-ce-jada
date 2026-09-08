@@ -28,6 +28,13 @@ import java.util.Set;
 @Transactional
 public class OnboardingService {
 
+    /**
+     * Product-analytics emitter (PostHog). Optional so hand-built test instances and
+     * analytics-less deployments are untouched; a null field emits nothing.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics;
+
     private static final Logger log = LoggerFactory.getLogger(OnboardingService.class);
 
     private final UserOnboardingRepository onboardingRepository;
@@ -278,6 +285,15 @@ public class OnboardingService {
      * @return OnboardingResponse with updated data
      */
     public OnboardingResponse saveOnboarding(String providerId, OnboardingRequest request) {
+        return saveOnboarding(providerId, request, true);
+    }
+
+    /**
+     * @param emitStepAnalytics false on the complete path, which reuses this save
+     *                          and emits {@code onboarding_completed} instead; a
+     *                          step event there would double-count the last step.
+     */
+    private OnboardingResponse saveOnboarding(String providerId, OnboardingRequest request, boolean emitStepAnalytics) {
         log.info("💾 Saving onboarding for providerId: {}, request: {}", providerId, request);
 
         // Find user
@@ -318,6 +334,19 @@ public class OnboardingService {
         if (request.getExperienceLevel() != null) {
             onboarding.setExperienceLevel(nullIfEmpty(request.getExperienceLevel()));
         }
+        // Persona questions (2026-09): each is optional and additive.
+        if (request.getPrimaryGoal() != null) {
+            onboarding.setPrimaryGoal(nullIfEmpty(request.getPrimaryGoal()));
+        }
+        if (request.getToolsUsed() != null) {
+            onboarding.setToolsUsed(request.getToolsUsed());
+        }
+        if (request.getPreviousTool() != null) {
+            onboarding.setPreviousTool(nullIfEmpty(request.getPreviousTool()));
+        }
+        if (request.getReferralSource() != null) {
+            onboarding.setReferralSource(nullIfEmpty(request.getReferralSource()));
+        }
 
         // Update step progress
         onboarding.setOnboardingStep(request.getCurrentStep());
@@ -325,6 +354,7 @@ public class OnboardingService {
         // Save
         UserOnboarding saved = onboardingRepository.save(onboarding);
         log.info("✅ Onboarding saved for userId: {}, step: {}", user.getId(), saved.getOnboardingStep());
+        if (emitStepAnalytics && analytics != null) analytics.onboardingStepSaved(user.getId(), request.getCurrentStep());
 
         OnboardingResponse response = OnboardingResponse.fromEntity(saved);
         response.setEmailVerified(user.isEmailVerified());
@@ -348,13 +378,15 @@ public class OnboardingService {
             throw new IllegalArgumentException("Email must be verified before completing onboarding");
         }
 
-        // Save the onboarding data first
-        OnboardingResponse response = saveOnboarding(providerId, request);
+        // Save the onboarding data first (no step event: this IS the completion)
+        OnboardingResponse response = saveOnboarding(providerId, request, false);
 
         // Mark as completed
         UserOnboarding onboarding = onboardingRepository.findByUserProviderId(providerId)
                 .orElseThrow(() -> new IllegalStateException("Onboarding not found after save"));
 
+        // A retried POST must not count as a second completion.
+        boolean alreadyCompleted = onboarding.isOnboardingCompleted();
         onboarding.markCompleted();
         UserOnboarding saved = onboardingRepository.save(onboarding);
 
@@ -363,14 +395,19 @@ public class OnboardingService {
         updateUserUsername(user, saved.getDisplayName());
 
         // Create personal organization (silent, no UI)
+        String personalOrgId = null;
         try {
-            organizationService.createPersonalOrganization(user, saved.getDisplayName());
+            var personalOrg = organizationService.createPersonalOrganization(user, saved.getDisplayName());
+            personalOrgId = personalOrg != null && personalOrg.getId() != null ? personalOrg.getId().toString() : null;
             bustGatewayCacheAfterCommit(user);
             log.info("🏢 Personal organization created for user: {}", user.getId());
         } catch (Exception e) {
             // Log but don't fail onboarding - org creation is non-critical
             log.error("⚠️ Failed to create personal organization for providerId: {}", providerId, e);
         }
+
+        // The persona record: what the user declared, re-bucketed to the option lists.
+        if (analytics != null && !alreadyCompleted) analytics.onboardingCompleted(user.getId(), saved, personalOrgId);
 
         log.info("✅ Onboarding completed for providerId: {}", providerId);
         OnboardingResponse completed = OnboardingResponse.completed(saved);
@@ -424,14 +461,17 @@ public class OnboardingService {
         updateUserUsername(user, displayName);
 
         // Create personal organization (silent, no UI)
+        String personalOrgId = null;
         try {
-            organizationService.createPersonalOrganization(user, displayName);
+            var personalOrg = organizationService.createPersonalOrganization(user, displayName);
+            personalOrgId = personalOrg != null && personalOrg.getId() != null ? personalOrg.getId().toString() : null;
             bustGatewayCacheAfterCommit(user);
             log.info("🏢 Personal organization created for user: {}", user.getId());
         } catch (Exception e) {
             // Log but don't fail skip - org creation is non-critical
             log.error("⚠️ Failed to create personal organization for providerId: {}", providerId, e);
         }
+        if (analytics != null) analytics.onboardingSkipped(user.getId(), saved.getOnboardingStep(), personalOrgId);
 
         OnboardingResponse response = OnboardingResponse.fromEntity(saved);
         response.setEmailVerified(user.isEmailVerified());

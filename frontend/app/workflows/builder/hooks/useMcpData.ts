@@ -103,6 +103,52 @@ export const useMcpApis = (enabled: boolean = true, searchQuery?: string) => {
   });
 };
 
+/** Page size of the ranked integrations list, shared by the fetch and its pager. */
+export const POPULAR_APIS_PAGE_SIZE = 20;
+
+/**
+ * One page of integrations ordered by how much the PLATFORM runs them (V461).
+ *
+ * Deliberately a separate endpoint rather than a `sort` flag on `/apis`: that one
+ * loads the whole catalogue and slices it in JS, which is exactly the cost this list -
+ * scrolled page by page from the palette - must not pay twice.
+ */
+export const fetchPopularApis = async ({ pageParam = 0 }: { pageParam?: number }) => {
+  const page = typeof pageParam === 'number' && !isNaN(pageParam) ? pageParam : 0;
+  const data = await apiClient.get<ApisResponse & { last?: boolean }>('/workflow-inspector/apis/popular', {
+    params: { page, size: POPULAR_APIS_PAGE_SIZE },
+  });
+  return data;
+};
+
+/**
+ * The palette's ranked integrations section.
+ *
+ * `enabled` is what makes it lazy: the caller only turns it on once the section has
+ * actually been scrolled into view, so opening the palette on the categories does not
+ * fetch a list nobody looked at.
+ */
+export const usePopularApis = (enabled: boolean) => {
+  return useInfiniteQuery({
+    queryKey: ['mcp-apis-popular'],
+    queryFn: ({ pageParam }) => fetchPopularApis({ pageParam }),
+    enabled,
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage?.last === true) return undefined;
+      const content = Array.isArray(lastPage?.content) ? lastPage.content : [];
+      // A short page is the last page: the ranking is a total order over a fixed
+      // catalogue, so a full page always means there is more behind it.
+      if (content.length < POPULAR_APIS_PAGE_SIZE) return undefined;
+      return allPages.length;
+    },
+    // The ranking moves on a flush interval, not per interaction. Refetching it while
+    // the builder is open would reorder the list under the pointer for no new information.
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+};
+
 export const fetchApiTools = async (apiSlug: string): Promise<ApiTool[]> => {
   if (!apiSlug) return [];
   return apiClient.get<ApiTool[]>(`/workflow-inspector/apis/${encodeURIComponent(apiSlug)}/tools`);

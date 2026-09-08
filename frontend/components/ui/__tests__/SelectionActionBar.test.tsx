@@ -90,6 +90,26 @@ describe('SelectionActionBar', () => {
     expect(screen.getByRole('button', { name: 'Clear selection' })).toBeInTheDocument();
   });
 
+  it('folds onto a second line instead of hanging off both edges of a phone', () => {
+    // The bar is centred with `-translate-x-1/2` and holds five to seven
+    // labelled buttons: on a 410px screen it used to overflow BOTH sides at
+    // once, so the actions at each end could not be reached at all.
+    const { getByTestId } = renderBar(
+      <SelectionActionBar count={3} onClear={() => {}}>
+        <BulkBarButton>Duplicate</BulkBarButton>
+        <BulkBarButton>Move to folder</BulkBarButton>
+        <BulkBarButton>Delete</BulkBarButton>
+      </SelectionActionBar>,
+    );
+
+    const bar = getByTestId('selection-action-bar');
+    expect(bar.className).toContain('flex-wrap');
+    // Against its CONTAINER, not the window: the bar is absolutely positioned
+    // inside the content area, which is narrower than the viewport whenever the
+    // sidebar is open, so a 100vw cap would not have stopped it overflowing.
+    expect(bar.className).toContain('max-w-[calc(100%-1rem)]');
+  });
+
   it('honours a custom testId', () => {
     const { getByTestId } = renderBar(
       <SelectionActionBar count={1} onClear={() => {}} testId="my-bar">

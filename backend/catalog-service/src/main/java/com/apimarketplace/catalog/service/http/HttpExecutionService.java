@@ -9,6 +9,8 @@ import com.apimarketplace.common.web.UrlSafetyValidator;
 import com.apimarketplace.catalog.service.UserCredentialService;
 import com.apimarketplace.catalog.service.exception.ApiAuthenticationException;
 import com.apimarketplace.catalog.service.exception.InsufficientScopesException;
+import com.apimarketplace.catalog.service.execution.FileAttachmentException;
+import com.apimarketplace.catalog.service.execution.FileAttachmentResolver;
 import com.apimarketplace.catalog.service.http.bodypath.BodyPathExecutor;
 import com.apimarketplace.catalog.service.http.bodypath.BodyPathParser;
 import com.apimarketplace.credential.client.dto.AccessTokenResult;
@@ -47,6 +49,7 @@ public class HttpExecutionService {
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
     private final RestTemplate restTemplate;
+    private final ErrorPolicyEngine errorPolicyEngine;
 
     /**
      * Cache of resource-scoped sub-tokens (e.g. Facebook Page tokens) resolved via the generic
@@ -63,6 +66,17 @@ public class HttpExecutionService {
     /** Hard cap on the sub-token cache to bound growth (users × credentials × sub-resources). Settable for tests. */
     int subTokenCacheMax = 5_000;
     private record CachedSubToken(String token, long expiresAtMs) {}
+
+    /**
+     * Retry counter. Optional for the same reason as the strategies below, and because a missing
+     * registry must never be the thing that stops a provider call.
+     *
+     * <p>Without it the retry is invisible: the wait happens on the serving thread, so a
+     * provider-wide throttle shows up only as latency with no way to attribute it. The counter is
+     * what turns "the catalogue got slow" into "this provider threw 429s for ten minutes".
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     // Typed-execution refactor (Phases 8/9/10) - strategies for binary, multipart, async.
     // Optional so tests using the legacy 6-arg constructor still compile.
@@ -84,6 +98,8 @@ public class HttpExecutionService {
     private com.apimarketplace.catalog.service.execution.AsyncPollExecutor asyncPollExecutor;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.apimarketplace.catalog.service.execution.StreamingResponseHandler streamingResponseHandler;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.catalog.service.execution.FileAttachmentResolver fileAttachmentResolver;
 
     // Platform tenant ID for shared credentials
     private static final String PLATFORM_TENANT_ID = "PLATFORM";
@@ -134,12 +150,18 @@ public class HttpExecutionService {
      * default that keeps '/' ':' '@' literal for multi-segment values (S3 keys,
      * GitLab file_path, GCS object). See processPathParameters().
      */
-    public record ParameterMetadata(String parameterType, String dataType, String bodyPath, boolean inlineBody, String encoding, String defaultValue) {
+    public record ParameterMetadata(String parameterType, String dataType, String bodyPath, boolean inlineBody,
+                                    String encoding, String defaultValue,
+                                    FileAttachmentResolver.Spec fileAttachments) {
         public ParameterMetadata(String parameterType, String dataType, String bodyPath) {
-            this(parameterType, dataType, bodyPath, false, null, null);
+            this(parameterType, dataType, bodyPath, false, null, null, null);
         }
         public ParameterMetadata(String parameterType, String dataType, String bodyPath, boolean inlineBody) {
-            this(parameterType, dataType, bodyPath, inlineBody, null, null);
+            this(parameterType, dataType, bodyPath, inlineBody, null, null, null);
+        }
+        public ParameterMetadata(String parameterType, String dataType, String bodyPath, boolean inlineBody,
+                                 String encoding, String defaultValue) {
+            this(parameterType, dataType, bodyPath, inlineBody, encoding, defaultValue, null);
         }
     }
 
@@ -774,12 +796,14 @@ public class HttpExecutionService {
             log.info("[HttpExecutionService.executeHttpCall] Tool: {}, About to call REST with URL: {}, Method: {}",
                     tool.getId(), url, tool.getMethod());
 
-            ResponseEntity<Object> response = restTemplate.exchange(
-                    url,
-                    HttpMethod.valueOf(tool.getMethod()),
-                    request,
-                    Object.class
-            );
+            final String requestUrl = url;
+            ResponseEntity<Object> response = exchangeWithRetry(
+                    () -> restTemplate.exchange(
+                            requestUrl,
+                            HttpMethod.valueOf(tool.getMethod()),
+                            request,
+                            Object.class),
+                    requestUrl, tool, api);
 
             // Create mutable Map to allow adding fields later
             int statusCode = response.getStatusCode().value();
@@ -797,6 +821,7 @@ public class HttpExecutionService {
             int statusCode = e.getStatusCode().value();
             String errorBody = e.getResponseBodyAsString();
             String errorMessage = extractErrorMessage(errorBody, e.getMessage());
+            errorMessage = declaredErrorMessage(api, statusCode, errorBody, e.getResponseHeaders(), errorMessage);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", false);
@@ -903,7 +928,9 @@ public class HttpExecutionService {
             // - apply every header from THIS row's customConfig; no-op for single/non-custom auth.
             applyCustomFieldHeaderInjections(headers, injection, userId, credentialName, credentialValue);
             applyHeaderParameters(headers, tool, filteredParameters);
-            Object body = prepareRequestBody(tool, filteredParameters);
+            // userId is the tenant whose storage an attached file lives in - the same
+            // value ApiService hands the typed path as tenantId.
+            Object body = prepareRequestBody(tool, filteredParameters, userId);
             log.info("[HttpExecutionService.executeHttpCallWithCredentials] Request body: {}", body);
 
             // AWS SigV4: sign *.amazonaws.com requests from access_key_id/secret_access_key.
@@ -929,13 +956,18 @@ public class HttpExecutionService {
             log.info("[HttpExecutionService.executeHttpCallWithCredentials] Calling {} {}", tool.getMethod(), url);
 
             try {
-                // Use URI.create to prevent Spring from trying to expand {variables} as URI templates
-                ResponseEntity<Object> response = restTemplate.exchange(
-                    java.net.URI.create(url),
-                    HttpMethod.valueOf(tool.getMethod()),
-                    request,
-                    Object.class
-                );
+                // Retries the call while the provider says "rejected, come back later" (429, or
+                // 503 with a Retry-After), then rethrows so the catch branches below handle the
+                // final outcome exactly as they always have.
+                final String requestUrl = url;
+                ResponseEntity<Object> response = exchangeWithRetry(
+                    // URI.create prevents Spring from re-expanding {variables} as URI templates
+                    () -> restTemplate.exchange(
+                        java.net.URI.create(requestUrl),
+                        HttpMethod.valueOf(tool.getMethod()),
+                        request,
+                        Object.class),
+                    requestUrl, tool, api);
 
                 int statusCode = response.getStatusCode().value();
                 Map<String, Object> result = new HashMap<>();
@@ -1023,12 +1055,41 @@ public class HttpExecutionService {
 
                     HttpEntity<Object> retryRequest = new HttpEntity<>(body, retryHeaders);
 
-                    ResponseEntity<Object> response = restTemplate.exchange(
-                        url,
-                        HttpMethod.valueOf(tool.getMethod()),
-                        retryRequest,
-                        Object.class
-                    );
+                    final String refreshedUrl = url;
+                    ResponseEntity<Object> response;
+                    try {
+                        response = exchangeWithRetry(
+                            () -> restTemplate.exchange(
+                                refreshedUrl,
+                                HttpMethod.valueOf(tool.getMethod()),
+                                retryRequest,
+                                Object.class),
+                            refreshedUrl, tool, api);
+                    } catch (org.springframework.web.client.HttpStatusCodeException afterRefresh) {
+                        // This call sits INSIDE the Unauthorized catch, so anything it throws would
+                        // otherwise skip the sibling catches and land in the generic Exception
+                        // handler: status 0, the raw exception message, no declared message and no
+                        // Retry-After. A provider that throttles right after a token refresh is
+                        // routine on the OAuth integrations this feature targets.
+                        int failedStatus = afterRefresh.getStatusCode().value();
+                        String failedBody = afterRefresh.getResponseBodyAsString();
+                        String failedMessage = declaredErrorMessage(api, failedStatus, failedBody,
+                                afterRefresh.getResponseHeaders(),
+                                extractErrorMessage(failedBody, afterRefresh.getMessage()));
+
+                        Map<String, Object> failedResult = new HashMap<>();
+                        failedResult.put("success", false);
+                        failedResult.put("status", failedStatus);
+                        failedResult.put("httpStatus", buildHttpStatus(failedStatus, failedMessage));
+                        failedResult.put("data", Map.of());
+                        failedResult.put("error", failedMessage);
+                        failedResult.put("errorBody", failedBody);
+
+                        log.error("[HttpExecutionService.executeHttpCallWithCredentials] "
+                                + "HTTP error after token refresh: status={}, error={}",
+                                failedStatus, failedMessage);
+                        return failedResult;
+                    }
 
                     int statusCode = response.getStatusCode().value();
                     Map<String, Object> result = new HashMap<>();
@@ -1045,6 +1106,11 @@ public class HttpExecutionService {
                 // Refresh failed or not possible - return error result
                 String serviceName = api.getIconSlug() != null ? api.getIconSlug() : api.getApiName();
                 String errorMessage = "Authentication expired for " + serviceName + ". Please reconnect your account.";
+                // A provider whose 401 body says something more specific than "reconnect" (a
+                // revoked scope, a suspended app) can say it here through the seed, like every
+                // other error return.
+                errorMessage = declaredErrorMessage(api, 401, e.getResponseBodyAsString(),
+                        e.getResponseHeaders(), errorMessage);
 
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", false);
@@ -1066,6 +1132,10 @@ public class HttpExecutionService {
                 String errorMessage = providerReason != null
                         ? "Access forbidden for " + serviceName + ": " + providerReason
                         : "Access forbidden for " + serviceName + ". Check your permissions.";
+                // A 403 is a common carrier of a refusal only the account owner can act on
+                // (unapproved app, missing consent). When the seed names it, its wording wins over
+                // the provider's raw reason.
+                errorMessage = declaredErrorMessage(api, 403, errorBody, e.getResponseHeaders(), errorMessage);
 
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", false);
@@ -1079,10 +1149,13 @@ public class HttpExecutionService {
                 return result;
 
             } catch (org.springframework.web.client.HttpStatusCodeException e) {
-                // Other HTTP errors (400, 404, 500, etc.) - return error result
+                // Other HTTP errors (400, 404, 429, 500, etc.) - return error result. A 429 only
+                // reaches here once exchangeWithRetry has given up (attempts exhausted, or the
+                // provider asked to wait longer than a request thread may be held).
                 int statusCode = e.getStatusCode().value();
                 String errorBody = e.getResponseBodyAsString();
                 String errorMessage = extractErrorMessage(errorBody, e.getMessage());
+                errorMessage = declaredErrorMessage(api, statusCode, errorBody, e.getResponseHeaders(), errorMessage);
 
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", false);
@@ -1116,6 +1189,112 @@ public class HttpExecutionService {
             log.error("[HttpExecutionService.executeHttpCallWithCredentials] Error: {}", e.getMessage());
             return result;
         }
+    }
+
+    /**
+     * Sends the request, waiting and re-sending while {@link ErrorPolicyEngine} says the provider
+     * rejected the call and asked us to come back.
+     *
+     * <p>Only the exchange is repeated. Everything above it (credential resolution, header and
+     * body building) already happened and is reused, and a multipart body is backed by
+     * {@code ByteArrayResource}, so re-sending it is byte-identical rather than a consumed stream.
+     *
+     * <p>When the engine stops saying RETRY, the last exception is rethrown untouched so the
+     * caller's existing catch branches produce exactly the result they always did.
+     *
+     * <p>The send itself is a {@link java.util.function.Supplier} because the two call sites do not
+     * dispatch identically: the credentialed path passes a {@code URI} so Spring cannot re-expand
+     * {@code {placeholders}} in an already-substituted URL, while the legacy path still passes the
+     * String form. Sharing the loop without touching that difference keeps this change to the
+     * retry behaviour alone.
+     */
+    private <T> ResponseEntity<T> exchangeWithRetry(java.util.function.Supplier<ResponseEntity<T>> send,
+                                                   String url, ApiToolEntity tool, ApiEntity api) {
+        long sleptMs = 0L;
+        for (int attempt = 0; ; attempt++) {
+            try {
+                return send.get();
+            } catch (org.springframework.web.client.HttpStatusCodeException e) {
+                ErrorPolicyEngine.Verdict verdict = errorPolicyEngine.classify(
+                        e.getStatusCode().value(),
+                        e.getResponseBodyAsString(),
+                        e.getResponseHeaders(),
+                        api.getErrorPolicy(),
+                        attempt,
+                        tool.getMethod());
+
+                if (verdict.action() != ErrorPolicyEngine.Action.RETRY) {
+                    throw e;
+                }
+
+                // The budget is the TOTAL wait for this call, not a per-wait cap: two allowed
+                // retries of the cap each would hold the thread for twice what the cap promises,
+                // and this request thread is also paying for the dispatches between the waits.
+                if (sleptMs + verdict.waitMs() > errorPolicyEngine.getMaxWaitMs()) {
+                    log.warn("[HttpExecutionService] {} {} answered {} and asked for {}ms more, "
+                                    + "over the {}ms budget already {}ms spent - not retrying",
+                            tool.getMethod(), stripQueryString(url), e.getStatusCode().value(),
+                            verdict.waitMs(), errorPolicyEngine.getMaxWaitMs(), sleptMs);
+                    throw e;
+                }
+
+                log.warn("[HttpExecutionService] {} {} answered {} - waiting {}ms and retrying "
+                                + "(attempt {} of {})",
+                        tool.getMethod(), stripQueryString(url), e.getStatusCode().value(),
+                        verdict.waitMs(), attempt + 1, errorPolicyEngine.getMaxRetries());
+
+                countRetry(api, e.getStatusCode().value());
+
+                try {
+                    Thread.sleep(verdict.waitMs());
+                    sleptMs += verdict.waitMs();
+                } catch (InterruptedException interrupted) {
+                    // A shutdown or a cancelled request must not be turned into a retry: restore
+                    // the flag and let the provider's own error be the outcome.
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
+    /**
+     * The message an API's {@code errorPolicy} declares for this refusal, or {@code fallback} when
+     * it declares none. Called with the attempts already spent, so a {@code retry} rule can only
+     * contribute its wording here, never another wait.
+     */
+    private String declaredErrorMessage(ApiEntity api, int status, String body,
+                                        HttpHeaders headers, String fallback) {
+        ErrorPolicyEngine.Verdict verdict = errorPolicyEngine.classifyForMessage(
+                status, body, headers, api.getErrorPolicy());
+        return verdict.action() == ErrorPolicyEngine.Action.USER_ERROR && verdict.message() != null
+                ? verdict.message()
+                : fallback;
+    }
+
+    /**
+     * One counter per (integration, status), so a provider-wide throttle is attributable rather
+     * than showing up as unexplained latency on the whole catalogue. Tagged by icon slug because
+     * that is the identifier the rest of the platform's dashboards already use.
+     */
+    private void countRetry(ApiEntity api, int status) {
+        if (meterRegistry == null) {
+            return;
+        }
+        String integration = api.getIconSlug() != null ? api.getIconSlug() : api.getApiName();
+        meterRegistry.counter("catalog_tool_retry_total",
+                "integration", integration == null ? "unknown" : integration,
+                "status", String.valueOf(status)).increment();
+    }
+
+    /**
+     * Drops the query string, which on several providers carries the access token itself. Scoped
+     * to the retry log below: it does not undo the full-URL logging this service already does
+     * elsewhere.
+     */
+    private static String stripQueryString(String url) {
+        int q = url.indexOf('?');
+        return q < 0 ? url : url.substring(0, q);
     }
 
     /**
@@ -1937,13 +2116,17 @@ public class HttpExecutionService {
                 String bodyPath = extractBodyPath(param.getExtras());
                 boolean inlineBody = extractInlineBody(param.getExtras());
                 String encoding = extractEncoding(param.getExtras());
+                FileAttachmentResolver.Spec attachments = fileAttachmentResolver == null
+                        ? null
+                        : fileAttachmentResolver.parseSpec(param.getExtras());
                 metadata.put(param.getName(), new ParameterMetadata(
                     param.getParameterType(),
                     param.getDataType(),
                     bodyPath,
                     inlineBody,
                     encoding,
-                    param.getDefaultValue()
+                    param.getDefaultValue(),
+                    attachments
                 ));
             }
             log.debug("[HttpExecutionService.loadParameterMetadata] Loaded {} parameter metadata entries for tool {}",
@@ -1955,17 +2138,17 @@ public class HttpExecutionService {
         return metadata;
     }
 
+    /**
+     * Where a parameter's value lands in the body, read from its extras.
+     *
+     * <p>Delegated so the WRITE side and every reader that has to recognise the
+     * same field agree on one answer, down to the trimming: a generation
+     * descriptor is matched against this string, and two readers disagreeing
+     * about a stray space is a dropdown attached to a field the request fills
+     * under another name.
+     */
     private String extractBodyPath(String extrasJson) {
-        if (extrasJson == null || extrasJson.isBlank() || "{}".equals(extrasJson)) {
-            return null;
-        }
-        try {
-            JsonNode extras = objectMapper.readTree(extrasJson);
-            JsonNode bodyPathNode = extras.path("bodyPath");
-            return bodyPathNode.isMissingNode() || bodyPathNode.isNull() ? null : bodyPathNode.asText();
-        } catch (Exception e) {
-            return null;
-        }
+        return com.apimarketplace.catalog.util.ParameterBodyPath.of(extrasJson);
     }
 
     private boolean extractInlineBody(String extrasJson) {
@@ -2045,6 +2228,22 @@ public class HttpExecutionService {
                     } catch (Exception e) {
                         // Not valid JSON, treat as single value
                         log.debug("[HttpExecutionService.convertToExpectedType] Could not parse '{}' as JSON array, wrapping as single element", strValue);
+                    }
+                }
+                // A single JSON OBJECT written as a string (a FileRef that went
+                // through a core:transform, which stringifies its values). Parsed
+                // here or it falls into the CSV split below and comes out as a
+                // list of fragments split on the commas BETWEEN ITS OWN FIELDS -
+                // never anything a provider can read, so this branch cannot cost
+                // a case that works today.
+                if (strValue.startsWith("{") && strValue.endsWith("}")) {
+                    try {
+                        JsonNode objectNode = objectMapper.readTree(strValue);
+                        if (objectNode.isObject()) {
+                            return List.of(extractJsonNodeValue(objectNode));
+                        }
+                    } catch (Exception e) {
+                        log.debug("[HttpExecutionService.convertToExpectedType] Could not parse '{}' as a JSON object, falling through", strValue);
                     }
                 }
                 // CSV-string fallback for legacy plans (pre-2026-05-06): callers
@@ -2743,6 +2942,18 @@ public class HttpExecutionService {
      * Converts values to their expected types (e.g., array conversion).
      */
     public Object prepareRequestBody(ApiToolEntity tool, JsonNode parameters) {
+        return prepareRequestBody(tool, parameters, null);
+    }
+
+    /**
+     * Same, for a call that knows whose storage its attachments live in.
+     *
+     * <p>{@code tenantId} is only read to fetch the bytes of a parameter that
+     * declares {@code fileAttachments}. Every other parameter ignores it, so the
+     * two-argument overload above stays correct for every call that has no file
+     * to send.
+     */
+    public Object prepareRequestBody(ApiToolEntity tool, JsonNode parameters, String tenantId) {
         // GET has no body. DELETE does: 60 catalog endpoints declare body params on DELETE
         // because their vendor requires one (Spotify playlist track removal, Auth0 role
         // removal, Cloudflare bulk key delete, Quickbase record delete, Segment user delete,
@@ -2825,6 +3036,12 @@ public class HttpExecutionService {
                         // Convert to expected type (handles array conversion)
                         Object convertedValue = convertToExpectedType(rawValue, dataType);
 
+                        // A parameter that carries FILES holds the platform's own
+                        // file handles, which no provider understands. Rewrite them
+                        // into the objects this endpoint declared before they reach
+                        // the body.
+                        convertedValue = resolveFileAttachments(paramName, convertedValue, meta, tenantId);
+
                         // Use bodyPath for nested placement / array indexing / array-mapping
                         // (e.g., "properties.title", "requests[0].addSheet.x",
                         //  "message.toRecipients[].emailAddress.address").
@@ -2848,11 +3065,28 @@ public class HttpExecutionService {
 
                 return body.isEmpty() ? null : body;
             }
+        } catch (FileAttachmentException e) {
+            // Must escape this catch. Swallowed, it becomes a null body: the mail
+            // sends, the file is missing, and the run is green. See the exception.
+            throw e;
         } catch (Exception e) {
             log.warn("Error processing body: {}", e.getMessage());
         }
 
         return null;
+    }
+
+    /**
+     * Rewrite a parameter's FileRefs into the attachment objects this endpoint
+     * declared, or return the value untouched when it declares none.
+     *
+     * <p>Every parameter but an attachment one takes the first return.
+     */
+    private Object resolveFileAttachments(String paramName, Object value, ParameterMetadata meta, String tenantId) {
+        if (value == null || meta == null || meta.fileAttachments() == null || fileAttachmentResolver == null) {
+            return value;
+        }
+        return fileAttachmentResolver.resolve(paramName, value, meta.fileAttachments(), tenantId);
     }
 
     /**
@@ -2901,13 +3135,52 @@ public class HttpExecutionService {
     }
 
     /**
-     * Build RFC 2822 message body from user-friendly parameters.
-     * Used for email APIs like Gmail send_message.
+     * The spellings an attachment object may use, owned by {@link FileAttachmentResolver}.
+     *
+     * <p>Shared rather than duplicated on purpose: this writer and the resolver's
+     * ceiling have to accept exactly the same set. While they did not, an
+     * attachment written under a spelling the ceiling did not count went out over
+     * the limit, and the limit was one field name away from not existing.
      */
-    public Map<String, String> buildRfc2822Body(Map<String, Object> params) {
+    private static final List<String> ATTACHMENT_NAME_FIELDS = FileAttachmentResolver.NAME_FIELDS;
+    private static final List<String> ATTACHMENT_CONTENT_FIELDS = FileAttachmentResolver.CONTENT_FIELDS;
+    private static final List<String> ATTACHMENT_MIME_FIELDS = FileAttachmentResolver.MIME_FIELDS;
+
+    /**
+     * Build the RFC 2822 message Gmail wants, from user-friendly parameters.
+     *
+     * <p>Returns the Gmail message resource, not just the encoded text: the
+     * {@code raw} field plus {@code threadId} when the caller is replying. That
+     * second field used to be declared on the endpoint and dropped here, so
+     * every "reply in this conversation" silently started a NEW conversation,
+     * on a call that reported success.
+     *
+     * <p>With no attachment the message is a single part, exactly as before.
+     * With one or more it becomes {@code multipart/mixed}: the text first, then
+     * one base64 part per file. Before that existed the parameter did not exist
+     * either, so attaching a file to a Gmail send was simply impossible.
+     */
+    public Map<String, Object> buildRfc2822Body(Map<String, Object> params) {
+        String rawMessage = Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(buildMimeMessage(params).getBytes(StandardCharsets.UTF_8));
+
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("raw", rawMessage);
+
+        // Gmail nests the sent mail into an existing conversation only when the
+        // resource carries the thread id; the headers alone do not do it.
+        String threadId = getStringParam(params, "threadId");
+        if (threadId != null && !threadId.isBlank()) {
+            message.put("threadId", threadId);
+        }
+        return message;
+    }
+
+    /** Assemble the MIME text: headers, then either one body or a multipart mixed. */
+    private String buildMimeMessage(Map<String, Object> params) {
         StringBuilder message = new StringBuilder();
 
-        // Extract parameters
         String to = getStringParam(params, "to");
         String subject = getStringParam(params, "subject");
         String body = getStringParam(params, "body");
@@ -2915,45 +3188,377 @@ public class HttpExecutionService {
         String bcc = getStringParam(params, "bcc");
         String replyTo = getStringParam(params, "replyTo");
         boolean isHtml = Boolean.parseBoolean(getStringParam(params, "isHtml"));
+        List<Map<String, Object>> attachments = readAttachments(params.get("attachments"));
 
-        // Build RFC 2822 headers
         if (to != null && !to.isBlank()) {
-            message.append("To: ").append(to).append("\r\n");
+            message.append("To: ").append(stripHeaderBreaks(to)).append("\r\n");
         }
         if (cc != null && !cc.isBlank()) {
-            message.append("Cc: ").append(cc).append("\r\n");
+            message.append("Cc: ").append(stripHeaderBreaks(cc)).append("\r\n");
         }
         if (bcc != null && !bcc.isBlank()) {
-            message.append("Bcc: ").append(bcc).append("\r\n");
+            message.append("Bcc: ").append(stripHeaderBreaks(bcc)).append("\r\n");
         }
         if (replyTo != null && !replyTo.isBlank()) {
-            message.append("Reply-To: ").append(replyTo).append("\r\n");
+            message.append("Reply-To: ").append(stripHeaderBreaks(replyTo)).append("\r\n");
         }
         if (subject != null) {
-            message.append("Subject: ").append(subject).append("\r\n");
+            // A header is ASCII by definition, so an accent sent verbatim reaches
+            // the recipient as mojibake - which is most subjects, in most of the
+            // languages the product ships in.
+            message.append("Subject: ").append(encodeHeaderValue(stripHeaderBreaks(subject))).append("\r\n");
+        }
+        message.append("MIME-Version: 1.0\r\n");
+
+        String bodyContentType = isHtml ? "text/html; charset=utf-8" : "text/plain; charset=utf-8";
+
+        if (attachments.isEmpty()) {
+            message.append("Content-Type: ").append(bodyContentType).append("\r\n");
+            message.append("\r\n");
+            if (body != null) {
+                message.append(body);
+            }
+            return message.toString();
         }
 
-        // Content type header
-        if (isHtml) {
-            message.append("Content-Type: text/html; charset=utf-8\r\n");
-        } else {
-            message.append("Content-Type: text/plain; charset=utf-8\r\n");
-        }
-
-        // Empty line separates headers from body
+        // Kept short on purpose: the Content-Type line carrying it should stay
+        // inside the 78 characters RFC 5322 recommends, and 64 random bits is
+        // already far past any chance of appearing inside the content.
+        String boundary = "=_LiveContext_"
+                + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        message.append("Content-Type: multipart/mixed; boundary=\"").append(boundary).append("\"\r\n");
         message.append("\r\n");
 
-        // Body
-        if (body != null) {
-            message.append(body);
+        message.append("--").append(boundary).append("\r\n");
+        message.append("Content-Type: ").append(bodyContentType).append("\r\n");
+        message.append("\r\n");
+        message.append(body == null ? "" : body).append("\r\n");
+
+        for (Map<String, Object> attachment : attachments) {
+            appendAttachmentPart(message, boundary, attachment);
         }
 
-        // Encode to Base64url (Gmail requires URL-safe Base64)
-        String rawMessage = Base64.getUrlEncoder()
-                .withoutPadding()
-                .encodeToString(message.toString().getBytes(StandardCharsets.UTF_8));
+        message.append("--").append(boundary).append("--\r\n");
+        return message.toString();
+    }
 
-        return Map.of("raw", rawMessage);
+    private void appendAttachmentPart(StringBuilder message, String boundary, Map<String, Object> attachment) {
+        String name = firstField(attachment, ATTACHMENT_NAME_FIELDS);
+        if (name == null || name.isBlank()) name = "attachment";
+        String mimeType = sanitizeMediaType(firstField(attachment, ATTACHMENT_MIME_FIELDS));
+
+        // NORMALISE FIRST, then judge. Checking emptiness before stripping the
+        // data-URL prefix let "data:image/png;base64," through as non-blank and
+        // wrote a zero-byte part: a mail that sends carrying an empty attachment,
+        // green, which is the same failure the check below exists to refuse.
+        String content = normalizeBase64(firstField(attachment, ATTACHMENT_CONTENT_FIELDS));
+        if (content.isEmpty()) {
+            throw new FileAttachmentException("The attachment '" + name + "' carries no file. "
+                    + "Give the whole file object an earlier step produced, or an object with the "
+                    + "file name and its bytes as base64. A link on its own cannot be attached.");
+        }
+        if (!isBase64(content)) {
+            // Written out verbatim under Content-Transfer-Encoding: base64, this
+            // reaches the recipient as a corrupt file with nothing reporting it.
+            throw new FileAttachmentException("The bytes given for the attachment '" + name
+                    + "' are not base64. Give the whole file object an earlier step produced and the "
+                    + "platform encodes it for you.");
+        }
+
+        String safeName = boundFilenameLength(stripHeaderBreaks(name));
+        message.append("--").append(boundary).append("\r\n");
+        appendFoldedHeader(message, "Content-Type: " + mimeType, nameParameters("name", safeName));
+        message.append("Content-Transfer-Encoding: base64\r\n");
+        appendFoldedHeader(message, "Content-Disposition: attachment", nameParameters("filename", safeName));
+        message.append("\r\n");
+        message.append(wrapBase64(content)).append("\r\n");
+    }
+
+    /**
+     * A media type reduced to what a MIME header may carry.
+     *
+     * <p>Interpolated raw, a value like {@code application/pdf"; evil="1} smuggled
+     * a parameter of its own into the header, the same hole that was just closed
+     * for the file name. Only what a type/subtype can hold survives; anything else
+     * means the caller did not give a media type.
+     */
+    private static final Pattern MEDIA_TYPE =
+            // \\s, not \s: in a Java string literal \s is the JLS 15 escape for a
+            // single SPACE, so the pattern read as "any whitespace" and compiled as
+            // "a space", and a tab before the parameter dropped the whole type.
+            Pattern.compile("([A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+)\\s*(;.*)?", Pattern.DOTALL);
+
+    private String sanitizeMediaType(String mimeType) {
+        if (mimeType == null || mimeType.isBlank()) return "application/octet-stream";
+        // Keeps the type/subtype off a parameterised value instead of discarding it.
+        // BinaryResponseHandler stores the upstream Content-Type header VERBATIM as
+        // a FileRef's media type, parameters and all, so "text/html; charset=utf-8"
+        // is the ordinary shape for any downloaded file: rejecting it outright
+        // retyped every attached HTML, CSV or PDF as an unrecognised binary.
+        java.util.regex.Matcher matcher = MEDIA_TYPE.matcher(mimeType.trim());
+        return matcher.matches() ? matcher.group(1) : "application/octet-stream";
+    }
+
+    /** Whitespace removed, any data-URL prefix dropped, base64url mapped onto the standard alphabet. */
+    private String normalizeBase64(String content) {
+        if (content == null) return "";
+        String bytes = content.startsWith("data:") && content.indexOf(',') >= 0
+                ? content.substring(content.indexOf(',') + 1)
+                : content;
+        return bytes.replaceAll("\\s", "").replace('-', '+').replace('_', '/');
+    }
+
+    private boolean isBase64(String content) {
+        try {
+            Base64.getDecoder().decode(content);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
+     * The parameters carrying a file name, one entry each so every one can be
+     * folded onto a line of its own.
+     *
+     * <p>A MIME parameter is not a header value, so an RFC 2047 encoded word does
+     * not belong in this position even though clients tolerate one: RFC 2231 is
+     * the form for it. A non-ASCII name therefore goes out as
+     * {@code filename*=UTF-8''...}, beside an ASCII-only {@code filename="..."} so
+     * a reader that understands neither still shows something.
+     *
+     * <p>The quoted form escapes quotes and backslashes. Interpolated raw, a name
+     * holding a quote closed the parameter early and left the rest of it loose in
+     * the header.
+     */
+    private List<String> nameParameters(String parameter, String name) {
+        String ascii = toAsciiFilename(name);
+        List<String> parameters = new ArrayList<>(2);
+        parameters.add(parameter + "=\"" + ascii + "\"");
+        if (!ascii.equals(name)) {
+            parameters.add(parameter + "*=UTF-8''" + percentEncodeFilename(name));
+        }
+        return parameters;
+    }
+
+    /**
+     * Write a header, folding its parameters onto a continuation line when the
+     * whole thing would run long.
+     *
+     * <p>RFC 5322 recommends 78 characters and hard-limits at 998, and a file name
+     * is caller data of any length: a long one produced a single header line well
+     * past the recommendation with nothing to break it.
+     */
+    private void appendFoldedHeader(StringBuilder message, String head, List<String> parameters) {
+        message.append(head);
+        for (String parameter : parameters) {
+            int lineLength = message.length() - message.lastIndexOf("\r\n") - 2;
+            if (lineLength + parameter.length() + 2 > 78) {
+                message.append(";\r\n ").append(parameter);
+            } else {
+                message.append("; ").append(parameter);
+            }
+        }
+        message.append("\r\n");
+    }
+
+    /**
+     * A file name long enough to matter, and no longer.
+     *
+     * <p>The name is caller data of any length, and it is written twice into one
+     * header (quoted, then percent-encoded). Left unbounded, a pathological name
+     * reaches RFC 5322's 998-character hard limit, which folding at parameter
+     * boundaries cannot rescue. The extension is kept, because that is what a
+     * recipient's client opens the file with.
+     */
+    private String boundFilenameLength(String name) {
+        if (utf8Length(name) <= MAX_FILENAME_BYTES) return name;
+        int dot = name.lastIndexOf('.');
+        String extension = (dot > 0 && name.length() - dot <= 12) ? name.substring(dot) : "";
+        int budget = MAX_FILENAME_BYTES - utf8Length(extension);
+
+        // Cut on a code point, never inside one: splitting a surrogate pair emits
+        // a replacement character into the name the recipient sees.
+        StringBuilder kept = new StringBuilder();
+        int used = 0;
+        for (int i = 0; i < name.length(); ) {
+            String piece = new String(Character.toChars(name.codePointAt(i)));
+            int cost = utf8Length(piece);
+            if (used + cost > budget) break;
+            kept.append(piece);
+            used += cost;
+            i += piece.length();
+        }
+        return kept + extension;
+    }
+
+    private static int utf8Length(String value) {
+        return value.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    /**
+     * Bounded in BYTES, not characters, because that is what the header costs.
+     *
+     * <p>The name is written twice into one header: quoted, and percent-encoded at
+     * three characters per byte. A 120-CHARACTER bound let a CJK name (three bytes
+     * each) reach 1080 encoded characters, past RFC 5322's 998 hard limit that the
+     * bound exists to respect. 100 bytes puts the worst case at ~300.
+     */
+    private static final int MAX_FILENAME_BYTES = 100;
+
+    /** The name reduced to what a quoted-string can hold, quotes and backslashes escaped. */
+    private String toAsciiFilename(String name) {
+        StringBuilder ascii = new StringBuilder(name.length());
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c > 127) {
+                ascii.append('_');
+            } else if (c == '"' || c == '\\') {
+                ascii.append('\\').append(c);
+            } else {
+                ascii.append(c);
+            }
+        }
+        return ascii.toString();
+    }
+
+    /** RFC 2231 percent-encoding: everything outside the attribute characters. */
+    private String percentEncodeFilename(String name) {
+        StringBuilder encoded = new StringBuilder();
+        for (byte b : name.getBytes(StandardCharsets.UTF_8)) {
+            int c = b & 0xFF;
+            boolean attributeChar = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                    || "!#$&+-.^_`|~".indexOf(c) >= 0;
+            if (attributeChar) {
+                encoded.append((char) c);
+            } else {
+                encoded.append('%').append(String.format("%02X", c));
+            }
+        }
+        return encoded.toString();
+    }
+
+    /**
+     * The attachments a caller supplied, as a list of objects.
+     *
+     * <p>A single object is accepted as well as a list: mapping one upstream
+     * file into the field is at least as common as mapping several.
+     */
+    private List<Map<String, Object>> readAttachments(Object value) {
+        List<Map<String, Object>> attachments = new ArrayList<>();
+        if (value == null) return attachments;
+
+        List<?> items = (value instanceof List<?> list) ? list : List.of(value);
+        for (Object item : items) {
+            Object candidate = item;
+            if (candidate instanceof JsonNode node) {
+                candidate = objectMapper.convertValue(node, Object.class);
+            }
+            if (candidate instanceof Map<?, ?> map) {
+                Map<String, Object> typed = new LinkedHashMap<>();
+                map.forEach((k, v) -> typed.put(String.valueOf(k), v));
+                attachments.add(typed);
+            } else if (candidate != null && !String.valueOf(candidate).isBlank()) {
+                // Same rule as a part with no bytes: a value this cannot read is
+                // a file the caller believes is attached.
+                throw new FileAttachmentException("An entry given to 'attachments' is not a file. "
+                        + "Give the whole file object an earlier step produced; a bare path or URL is not one, "
+                        + "because the bytes have to be read to be attached.");
+            }
+            // A BLANK entry is skipped rather than refused. An optional field an
+            // agent filled with "" arrives as a one-element list holding it, and a
+            // template that resolved to nothing arrives the same way: neither is a
+            // file the caller believes is attached, so neither should fail a mail.
+        }
+        return attachments;
+    }
+
+    /**
+     * Delegates so the writer and the resolver's ceiling choose the same field.
+     * Two copies of this rule disagreed on blanks, and the gap was an attachment
+     * that counted as nothing and went out in full.
+     */
+    private String firstField(Map<String, Object> map, List<String> candidates) {
+        return FileAttachmentResolver.firstNonBlank(map, candidates);
+    }
+
+    /**
+     * Re-wrap unbroken base64 into the 76-character lines RFC 2045 requires.
+     * Left as one long line, strict servers reject the whole message.
+     */
+    private String wrapBase64(String base64) {
+        // Already compacted and mapped onto the standard alphabet by
+        // normalizeBase64, which HAS to run before the emptiness and validity
+        // checks. An agent forwarding a file it just read out of a mailbox hands
+        // over base64URL ('-' and '_'), and a MIME part is standard base64: left
+        // alone, every attachment whose bytes encode one of those two characters
+        // arrives corrupt with no error anywhere.
+        String compact = base64;
+        StringBuilder wrapped = new StringBuilder(compact.length() + compact.length() / 76 * 2);
+        for (int i = 0; i < compact.length(); i += 76) {
+            if (i > 0) wrapped.append("\r\n");
+            wrapped.append(compact, i, Math.min(i + 76, compact.length()));
+        }
+        return wrapped.toString();
+    }
+
+    /**
+     * Encode a header value as RFC 2047 encoded words when it is not pure ASCII.
+     *
+     * <p>Pure-ASCII values are returned untouched, which is the overwhelming
+     * majority and keeps them readable in any client. Anything else is split
+     * into chunks small enough that each encoded word stays inside the 75
+     * characters RFC 2047 allows, split on CHARACTERS so a multi-byte one is
+     * never cut in half.
+     */
+    private String encodeHeaderValue(String value) {
+        if (value == null || value.isEmpty()) return value;
+        boolean ascii = true;
+        for (int i = 0; i < value.length(); i++) {
+            if (value.charAt(i) > 127) { ascii = false; break; }
+        }
+        if (ascii) return value;
+
+        // "=?UTF-8?B?" + payload + "?=" must stay <= 75 chars, so the base64
+        // payload gets 63 chars, which is 45 source bytes (rounded to a multiple
+        // of 3 so each chunk encodes without padding in the middle).
+        final int maxBytesPerWord = 45;
+        List<String> words = new ArrayList<>();
+        StringBuilder chunk = new StringBuilder();
+        int chunkBytes = 0;
+        for (int i = 0; i < value.length(); ) {
+            int codePoint = value.codePointAt(i);
+            String piece = new String(Character.toChars(codePoint));
+            int pieceBytes = piece.getBytes(StandardCharsets.UTF_8).length;
+            if (chunkBytes + pieceBytes > maxBytesPerWord && chunkBytes > 0) {
+                words.add(encodeWord(chunk.toString()));
+                chunk.setLength(0);
+                chunkBytes = 0;
+            }
+            chunk.append(piece);
+            chunkBytes += pieceBytes;
+            i += piece.length();
+        }
+        if (chunkBytes > 0) {
+            words.add(encodeWord(chunk.toString()));
+        }
+        // Folded onto continuation lines: consecutive encoded words are joined by
+        // the reader with no space, so the linear whitespace must be the fold.
+        return String.join("\r\n ", words);
+    }
+
+    private String encodeWord(String text) {
+        return "=?UTF-8?B?"
+                + Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8))
+                + "?=";
+    }
+
+    /**
+     * Remove CR/LF from a header value. A newline in a subject or a recipient is
+     * how a caller injects headers of its own (an extra Bcc, a different From).
+     */
+    private String stripHeaderBreaks(String value) {
+        return value == null ? null : value.replaceAll("[\\r\\n]+", " ").trim();
     }
 
     /**
@@ -2962,7 +3567,7 @@ public class HttpExecutionService {
      */
     public Map<String, Object> buildRfc2822DraftBody(Map<String, Object> params) {
         // Build the RFC 2822 message
-        Map<String, String> messageBody = buildRfc2822Body(params);
+        Map<String, Object> messageBody = buildRfc2822Body(params);
 
         // Wrap in draft structure: { "message": { "raw": "..." } }
         return Map.of("message", messageBody);
@@ -3097,7 +3702,7 @@ public class HttpExecutionService {
                 if (formUrlencodedBodyEncoder == null) {
                     return failure(0, "Form-urlencoded body encoder not available", tool);
                 }
-                Object prepared = prepareRequestBody(tool, filteredParameters);
+                Object prepared = prepareRequestBody(tool, filteredParameters, tenantId);
                 @SuppressWarnings("unchecked")
                 Map<String, Object> bodyMap = (prepared instanceof Map<?, ?>) ? (Map<String, Object>) prepared : java.util.Map.of();
                 body = formUrlencodedBodyEncoder.encode(bodyMap);
@@ -3106,7 +3711,7 @@ public class HttpExecutionService {
                 if (rawBinaryBodyEncoder == null) {
                     return failure(0, "Raw binary body encoder not available", tool);
                 }
-                Object prepared = prepareRequestBody(tool, filteredParameters);
+                Object prepared = prepareRequestBody(tool, filteredParameters, tenantId);
                 @SuppressWarnings("unchecked")
                 Map<String, Object> bodyMap = (prepared instanceof Map<?, ?>) ? (Map<String, Object>) prepared : java.util.Map.of();
                 JsonNode requestSpec = executionSpec.path("request");
@@ -3134,7 +3739,7 @@ public class HttpExecutionService {
                 body = graphqlBodyEncoder.encode(query, operationName, paramsMap, graphqlCfg);
                 headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
             } else {
-                body = prepareRequestBody(tool, filteredParameters);
+                body = prepareRequestBody(tool, filteredParameters, tenantId);
             }
 
             // 4b. AWS Signature V4 - applied after body is finalized (signature is computed over
@@ -3172,15 +3777,17 @@ public class HttpExecutionService {
 
             // 5b. Issue the request - branch on response type to pick the right Class<?>
             if ("binary".equals(responseType)) {
-                return executeBinaryResponse(url, tool, request, executionSpec, tenantId, resolvedCredentialSource);
+                return executeBinaryResponse(url, tool, request, executionSpec, tenantId, resolvedCredentialSource, api);
             }
 
-            ResponseEntity<Object> response = restTemplate.exchange(
-                java.net.URI.create(url),
-                HttpMethod.valueOf(tool.getMethod()),
-                request,
-                Object.class
-            );
+            final String typedUrl = url;
+            ResponseEntity<Object> response = exchangeWithRetry(
+                () -> restTemplate.exchange(
+                    java.net.URI.create(typedUrl),
+                    HttpMethod.valueOf(tool.getMethod()),
+                    request,
+                    Object.class),
+                typedUrl, tool, api);
             int statusCode = response.getStatusCode().value();
             Object responseBody = response.getBody() != null ? response.getBody() : Map.of();
 
@@ -3246,7 +3853,19 @@ public class HttpExecutionService {
             int statusCode = httpEx.getStatusCode().value();
             String errorMessage = httpEx.getResponseBodyAsString();
             log.error("[HttpExecutionService.executeTyped] HTTP error: status={}, error={}", statusCode, errorMessage);
-            return failure(statusCode, errorMessage, tool);
+            // This path returns the provider's RAW body as the error, which is exactly the case
+            // errorPolicy exists for: an upload or a publish refused for a reason only the account
+            // owner can act on reads as a platform bug otherwise.
+            String readerMessage = declaredErrorMessage(
+                    api, statusCode, errorMessage, httpEx.getResponseHeaders(), errorMessage);
+            Map<String, Object> failed = failure(statusCode, readerMessage, tool);
+            if (!readerMessage.equals(errorMessage)) {
+                // A rule replaced the provider's own words. Keep them alongside, the way the
+                // credentialed path does: if a bodyContains needle ever collides with an unrelated
+                // failure, the only thing that says what actually happened is this body.
+                failed.put("errorBody", errorMessage);
+            }
+            return failed;
         } catch (com.apimarketplace.catalog.service.exception.CredentialSelectionException e) {
             // The typed path serves binary responses, multipart uploads, async
             // polling and streaming, which is exactly the endpoint class a
@@ -3269,16 +3888,23 @@ public class HttpExecutionService {
                                                       HttpEntity<Object> request,
                                                       JsonNode executionSpec,
                                                       String tenantId,
-                                                      String resolvedCredentialSource) {
+                                                      String resolvedCredentialSource,
+                                                      ApiEntity api) {
         if (binaryResponseHandler == null) {
             return failure(0, "Binary response handler not available", tool);
         }
-        ResponseEntity<byte[]> response = restTemplate.exchange(
-            java.net.URI.create(url),
-            HttpMethod.valueOf(tool.getMethod()),
-            request,
-            byte[].class
-        );
+        // Image, audio and video generation live behind this branch, which is the endpoint class
+        // that gets throttled hardest. It dispatches separately from the JSON typed path, so
+        // without its own wrapper the 429 retry would apply everywhere except where it is needed
+        // most.
+        final String binaryUrl = url;
+        ResponseEntity<byte[]> response = exchangeWithRetry(
+            () -> restTemplate.exchange(
+                java.net.URI.create(binaryUrl),
+                HttpMethod.valueOf(tool.getMethod()),
+                request,
+                byte[].class),
+            binaryUrl, tool, api);
         int statusCode = response.getStatusCode().value();
         byte[] bytes = response.getBody();
         String contentType = response.getHeaders().getFirst("Content-Type");

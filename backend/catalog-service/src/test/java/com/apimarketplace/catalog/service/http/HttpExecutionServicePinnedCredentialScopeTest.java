@@ -67,7 +67,7 @@ class HttpExecutionServicePinnedCredentialScopeTest {
         lenient().when(apiToolParameterRepository.findByApiToolId(any())).thenReturn(List.of());
         service = new HttpExecutionService(
                 apiToolParameterRepository, userCredentialService, encryptionService,
-                new ObjectMapper(), jdbcTemplate, restTemplate);
+                new ObjectMapper(), jdbcTemplate, restTemplate, new ErrorPolicyEngine(2, 10_000L));
 
         CredentialModeContext.setExplicitSource("user");
         CredentialModeContext.setSelectedCredentialId(PINNED);

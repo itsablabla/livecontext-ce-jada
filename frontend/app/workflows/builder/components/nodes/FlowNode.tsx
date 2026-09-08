@@ -23,7 +23,7 @@ import { type FilePanelTarget } from '@/lib/sidePanel/openFilesPanel';
 import { useInterfaceById, useInterfaceRender } from '../../hooks/useInterfaces';
 import { NodePlayButton, deriveNodeStatus, PANEL_TAB_BY_TRIGGER_VARIANT } from '../NodePlayButton';
 import { dispatchOpenTriggerTab } from '@/lib/workflow/triggerTabEvent';
-import { NodeBottomBar } from './NodeBottomBar';
+import { NodeBottomBar, type BottomButton } from './NodeBottomBar';
 import { FleetTriggerButtons } from './FleetTriggerButtons';
 import { TriggerNodePinButton } from './TriggerNodePinButton';
 import { TriggerEditLaunchButton } from './TriggerEditLaunchButton';
@@ -42,6 +42,7 @@ import { DataInputNodePreview } from './DataInputNodePreview';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { branchSpreadPercent, getSourceHandleGeometry, getTargetHandleGeometry, getSideAttachment } from './handleGeometry';
+import { NodeActivityShimmer } from './NodeActivityShimmer';
 // Fleet resource type → icon + background override (used only in fleet canvas)
 // 'tool' and 'model' are excluded: tools use their service icon or MCP logo fallback,
 // models use their provider icon (openai, anthropic, etc.)
@@ -88,6 +89,9 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
     label: data.label,
     kind: data.kind,
     crudOperation: (data as any)?.dataSourceData?.crudOperation,
+    // While one epoch is focused this is THAT epoch's outcome, which is what the run
+    // controls have to speak about there (the context's own sets accumulate across epochs).
+    status: data.status,
   });
 
   // Browser-agent live view for GENERIC agent nodes: when this node's agent
@@ -275,6 +279,12 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
     // Historical epoch viewing: data.status is set by useEpochStateViewing, use it directly
     if (viewingEpoch != null) return data.status;
     if (stepByStepStatus.isStepByStepMode) {
+      // A node parked on a signal is NOT running, but it stays in `runningSteps`:
+      // yielding never rewrites the RUNNING step row, so the two sets overlap and
+      // whichever is tested first wins. Awaiting is the newer, more specific fact,
+      // so it goes first - otherwise the waiting state is unreachable and the node
+      // reads blue "running" while its own badge shows an amber pause chip.
+      if (stepByStepStatus.isAwaitingSignal) return 'awaiting_signal';
       if (stepByStepStatus.isRunning) return 'running';
       if (stepByStepStatus.isFailed) return 'failed';
       if (stepByStepStatus.isSkipped) return 'skipped';
@@ -289,6 +299,7 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
     }
     // Auto mode: streaming stepStarted/stepCompleted update runningSteps in real-time,
     // so check it as an override for data.status (which only updates from REST API sync)
+    if (stepByStepStatus.isAwaitingSignal) return 'awaiting_signal';
     if (stepByStepStatus.isRunning) return 'running';
     // Fleet mode: real-time running state from WebSocket activity stream
     if (isFleetMode && fleetIsRunning) return 'running';
@@ -403,18 +414,13 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
       }}
       tabIndex={0}
     >
-      {/* Shimmer scan effect for running state - left to right like ChatGPT (hide when showing HTML) */}
-      {isNodeRunning && !isShowingHtml && (
-        <div
-          data-testid={fleetAgentId ? `fleet-agent-shimmer-${fleetAgentId}` : undefined}
-          className="absolute inset-0 pointer-events-none rounded-[26px]"
-          style={{
-            background: 'linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.15) 50%, transparent 100%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer-scan 2.5s ease-in-out infinite',
-          }}
-        />
-      )}
+      {/* Live-state scan overlay (running / awaiting a signal). Suppressed while the
+          node renders an interface preview: the overlay would wash over the HTML. */}
+      <NodeActivityShimmer
+        status={isShowingHtml ? undefined : effectiveStatus}
+        className="rounded-[26px]"
+        testId={fleetAgentId ? `fleet-agent-shimmer-${fleetAgentId}` : undefined}
+      />
       {/* Fleet trigger buttons (webhook / schedule) are rendered to the LEFT of the
           agent node (see the FleetTriggerButtons block further down), so the old
           top-right corner badge is gone. */}
@@ -644,7 +650,9 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
         // Agent config/conversation, table data, files, and sub-workflow
         // buttons are built by useNodeContextualButtons (shared with the
         // run-info step popover). Files is canvas-only (includeFiles: true).
-        const bottomButtons = [...sharedContextualButtons];
+        // Typed as the bar's own button shape (a superset of the shared contextual one) so a
+        // button added here can carry `revealsBar`.
+        const bottomButtons: BottomButton[] = [...sharedContextualButtons];
 
         // Browser-agent live view (generic agent node hosting an
         // agent_browse tool call) - same affordance as the dedicated
@@ -703,6 +711,12 @@ export function FlowNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
             key: 'focus-trigger-play',
             icon: <Play className="h-3 w-3" fill="currentColor" strokeWidth={2} />,
             title: tCanvas('runWorkflow'),
+            // Shows without hover, like the normal play it stands in for - and with it the
+            // rest of the bar, so pin/unpin is reachable on a focused epoch without hunting
+            // for it. Not byte-identical to the all-epochs view, where that reveal is
+            // conditional on the play being READY: here the button only EXISTS when the
+            // trigger is fireable, so its presence already carries the condition.
+            revealsBar: true,
             onClick: () => {
               // Keyed off the run the CANVAS is bound to: that is the id the
               // epoch selection is read back under, and it is not always the

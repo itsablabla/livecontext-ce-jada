@@ -12,6 +12,12 @@ export interface DataSourceItemRow {
   _jsonPath?: string;
   _isWorkflowStep?: boolean;
   _outputStorageId?: string;
+  /**
+   * Keys `normalizeRow` wrote INTO `data` for display (`id`, `_callId`), recorded so a writer can
+   * take exactly those back out - see `stripInjectedIdentity`. Absent on rows that did not come
+   * through the normalizer.
+   */
+  _injectedDataKeys?: string[];
 }
 
 export interface PaginationResponse<T> {

@@ -182,11 +182,34 @@ public class CatalogDataBootstrapService {
 
                 // Handle COPY ... FROM stdin blocks
                 if (line.startsWith("COPY ") && line.contains("FROM stdin")) {
-                    inCopyBlock = true;
                     // The line already contains "FROM stdin;" - use it as-is for COPY API
                     // Remove trailing semicolon for PG COPY API
                     copyStatement = line.endsWith(";") ? line.substring(0, line.length() - 1) : line;
                     currentStatement.setLength(0);
+
+                    // A block nobody rewrites goes STRAIGHT to Postgres, one line at a time.
+                    //
+                    // The alternative - the path the three adapted tables still take below - holds
+                    // the whole block as a StringBuilder, concatenates it into a String and then
+                    // encodes that into a byte[]: three copies of the same data, alive at once. It
+                    // worked while the seed carried 16k endpoints. Refreshed from a catalog that
+                    // had since doubled (31,772 endpoints, 134,208 parameters, ~204 MB of SQL), it
+                    // threw OutOfMemoryError on the parameters block, and the failure is invisible:
+                    // it kills the seed-import THREAD, the app stays healthy, and the install is
+                    // left with its APIs and not one tool.
+                    //
+                    // Streaming holds one line, so the load no longer scales with the catalog.
+                    // Only the three tables with a legacy rewrite are excluded, and they are the
+                    // small ones - the rewrite needs the block in hand to change its columns or
+                    // drop rows.
+                    if (!needsLegacyAdaptation(copyStatement)) {
+                        streamCopyBlock(copyStatement, reader);
+                        statementCount++;
+                        copyStatement = null;
+                        continue;
+                    }
+
+                    inCopyBlock = true;
                     continue;
                 }
 
@@ -301,6 +324,105 @@ public class CatalogDataBootstrapService {
         } catch (Exception e) {
             log.warn("[CatalogBootstrap] COPY failed for '{}': {}",
                     copyBlock.statement().substring(0, Math.min(80, copyBlock.statement().length())), e.getMessage());
+        }
+    }
+
+    /**
+     * Whether this COPY block is one of the three the loader still rewrites.
+     *
+     * <p>{@code apis} may carry a dropped column, {@code credentials} has rows to filter and
+     * {@code tool_credentials} rows to de-duplicate. Those rewrites need the block in hand. Every
+     * other table - including the three biggest, which are the ones that exhausted the heap - is
+     * copied through untouched and can therefore be streamed.
+     */
+    static boolean needsLegacyAdaptation(String copyStatement) {
+        return copyStatement.startsWith("COPY catalog.apis ")
+                || copyStatement.startsWith("COPY catalog.credentials ")
+                || copyStatement.startsWith("COPY catalog.tool_credentials ");
+    }
+
+    /**
+     * Feeds a COPY block to Postgres straight from the dump reader, holding one line at a time.
+     *
+     * <p>Consumes the block's terminator ({@code \.}) so the caller's parse continues after it,
+     * and does so even when the COPY fails - a block left half-read would be parsed as SQL and
+     * every remaining table lost with it. Failures stay non-fatal and logged, matching the
+     * buffered path.
+     */
+    private void streamCopyBlock(String copyStatement, BufferedReader reader) {
+        CopyBlockReader data = new CopyBlockReader(reader);
+        try {
+            jdbcTemplate.execute((java.sql.Connection conn) -> {
+                var pgConn = conn.unwrap(org.postgresql.PGConnection.class);
+                try {
+                    pgConn.getCopyAPI().copyIn(copyStatement, data);
+                } catch (IOException ioe) {
+                    throw new java.sql.SQLException("COPY I/O error", ioe);
+                }
+                return null;
+            });
+        } catch (Exception e) {
+            log.warn("[CatalogBootstrap] COPY failed for '{}': {}",
+                    copyStatement.substring(0, Math.min(80, copyStatement.length())), e.getMessage());
+        } finally {
+            try {
+                data.drainToTerminator();
+            } catch (IOException e) {
+                log.warn("[CatalogBootstrap] Could not skip to the end of a COPY block: {}", e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * The lines of ONE {@code COPY ... FROM stdin} block, as a {@link Reader}.
+     *
+     * <p>Ends at the {@code \.} terminator rather than at end of file, so the dump's remaining
+     * statements are still there for the caller. Never holds more than the line it is serving.
+     */
+    // Package-private, not private: the terminator handling is the part of this change that could
+    // silently lose rows, and it is only observable by driving the reader directly.
+    static final class CopyBlockReader extends Reader {
+        private final BufferedReader source;
+        private String pending;
+        private int offset;
+        private boolean done;
+
+        CopyBlockReader(BufferedReader source) {
+            this.source = source;
+        }
+
+        @Override
+        public int read(char[] buffer, int off, int len) throws IOException {
+            if (done) return -1;
+            // A zero-length request must not pull a line it cannot hand back.
+            if (len == 0) return 0;
+            if (pending == null || offset >= pending.length()) {
+                String line = source.readLine();
+                if (line == null || line.equals("\\.")) {
+                    done = true;
+                    return -1;
+                }
+                // The newline COPY needs as a row separator; readLine() drops it.
+                pending = line + "\n";
+                offset = 0;
+            }
+            int n = Math.min(len, pending.length() - offset);
+            pending.getChars(offset, offset + n, buffer, off);
+            offset += n;
+            return n;
+        }
+
+        /** Consumes whatever is left of the block, so the caller resumes on the next statement. */
+        void drainToTerminator() throws IOException {
+            while (!done) {
+                String line = source.readLine();
+                if (line == null || line.equals("\\.")) done = true;
+            }
+        }
+
+        @Override
+        public void close() {
+            // The dump reader belongs to the caller and stays open for the rest of the file.
         }
     }
 

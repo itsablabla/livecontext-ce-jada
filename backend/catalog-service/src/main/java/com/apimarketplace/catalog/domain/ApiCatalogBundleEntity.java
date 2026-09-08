@@ -70,6 +70,30 @@ public class ApiCatalogBundleEntity {
     @Column(name = "payload_gz")
     private byte[] payloadGz;
 
+    /**
+     * The {@code generationPrices} array this bundle carried, as canonical JSON.
+     *
+     * <p>Kept so a CE can re-offer prices on a tick where the cloud answered 304
+     * and there is no payload to re-parse.
+     *
+     * <p><b>NULL and {@code []} are different statements, and the conditional
+     * fetch depends on telling them apart.</b> NULL means "never captured": the
+     * install must fetch in full, because a 304 would leave it nothing to
+     * re-offer. {@code []} means "captured, and this bundle declares no prices",
+     * which the price applier reads as a no-op (never as "unprice everything").
+     * Collapsing the two would either stop price re-offering for good or pin an
+     * install to a permanent full download.
+     *
+     * <p>Stored as {@code text}, not {@code jsonb}, on purpose: nothing ever
+     * queries inside it, it is written and read back whole by Jackson. A jsonb
+     * column would need {@code @JdbcTypeCode(SqlTypes.JSON)} or every write
+     * would fail on Postgres with 42804 (Hibernate binds a String as varchar,
+     * and the varchar->jsonb cast is explicit-only) - a failure H2 accepts
+     * silently, so no test in this module could see it.
+     */
+    @Column(name = "generation_prices", columnDefinition = "text")
+    private String generationPrices;
+
     @Column(name = "source_url", columnDefinition = "text")
     private String sourceUrl;
 
@@ -120,6 +144,9 @@ public class ApiCatalogBundleEntity {
 
     public byte[] getPayloadGz() { return payloadGz; }
     public void setPayloadGz(byte[] payloadGz) { this.payloadGz = payloadGz; }
+
+    public String getGenerationPrices() { return generationPrices; }
+    public void setGenerationPrices(String generationPrices) { this.generationPrices = generationPrices; }
 
     public String getSourceUrl() { return sourceUrl; }
     public void setSourceUrl(String sourceUrl) { this.sourceUrl = sourceUrl; }

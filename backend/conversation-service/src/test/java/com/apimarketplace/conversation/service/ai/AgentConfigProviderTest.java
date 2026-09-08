@@ -229,6 +229,48 @@ class AgentConfigProviderTest {
         }
 
         @Test
+        @DisplayName("Parse: toolsConfig.memoryAccessMode='read' is carried through (chat-path read-only memory enforcement)")
+        void parseToolsConfigMemoryAccessMode() {
+            String jsonResponse = """
+                {
+                    "name": "Read-only Memory Agent",
+                    "toolsConfig": { "mode": "all", "memoryAccessMode": "read" }
+                }
+                """;
+
+            when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                    .thenReturn(new ResponseEntity<>(jsonResponse, HttpStatus.OK));
+
+            AgentConfig config = agentConfigProvider.getAgentConfig("agent-1", "tenant-1");
+
+            // Chat is the surface where an agent talks to a person about the facts
+            // it holds, so it is the one where a read-only agent most obviously has
+            // to stay read-only. Lost in this parse, the mode is simply absent
+            // downstream and resolves to the permissive default.
+            assertThat(config).isNotNull();
+            assertThat(config.toolsConfig()).isNotNull();
+            assertThat(config.toolsConfig().memoryAccessMode()).isEqualTo("read");
+        }
+
+        @Test
+        @DisplayName("Parse: absent toolsConfig.memoryAccessMode -> null (default 'write' resolved downstream)")
+        void parseToolsConfigMemoryAccessModeAbsent() {
+            String jsonResponse = """
+                { "name": "Default Memory Agent", "toolsConfig": { "mode": "all" } }
+                """;
+
+            when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                    .thenReturn(new ResponseEntity<>(jsonResponse, HttpStatus.OK));
+
+            AgentConfig config = agentConfigProvider.getAgentConfig("agent-1", "tenant-1");
+
+            // null, not "write": every existing agent predates this field, and a
+            // parse that invented a value here would be indistinguishable from one
+            // the person actually chose.
+            assertThat(config.toolsConfig().memoryAccessMode()).isNull();
+        }
+
+        @Test
         @DisplayName("Parse: workflowsGrant='all' makes the BUILDER agent unrestricted on workflows even with an empty list")
         void parseToolsConfigWorkflowsGrantAll() {
             // A BUILDER agent durably granted "all" workflows: the grant drives, the

@@ -28,6 +28,12 @@ export type MarketplaceInstallStatus =
   | 'error'
   /** Managed cloud cannot install a CE-exclusive publication (backend 403 CE_EXCLUSIVE). */
   | 'ce-exclusive'
+  /**
+   * The app uses a capability this workspace's PLAN does not include, today vector search
+   * (backend 403 PLAN_UPGRADE_REQUIRED). Deliberately NOT 'ce-exclusive': that state renders a
+   * dead end with no retry, while this one is lifted by an upgrade and must offer that route.
+   */
+  | 'plan-upgrade-required'
   | 'link-required'
   | 'insufficient-credits';
 
@@ -286,6 +292,9 @@ export const useMarketplaceInstallStore = create<MarketplaceInstallState>((set, 
         if (err?.status === 403 && err?.code === 'CLOUD_ACCOUNT_NOT_LINKED') {
           status = 'link-required';
           outcome = 'link_required';
+        } else if (err?.status === 403 && err?.code === 'PLAN_UPGRADE_REQUIRED') {
+          status = 'plan-upgrade-required';
+          outcome = 'plan_upgrade_required';
         } else if (err?.status === 403 && err?.code === 'CE_EXCLUSIVE') {
           // Defense in depth: the UI already hides Install for these on cloud,
           // so reaching here means a stale card or a direct call. Surface the

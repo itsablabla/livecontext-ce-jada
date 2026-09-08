@@ -78,8 +78,11 @@ class CeExclusiveInlineGuardTest {
         publication.setStatus(PublicationStatus.ACTIVE);
         publication.setVisibility(PublicationVisibility.PUBLIC);
         publication.setResourceId("42");
+        // CLI_AGENT, deliberately: since 2026-09-03 that is the only feature managed cloud cannot
+        // run at any price. A VECTOR_SEARCH publication is installable here from a plan, so using
+        // it as the fixture would test the opposite of what this class is named for.
         publication.setCeExclusive(true);
-        publication.setCeExclusiveFeatures(List.of("VECTOR_SEARCH"));
+        publication.setCeExclusiveFeatures(List.of("CLI_AGENT"));
         return publication;
     }
 
@@ -104,7 +107,7 @@ class CeExclusiveInlineGuardTest {
                 authClient,
                 new com.apimarketplace.publication.service.PublicationFileUrlResolver(new com.apimarketplace.common.storage.signing.ShowcaseUrlSigner("test-secret-32-bytes-long-enough-for-hmac")));
         ReflectionTestUtils.setField(service, "ceExclusiveGuard",
-                new CeExclusiveAcquisitionGuard(edition(editionValue)));
+                new CeExclusiveAcquisitionGuard(edition(editionValue), null));
         return service;
     }
 
@@ -155,7 +158,7 @@ class CeExclusiveInlineGuardTest {
                 List.of(strategy),
                 authClient);
         ReflectionTestUtils.setField(service, "ceExclusiveGuard",
-                new CeExclusiveAcquisitionGuard(edition(editionValue)));
+                new CeExclusiveAcquisitionGuard(edition(editionValue), null));
         return service;
     }
 
@@ -207,7 +210,7 @@ class CeExclusiveInlineGuardTest {
                 mock(LandingInterfaceSnapshotter.class),
                 authClient);
         ReflectionTestUtils.setField(service, "ceExclusiveGuard",
-                new CeExclusiveAcquisitionGuard(edition(editionValue)));
+                new CeExclusiveAcquisitionGuard(edition(editionValue), null));
         return service;
     }
 

@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { clampMenuLeft } from '@/lib/utils/menuPlacement';
 import { MoreVertical, ExternalLink, Play, Trash2 } from 'lucide-react';
 
 export interface ActionMenuItem {
@@ -29,6 +30,9 @@ interface PreviewActionMenuProps {
   triggerClassName?: string;
 }
 
+/** Width of the action menu, shared by its clamp and its box. */
+const MENU_WIDTH = 176;
+
 export function PreviewActionMenu({
   items,
   placement = 'above',
@@ -55,7 +59,10 @@ export function PreviewActionMenu({
       const rect = buttonRef.current.getBoundingClientRect();
       setMenuPosition({
         top: placement === 'below' ? rect.bottom + 8 : rect.top - 8,
-        left: rect.right - 176, // 176px = w-44 (11rem)
+        // Right-aligned to the trigger, then clamped: a trigger near the left
+        // edge of a phone would otherwise put the menu at a negative offset,
+        // half of it off screen.
+        left: clampMenuLeft(rect.right - MENU_WIDTH, MENU_WIDTH),
       });
     }
   }, [isOpen, placement]);
@@ -80,8 +87,10 @@ export function PreviewActionMenu({
   const menuContent = isOpen && mounted ? createPortal(
     <div
       ref={menuRef}
-      className="fixed w-44 bg-theme-primary border border-gray-300/70 dark:border-gray-600/70 rounded-2xl p-2 shadow-lg"
+      className="fixed max-w-[calc(100vw-1rem)] bg-theme-primary border border-gray-300/70 dark:border-gray-600/70 rounded-2xl p-2 shadow-lg"
       style={{
+        // One width for the box and the clamp that positions it.
+        width: MENU_WIDTH,
         top: `${menuPosition.top}px`,
         left: `${menuPosition.left}px`,
         transform: placement === 'below' ? 'none' : 'translateY(-100%)',

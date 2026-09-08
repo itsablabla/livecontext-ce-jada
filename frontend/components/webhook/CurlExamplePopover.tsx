@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import * as ReactDOM from 'react-dom';
 import { Terminal, Copy, Check, X } from 'lucide-react';
+import { clampMenuLeft } from '@/lib/utils/menuPlacement';
 
 export interface CurlExampleProps {
   webhookUrl: string;
@@ -13,6 +14,9 @@ export interface CurlExampleProps {
   /** Button variant: 'icon' shows a small icon button, 'button' shows a labeled button */
   variant?: 'icon' | 'button';
 }
+
+/** One width for the clamp and the box, so they cannot drift apart. */
+const POPOVER_WIDTH = 480;
 
 /**
  * Build a curl command string from webhook parameters.
@@ -74,13 +78,7 @@ export function CurlExamplePopover({
     e.stopPropagation();
     if (buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
-      const popoverWidth = 480;
-      let left = rect.left;
-      if (left + popoverWidth > window.innerWidth - 16) {
-        left = window.innerWidth - popoverWidth - 16;
-      }
-      if (left < 16) left = 16;
-      setPosition({ top: rect.bottom + 8, left });
+      setPosition({ top: rect.bottom + 8, left: clampMenuLeft(rect.left, POPOVER_WIDTH, 16) });
     }
     setIsOpen(!isOpen);
   };
@@ -121,8 +119,8 @@ export function CurlExamplePopover({
             onClick={() => setIsOpen(false)}
           />
           <div
-            className="fixed z-[9999] w-[480px] p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-xl animate-in fade-in-0 zoom-in-95 duration-150"
-            style={{ top: position.top, left: position.left }}
+            className="fixed z-[9999] max-w-[calc(100vw-2rem)] p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-xl animate-in fade-in-0 zoom-in-95 duration-150"
+            style={{ top: position.top, left: position.left, width: POPOVER_WIDTH }}
           >
             <div className="flex items-start justify-between gap-2 mb-3">
               <span className="font-semibold text-sm text-slate-700 dark:text-slate-200">

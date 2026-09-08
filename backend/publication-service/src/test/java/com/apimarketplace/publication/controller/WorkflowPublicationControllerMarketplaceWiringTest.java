@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
@@ -33,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -83,7 +85,8 @@ class WorkflowPublicationControllerMarketplaceWiringTest {
                 Instant.now(), Instant.now(),
                 null, null, null, null, null,
                 null, null, null, null, null, null,
-                null, null, false, null);
+                null, null, false, null,
+                false);
     }
 
     @SuppressWarnings("unchecked")
@@ -98,13 +101,13 @@ class WorkflowPublicationControllerMarketplaceWiringTest {
                 .thenReturn(new PageImpl<>(List.of(orgOwned("org-A"))));
 
         // Active workspace == owner org → owned.
-        assertThat(items(controller.getMarketplacePublications(0, 20, null, null, null, null, null, null, "5", "org-A"), "publications")
+        assertThat(items(controller.getMarketplacePublications(0, 20, null, null, null, null, null, null, null, "5", "org-A"), "publications")
                 .get(0).get("ownedByMe")).isEqualTo(true);
         // Member-elsewhere / different active workspace → not owned.
-        assertThat(items(controller.getMarketplacePublications(0, 20, null, null, null, null, null, null, "5", "org-B"), "publications")
+        assertThat(items(controller.getMarketplacePublications(0, 20, null, null, null, null, null, null, null, "5", "org-B"), "publications")
                 .get(0).get("ownedByMe")).isEqualTo(false);
         // Anonymous (no user id) → not owned.
-        assertThat(items(controller.getMarketplacePublications(0, 20, null, null, null, null, null, null, null, "org-A"), "publications")
+        assertThat(items(controller.getMarketplacePublications(0, 20, null, null, null, null, null, null, null, null, "org-A"), "publications")
                 .get(0).get("ownedByMe")).isEqualTo(false);
     }
 
@@ -114,9 +117,9 @@ class WorkflowPublicationControllerMarketplaceWiringTest {
         when(listQueryService.searchMarketplace(eq("q"), any(MarketplaceQueryFilter.class)))
                 .thenReturn(List.of(orgOwned("org-A")));
 
-        assertThat(items(controller.searchPublications("q", null, null, null, null, null, null, "5", "org-A"), "publications")
+        assertThat(items(controller.searchPublications("q", null, null, null, null, null, null, null, "5", "org-A"), "publications")
                 .get(0).get("ownedByMe")).isEqualTo(true);
-        assertThat(items(controller.searchPublications("q", null, null, null, null, null, null, "5", "org-B"), "publications")
+        assertThat(items(controller.searchPublications("q", null, null, null, null, null, null, null, "5", "org-B"), "publications")
                 .get(0).get("ownedByMe")).isEqualTo(false);
     }
 
@@ -130,5 +133,62 @@ class WorkflowPublicationControllerMarketplaceWiringTest {
                 .get(0).get("ownedByMe")).isEqualTo(true);
         assertThat(items(controller.getMarketplaceByType("WORKFLOW", 0, 20, "5", "org-B"), "content")
                 .get(0).get("ownedByMe")).isEqualTo(false);
+    }
+    /**
+     * The studio axis, from the query string to the filter the query is built from.
+     *
+     * <p><b>Why this is separate from the filter's own tests.</b> Deleting the axis from
+     * {@code MarketplaceQueryFilter} is a compile error - the defaulted overload was removed for
+     * exactly that reason - but passing the WRONG value is not. These two endpoints each hand
+     * `studio` to `fromRequest` in one expression, and nothing looked at it: replacing both with
+     * `null` left the whole selected suite green.
+     *
+     * <p>What that looks like to a reader is the failure this feature is most exposed to: the
+     * Studio shelf answers HTTP 200 with the ENTIRE catalogue under a heading promising it is
+     * narrowed, and the chip still reads as active. Nothing errors, nothing logs.
+     */
+    private MarketplaceQueryFilter capturedFilter() {
+        ArgumentCaptor<MarketplaceQueryFilter> captor =
+                ArgumentCaptor.forClass(MarketplaceQueryFilter.class);
+        verify(listQueryService).findMarketplacePublications(captor.capture(), anyInt(), anyInt());
+        return captor.getValue();
+    }
+
+    @Test
+    @DisplayName("/marketplace hands the studio axis to the filter the query is built from")
+    void marketplaceForwardsTheStudioAxis() {
+        when(listQueryService.findMarketplacePublications(any(MarketplaceQueryFilter.class), anyInt(), anyInt()))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        controller.getMarketplacePublications(0, 20, null, null, null, null, null, null, true, "5", "org-A");
+
+        assertThat(capturedFilter().studio()).isTrue();
+    }
+
+    @Test
+    @DisplayName("/marketplace asks for the ordinary shelf when the visitor chose no axis")
+    void marketplaceLeavesTheAxisUnsetWhenNotAsked() {
+        // The other direction, so a controller hardcoded to `true` cannot pass: it would hide every
+        // ordinary application from the main marketplace.
+        when(listQueryService.findMarketplacePublications(any(MarketplaceQueryFilter.class), anyInt(), anyInt()))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        controller.getMarketplacePublications(0, 20, null, null, null, null, null, null, null, "5", "org-A");
+
+        assertThat(capturedFilter().studio()).isNull();
+    }
+
+    @Test
+    @DisplayName("/search hands the studio axis through too - a search inside the shelf stays inside it")
+    void searchForwardsTheStudioAxis() {
+        when(listQueryService.searchMarketplace(any(String.class), any(MarketplaceQueryFilter.class)))
+                .thenReturn(List.of());
+
+        controller.searchPublications("clip", null, null, null, null, null, null, true, "5", "org-A");
+
+        ArgumentCaptor<MarketplaceQueryFilter> captor =
+                ArgumentCaptor.forClass(MarketplaceQueryFilter.class);
+        verify(listQueryService).searchMarketplace(any(String.class), captor.capture());
+        assertThat(captor.getValue().studio()).isTrue();
     }
 }

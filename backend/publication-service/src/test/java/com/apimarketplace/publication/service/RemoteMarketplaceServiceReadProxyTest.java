@@ -134,7 +134,7 @@ class RemoteMarketplaceServiceReadProxyTest {
             stubCloudResponse(Map.of("publications", List.of(), "count", 0));
 
             service.fetchMarketplacePublications(0, 24, MarketplaceQueryFilter.fromRequest(
-                    "ai", "AGENT", "recent", "min_4", 7, "free"));
+                    "ai", "AGENT", "recent", "min_4", 7, "free", null));
 
             String query = capturedUri().getQuery();
             assertThat(query)

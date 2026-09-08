@@ -21,18 +21,30 @@ let mockConversations: Array<Record<string, unknown>> = [];
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 vi.mock('@/i18n/navigation', () => ({ usePathname: () => '/app/chat', useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => ({ get: () => null }) }));
-vi.mock('@/hooks/useConversationHistory', () => ({
-  useConversationHistory: () => ({
+// The sidebar reads its own list hook, which is `useConversationList` +
+// `useConversationMutations` and nothing else - no message store. Mocking those
+// two rather than the sidebar hook itself keeps the real merge (shared cache +
+// server rows, de-duplicated and ordered) under test.
+vi.mock('@/hooks/conversation/useConversationList', () => ({
+  useConversationList: () => ({
     conversations: mockConversations,
     loading: false,
     error: null,
     hasMore: false,
-    selectConversation: vi.fn(),
-    loadMessages: vi.fn(),
-    deleteConversation: vi.fn(),
     loadMoreConversations: vi.fn(),
     loadConversationById: vi.fn(),
-    clearMessages: vi.fn(),
+    forceRefreshConversations: vi.fn(),
+    setConversations: vi.fn(),
+  }),
+}));
+vi.mock('@/hooks/conversation/useConversationMutations', () => ({
+  useConversationMutations: () => ({
+    loading: false,
+    error: null,
+    createConversation: vi.fn(),
+    updateConversation: vi.fn(),
+    deleteConversation: vi.fn(),
+    clearError: vi.fn(),
   }),
 }));
 vi.mock('@/contexts/UnifiedAppContext', () => ({

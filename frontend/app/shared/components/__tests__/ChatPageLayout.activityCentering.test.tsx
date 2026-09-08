@@ -26,6 +26,9 @@ vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/i18n/navigation', () => ({
   Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+  // The welcome view now carries the chat/studio switch, which routes.
+  useRouter: () => ({ push: () => undefined }),
+  usePathname: () => '/app',
 }));
 vi.mock('@/contexts/SidePanelContext', () => ({
   useSidePanelSafe: () => ({ isOpen: panelOpen }),

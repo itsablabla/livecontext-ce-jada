@@ -33,6 +33,10 @@ import { getPickedEpoch, markEpochPickedByUser, useDefaultEpochSelection } from 
 import { epochDisplayDurationMs, isEpochLive, resolveEpochBadgeStatus } from '@/components/workflow/run-panel/runFormatting';
 import { EpochStatusIcon } from '@/components/workflow/EpochStatusIcon';
 import { getRunStatusLabel } from '@/lib/utils/runStatusUtils';
+import { RunActionButton, resolveRunAction } from '@/components/workflow/run-panel/RunActionButton';
+import { useRunActions } from '@/components/workflow/run-panel/useRunActions';
+import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
+import { usePathname } from '@/i18n/navigation';
 
 export interface ApplicationConfig {
   interfaceId: string;
@@ -57,9 +61,12 @@ export interface ApplicationTemplateSource {
    */
   remote?: boolean;
   /**
-   * Whether "reset the data" applies on THIS surface. False for the publisher's own view:
-   * the page is bound to the source workflow while the reset targets the APPLICATION
-   * clone, so the button would write to tables the screen does not show. Loading the
+   * Whether "reset the data" applies on THIS surface. The reset targets the caller's
+   * INSTALLED clone, so it is true exactly when this surface is bound to that clone:
+   * false on a source workflow (the tables the endpoint rewrites are not the ones on
+   * screen) and false with no install at all (the endpoint has nothing to resolve and
+   * answers 404). Ownership of the publication does not decide it - a publisher who
+   * installed their own app is looking at their clone like anyone else. Loading the
    * example values is unaffected and stays available either way.
    */
   canReset?: boolean;
@@ -1105,9 +1112,10 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
 
   // ── Template actions: load the publisher's example inputs, reset the data ──
   //
-  // Both are only offered for an INSTALLED application (templateSource present) and
-  // never in a preview: an anonymous visitor must not write to the publisher's tenant,
-  // and there is no install of theirs to reset.
+  // Neither is offered in a preview: an anonymous visitor must not write to the
+  // publisher's tenant. Outside a preview the publication is always in hand, so what
+  // is left to decide is per-action, below - `templateSource` says which publication,
+  // not that the caller installed it.
   const templateActionsAvailable = !!templateSource && !previewMode && !isPreviewOnly;
   // A cloud-sourced (remote) install has no local publication row, so the reset
   // endpoint would have nothing to read. Loading the values still works - that read
@@ -1115,9 +1123,12 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
   // Reset needs more than the publication: the caller must be on a surface where the
   // tables it rewrites are the ones on screen (canReset), and the publication must be
   // local. Loading the example values needs neither - it only fills the forms.
+  // `=== true`, not `!== false`: the reset wipes real data, so an omitted flag must
+  // withhold it rather than grant it. Every call site passes an explicit answer today;
+  // this is what a future one that forgets gets.
   const canResetData = templateActionsAvailable
     && !templateSource?.remote
-    && templateSource?.canReset !== false;
+    && templateSource?.canReset === true;
 
   const [isLoadingTemplateValues, setIsLoadingTemplateValues] = React.useState(false);
   const [isResettingData, setIsResettingData] = React.useState(false);
@@ -1195,6 +1206,44 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
     }
   }, [templateSource, isResettingData, t, refetch]);
 
+  /**
+   * Stop, beside Launch.
+   *
+   * An application IS the run for the person using it: they fire a trigger from
+   * this toolbar and then watch the interface. Until now the only way to stop
+   * what they had just started was a control on another surface entirely - the
+   * canvas pill, or the Run tab of the side panel - and on the application page
+   * the user is looking at the interface, not at either of those.
+   *
+   * Scope, deliberately:
+   *  - the STOP alone (RUNNING / PAUSED). Cancelling or re-arming a run is
+   *    lifecycle management, which belongs to the run surfaces.
+   *  - never in a preview, on EITHER signal (the embedder's `previewMode` and the
+   *    run's own frozen flag), like the template actions above. A preview must
+   *    not act on the publisher's workflow, and the canvas' refusal is silent -
+   *    a dead click is the very thing this control exists to abolish.
+   *  - never for a VIEWER: stopping someone's run is a mutation, and the repo
+   *    gates mutations on the workspace role. (Launch, next to it, carries no
+   *    such gate today - a separate, pre-existing gap, not one to widen here.)
+   *  - NOT on a /s/<token> share, checked HERE rather than left to the panel
+   *    tab's route scope in another file. The gateway's share allow-list covers
+   *    firing triggers, interface actions and the form upload - not stopping a
+   *    run - so a visitor's click would 403 every time: a control that is always
+   *    dead, which is the very thing this change exists to abolish. Note the
+   *    role check does NOT cover this: an anonymous visitor has no organisation,
+   *    and `useCanMutateInCurrentOrg` reads a personal workspace as allowed.
+   */
+  const runActions = useRunActions(workflowId, runId);
+  const canMutateRun = useCanMutateInCurrentOrg();
+  const pathname = usePathname();
+  const isPublicShareRoute = (pathname ?? '').startsWith('/s/');
+  const canStopRun = !previewMode
+    && !isPreviewOnly
+    && !runActions.isPreviewOnly
+    && !isPublicShareRoute
+    && canMutateRun
+    && resolveRunAction(runActions.status) === 'stop';
+
   // ── Shared toolbar extraControls (launch + epoch selector + continue) ──
   const toolbarExtraControls = React.useMemo(() => {
     // Launch button - opens the multi-trigger panel (TriggerPanel) when there
@@ -1250,7 +1299,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
         // - schedule needs only workflowId (spawns a fresh run server-side)
         disabled={isLaunching || (!hasPanelTriggers && !runId && !launchable.firstSchedule)}
         size="sm"
-        className="h-8 px-3 rounded-xl shadow-none border-0 gap-1.5 bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200 focus-visible:ring-2 focus-visible:ring-theme-tertiary disabled:opacity-50"
+        className="h-8 px-3 rounded-xl shadow-none border-0 gap-1.5 focus-visible:ring-theme-tertiary disabled:opacity-50"
         title={tActions('launchTrigger', { label: buttonLabel })}
       >
         {isLaunching ? <LoadingSpinner size="sm" /> : <TriggerIcon className="h-3.5 w-3.5" />}
@@ -1266,8 +1315,8 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
           onClick={() => totalEpochs > 1 ? setEpochDropdownOpen(prev => !prev) : undefined}
           className={`h-7 flex items-center gap-1.5 px-2.5 rounded-xl text-xs transition-colors ${
             epochDropdownOpen
-              ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900'
-              : 'text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+              ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)]'
+              : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
           }`}
           data-testid="application-epoch-selector"
           data-all-epochs={showsAllEpochs || undefined}
@@ -1412,7 +1461,7 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
         onClick={handleDefaultContinue}
         disabled={isContinuing || !isCurrentItemPending}
         size="sm"
-        className="h-8 px-3 rounded-xl shadow-none border-0 gap-1.5 bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200 focus-visible:ring-2 focus-visible:ring-theme-tertiary disabled:opacity-50"
+        className="h-8 px-3 rounded-xl shadow-none border-0 gap-1.5 focus-visible:ring-theme-tertiary disabled:opacity-50"
         title={continueTitle}
       >
         {isContinuing ? <LoadingSpinner size="sm" /> : <StepForward className="h-3.5 w-3.5" />}
@@ -1538,12 +1587,28 @@ export function ApplicationTabContent({ config, runId, workflowId, onAction, car
       </button>
     ) : null;
 
+    // Built INSIDE the memo: a JSX element has a fresh identity every render, so
+    // holding it in a dependency would add one more guaranteed-changing entry to
+    // this list. (It would not be the only one - `epochTimestamps` above already
+    // allocates a fresh array per render - but adding a second is not a reason to
+    // add a second.)
+    const stopButton = canStopRun ? (
+      <RunActionButton
+        key="stop"
+        status={runActions.status}
+        onStop={() => runActions.perform('stop')}
+        pendingAction={runActions.pending}
+        failed={runActions.failed}
+        size="panel"
+      />
+    ) : null;
+
     if (!variablePaginationControl && !launchButton && !epochSelector && !continueButton
-        && !templateValuesButton && !resetDataButton && !soundButton) {
+        && !templateValuesButton && !resetDataButton && !soundButton && !stopButton) {
       return undefined;
     }
-    return <>{soundButton}{variablePaginationControl}{templateValuesButton}{resetDataButton}{launchButton}{epochSelector}{continueButton}</>;
-  }, [mediaMuted, onToggleMediaMuted, hasMediaAudio, tSound, totalEpochs, epochTimestamps, sortedEpochs, maxDuration, viewingEpoch, showsAllEpochs, currentDisplayEpoch, displayedEpochStatus, epochDropdownOpen, handleViewEpoch, handleEpochPickedByUser, runId, isAwaitingSignal, config.nodeId, isContinuing, isCurrentItemPending, handleDefaultContinue, t, tRun, tRoot, currentItemTriple, pendingSignalCount, launchable, hasPanelTriggers, hasAnyLaunchable, handleLaunchTrigger, isLaunching, tActions, previewMode, activeVariablePage, variablePaginationItems, handleVariablePrevious, handleVariableNext, tCanvas, templateActionsAvailable, canResetData, handleLoadTemplateValues, isLoadingTemplateValues, handleResetData, isResettingData]);
+    return <>{soundButton}{variablePaginationControl}{templateValuesButton}{resetDataButton}{launchButton}{stopButton}{epochSelector}{continueButton}</>;
+  }, [canStopRun, runActions.status, runActions.pending, runActions.failed, runActions.perform, mediaMuted, onToggleMediaMuted, hasMediaAudio, tSound, totalEpochs, epochTimestamps, sortedEpochs, maxDuration, viewingEpoch, showsAllEpochs, currentDisplayEpoch, displayedEpochStatus, epochDropdownOpen, handleViewEpoch, handleEpochPickedByUser, runId, isAwaitingSignal, config.nodeId, isContinuing, isCurrentItemPending, handleDefaultContinue, t, tRun, tRoot, currentItemTriple, pendingSignalCount, launchable, hasPanelTriggers, hasAnyLaunchable, handleLaunchTrigger, isLaunching, tActions, previewMode, activeVariablePage, variablePaginationItems, handleVariablePrevious, handleVariableNext, tCanvas, templateActionsAvailable, canResetData, handleLoadTemplateValues, isLoadingTemplateValues, handleResetData, isResettingData]);
 
   // ── The interface's display format - scale-to-fit virtual viewport ──
   // When the INTERFACE declares a format (preset name or "WxH"), the iframe renders inside a

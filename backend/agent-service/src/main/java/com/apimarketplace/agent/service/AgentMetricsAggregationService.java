@@ -151,6 +151,9 @@ public class AgentMetricsAggregationService {
             case "workflow"    -> firstNonNullArg(args, "workflow_id", "id");
             case "application" -> firstNonNullArg(args, "application_id");
             case "skill"       -> firstNonNullArg(args, "skill_id");
+            // Slug first: it is the handle the agent actually passes, and it is
+            // readable in the metrics, which a UUID here never is.
+            case "memory"      -> firstNonNullArg(args, "slug", "memory_id");
             default            -> null;
         };
     }

@@ -93,7 +93,7 @@ class WorkflowPublicationServiceCategoryDefaultTest {
                 WORKFLOW_ID, TENANT_ID, null, "Title", "Description",
                 null, null,
                 null, // categoryId omitted
-                0, PublicationVisibility.PRIVATE, null, DisplayMode.WORKFLOW, null, true, Map.of());
+                0, PublicationVisibility.PRIVATE, null, DisplayMode.WORKFLOW, null, true, Map.of(), null);
 
         verify(orchestratorClient).getCategoryById(AUTOMATION_ID);
         assertThat(published.getCategoryId()).isEqualTo(AUTOMATION_ID);
@@ -114,7 +114,7 @@ class WorkflowPublicationServiceCategoryDefaultTest {
                 WORKFLOW_ID, TENANT_ID, null, "Title", "Description",
                 null, null,
                 CUSTOM_ID,
-                0, PublicationVisibility.PRIVATE, null, DisplayMode.WORKFLOW, null, true, Map.of());
+                0, PublicationVisibility.PRIVATE, null, DisplayMode.WORKFLOW, null, true, Map.of(), null);
 
         verify(orchestratorClient).getCategoryById(CUSTOM_ID);
         verify(orchestratorClient, never()).getCategoryById(AUTOMATION_ID);
@@ -131,7 +131,8 @@ class WorkflowPublicationServiceCategoryDefaultTest {
                 PUBLICATION_ID, TENANT_ID, null, "New title", "New description",
                 null, null,
                 null, // categoryId omitted on update
-                0, PublicationVisibility.PRIVATE, DisplayMode.WORKFLOW, null, true, true, Map.of());
+                0, PublicationVisibility.PRIVATE, DisplayMode.WORKFLOW, null, true, true, Map.of(),
+                null);
 
         // Existing category preserved; the default is NOT applied and nothing is cleared.
         assertThat(updated.getCategoryId()).isEqualTo(CUSTOM_ID);
@@ -152,7 +153,8 @@ class WorkflowPublicationServiceCategoryDefaultTest {
                 PUBLICATION_ID, TENANT_ID, null, "New title", "New description",
                 null, null,
                 null,
-                0, PublicationVisibility.PRIVATE, DisplayMode.WORKFLOW, null, true, true, Map.of());
+                0, PublicationVisibility.PRIVATE, DisplayMode.WORKFLOW, null, true, true, Map.of(),
+                null);
 
         assertThat(updated.getCategoryId()).isNull();
         verify(orchestratorClient, never()).getCategoryById(any());

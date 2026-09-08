@@ -154,6 +154,67 @@ public class WorkflowInspectorService {
     }
 
     /**
+     * One page of active integrations, most-RUN first (V461 node-usage ledger).
+     *
+     * <p>What "most run" means here: the sum of every launch of any of the API's endpoints
+     * across the whole platform. That total is stored, not derived - see
+     * {@code ToolUsageStatsService} - so this stays an index-ordered page fetch instead of
+     * an aggregation over tens of thousands of endpoint rows on every palette scroll.
+     *
+     * <p>Paged in SQL, unlike {@link #getAllApisForWorkflow}, which loads the whole catalog
+     * and slices it in Java. This list is scrolled lazily from the palette, so paging it in
+     * the database is what keeps the second page as cheap as the first.
+     *
+     * <p>Never-run integrations are included, ranked after the run ones and alphabetical
+     * among themselves: the section is the full catalogue in usage order, so scrolling it
+     * reaches everything rather than dead-ending at whatever has been run so far. The tie
+     * break on {@code api_slug} (not name) makes the order total and therefore the paging
+     * stable - two APIs sharing a display name would otherwise be free to swap places
+     * between two page fetches and appear twice, or not at all.
+     */
+    public List<WorkflowApiDTO> getPopularApisForWorkflow(int page, int size) {
+        int safeSize = Math.max(1, Math.min(size, 200));
+        int safePage = Math.max(0, page);
+
+        String sql = """
+            SELECT
+                a.api_slug,
+                a.api_name,
+                a.description,
+                COUNT(t.id) AS tools_count,
+                COALESCE(a.icon_slug, 'mcp') AS icon_slug,
+                a.icon_url,
+                COALESCE(u.run_count, 0) AS run_count
+            FROM catalog.apis a
+            LEFT JOIN catalog.api_tools t ON a.id = t.api_id AND t.is_active = true
+            LEFT JOIN catalog.api_usage_stats u ON u.api_slug = a.api_slug
+            WHERE a.is_active = true
+            GROUP BY a.api_slug, a.api_name, a.description, a.icon_slug, a.icon_url, u.run_count
+            ORDER BY COALESCE(u.run_count, 0) DESC, a.api_slug ASC
+            LIMIT ? OFFSET ?
+            """;
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, safeSize, (long) safePage * safeSize);
+        return rows.stream()
+            .map(row -> new WorkflowApiDTO(
+                (String) row.get("api_slug"),
+                (String) row.get("api_name"),
+                (String) row.get("description"),
+                ((Number) row.get("tools_count")).intValue(),
+                (String) row.get("icon_slug"),
+                (String) row.get("icon_url")
+            ))
+            .collect(Collectors.toList());
+    }
+
+    /** How many active integrations the ranked list has, for the pager. */
+    public int countActiveApis() {
+        Integer total = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM catalog.apis WHERE is_active = true", Integer.class);
+        return total == null ? 0 : total;
+    }
+
+    /**
      * Récupère les tools d'une API spécifique par son slug (uniquement les champs nécessaires)
      */
     public List<WorkflowToolDTO> getToolsForApi(String apiSlug) {

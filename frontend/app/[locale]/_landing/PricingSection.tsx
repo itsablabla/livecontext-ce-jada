@@ -1,17 +1,21 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useAuth } from '@/lib/providers/smart-providers';
-import { calcPrice, CREDIT_TIERS, PLAN_FEATURE_KEYS } from '@/lib/billing/pricing-constants';
+import { setLandingIntent, track } from '@/lib/analytics/analytics';
+import { calcPrice, creditFactsFor, CREDIT_TIERS } from '@/lib/billing/pricing-constants';
 import DeploymentBadge from '@/components/pricing/DeploymentBadge';
 import ReferencePrice from '@/components/pricing/ReferencePrice';
 import FoundingPriceNote from '@/components/pricing/FoundingPriceNote';
 import { usePricingEvent } from '@/hooks/usePricingEvent';
 import type { ResolvedPricingEvent } from '@/lib/billing/pricing-events';
 import FeatureLabel from '@/components/pricing/FeatureLabel';
+import { planFeatureLabels } from '@/lib/billing/planFeatureLabels';
+import ComparePlansLink from '@/components/pricing/ComparePlansLink';
+import PlanComparisonDialog from '@/components/pricing/PlanComparisonDialog';
 
 type Cycle = 'monthly' | 'yearly';
 // The landing has no credit slider (by design); cards show the entry tier (5,000 credits).
@@ -33,6 +37,7 @@ type PlanCard = {
 
 export default function PricingSection() {
   const [cycle, setCycle] = useState<Cycle>('yearly');
+  const tPricing = useTranslations('pricing');
   const tCards = useTranslations('pricing.planCards');
   const tBilling = useTranslations('pricing.billing');
   const tBiz = useTranslations('pricing.businessPlans');
@@ -46,26 +51,21 @@ export default function PricingSection() {
   // and the section cannot disagree with itself between server HTML and hydration.
   const { event: pricingEvent } = usePricingEvent();
 
+  const selectCycle = (next: Cycle) => {
+    setCycle(next);
+    track('landing_pricing_cycle_toggled', { cycle: next });
+  };
+
   // Entry tier credits, shared with the settings page so both stay in sync.
   const landingCredits = CREDIT_TIERS[TIER_INDEX].toLocaleString(locale);
-  // Same coherent superset feature lists + i18n as the settings page (PlanSelector).
+  // The SAME mapping the settings page uses, not a second copy of it. The two
+  // switches were identical, so nothing had diverged YET - what they cost was
+  // every future edit twice, and adding the credits tooltip was one of them.
+  // Computed once per render, not once per card: five cards each scanning the
+  // examples list and re-formatting the same figures is work for one answer.
+  const creditFacts = useMemo(() => creditFactsFor(locale), [locale]);
   const featuresFor = (id: string): string[] =>
-    (PLAN_FEATURE_KEYS[id] || []).map((k) => {
-      if (k === 'creditsDynamic') {
-        return tCards('features.creditsPerMonth', { credits: landingCredits });
-      }
-      // Free monthly credits carry an info tooltip (workflows only; chat/agents
-      // need a paid plan) via the "label||tooltip" convention rendered by FeatureLabel.
-      if (k === 'creditsFree') {
-        return `${tCards('features.creditsFree')}||${tCards('features.creditsFreeTooltip')}`;
-      }
-      // Managed integration credentials for cloud-linked self-hosted installs carry
-      // an info tooltip (relay + per-call credit markup), same "label||tooltip" convention.
-      if (k === 'cePlatformCreds') {
-        return `${tCards('features.cePlatformCreds')}||${tCards('features.cePlatformCredsTooltip')}`;
-      }
-      return tCards(`features.${k}`);
-    });
+    planFeatureLabels(id, { tCards, tPricing, credits: landingCredits, creditFacts });
 
   const plans: PlanCard[] = [
     {
@@ -122,10 +122,10 @@ export default function PricingSection() {
           className="relative inline-flex items-center gap-1 p-1 rounded-xl"
           style={{ background: 'var(--bg-tertiary)' }}
         >
-          <CycleButton active={cycle === 'monthly'} onClick={() => setCycle('monthly')}>
+          <CycleButton active={cycle === 'monthly'} onClick={() => selectCycle('monthly')}>
             {tBilling('monthly')}
           </CycleButton>
-          <CycleButton active={cycle === 'yearly'} onClick={() => setCycle('yearly')}>
+          <CycleButton active={cycle === 'yearly'} onClick={() => selectCycle('yearly')}>
             {tBilling('yearly')}
             <span
               className="ml-2 px-2 py-0.5 text-[10px] font-bold rounded-full"
@@ -165,9 +165,18 @@ export default function PricingSection() {
         ))}
       </div>
 
-      <p className="mt-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
+      {/* The five cards say what each plan contains; this says it across plans,
+          which is the question a visitor comparing three of them is actually
+          asking. No current plan is marked here: a visitor has none. */}
+      <div className="mt-10 flex justify-center">
+        <ComparePlansLink />
+      </div>
+
+      <p className="mt-6 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
         {tBilling('taxNote')}
       </p>
+
+      <PlanComparisonDialog />
     </div>
   );
 }
@@ -209,10 +218,23 @@ function PlanCardView({
   const router = useRouter();
   const { isAuthenticated, isLoading, loginWithRedirect } = useAuth();
 
+  // Tracked BEFORE navigating (the auth redirect unloads the page). plan.id is
+  // the typed plan id, never the localized name.
+  const trackPlanClick = useCallback(() => {
+    track('landing_plan_clicked', {
+      plan_id: plan.id,
+      cycle,
+      is_recommended: isRecommended,
+      is_authenticated: isAuthenticated,
+    });
+    setLandingIntent('landing_plan', plan.id);
+  }, [plan.id, cycle, isRecommended, isAuthenticated]);
+
   const handleSignIn = useCallback(
     async (e: React.MouseEvent) => {
       e.preventDefault();
       if (isLoading) return;
+      trackPlanClick();
       const returnTo = '/app/settings/pricing';
       if (isAuthenticated) {
         router.push(returnTo);
@@ -220,7 +242,7 @@ function PlanCardView({
       }
       await loginWithRedirect({ appState: { returnTo } });
     },
-    [isAuthenticated, isLoading, loginWithRedirect, router]
+    [isAuthenticated, isLoading, loginWithRedirect, router, trackPlanClick]
   );
 
   return (
@@ -295,7 +317,7 @@ function PlanCardView({
             ? `/contact?category=other&message=${encodeURIComponent(plan.contactMessage ?? '')}`
             : '/app/settings/pricing'
         }
-        onClick={plan.id === 'enterprise' ? undefined : handleSignIn}
+        onClick={plan.id === 'enterprise' ? trackPlanClick : handleSignIn}
         className="mt-6 inline-flex items-center justify-center w-full h-9 rounded-xl text-sm font-medium transition-colors duration-200 hover:bg-[var(--accent-hover)] active:scale-[0.98] cursor-pointer"
         style={{
           background: 'var(--accent-primary)',

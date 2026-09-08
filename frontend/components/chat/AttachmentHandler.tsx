@@ -13,6 +13,7 @@ import { CredentialWizard } from '@/components/credentials/CredentialWizard';
 import { SkillFolderTreeSelect } from '@/components/skills/SkillFolderTreeSelect';
 import { CreateSkillModal } from '@/components/chat/CreateSkillModal';
 import { ChatConfigPanel } from '@/components/chat/ChatConfigPanel';
+import { clampMenuLeft } from '@/lib/utils/menuPlacement';
 
 export type AttachmentView = 'tools' | 'skills' | 'options';
 
@@ -42,6 +43,9 @@ interface AttachmentHandlerProps {
 }
 
 const PAGE_SIZE = 20;
+
+/** The attachment menu's resting width, shared by its box and its clamp. */
+const MENU_WIDTH = 320;
 
 export const AttachmentHandler: React.FC<AttachmentHandlerProps> = ({
   isOpen,
@@ -100,14 +104,14 @@ export const AttachmentHandler: React.FC<AttachmentHandlerProps> = ({
       // high on the page (e.g. chat welcome view).
       if (spaceAbove >= Math.min(DESIRED, 240) || spaceAbove >= spaceBelow) {
         setPortalPos({
-          left: rect.left,
+          left: clampMenuLeft(rect.left, MENU_WIDTH),
           placement: 'above',
           bottom: window.innerHeight - rect.top + GAP,
           maxHeight: Math.max(200, Math.min(DESIRED, spaceAbove)),
         });
       } else {
         setPortalPos({
-          left: rect.left,
+          left: clampMenuLeft(rect.left, MENU_WIDTH),
           placement: 'below',
           top: rect.bottom + GAP,
           maxHeight: Math.max(200, Math.min(DESIRED, spaceBelow)),
@@ -358,7 +362,7 @@ export const AttachmentHandler: React.FC<AttachmentHandlerProps> = ({
       data-attachment-menu
       className={`${usePortal ? 'fixed' : 'absolute bottom-full left-0 mb-2'} bg-theme-primary rounded-2xl border border-gray-300/70 dark:border-gray-600/70 z-[99999] overflow-hidden flex flex-col shadow-xl`}
       style={{
-        width: 'min(320px, calc(100vw - 16px))',
+        width: `min(${MENU_WIDTH}px, calc(100vw - 16px))`,
         maxHeight: usePortal ? `${portalPos!.maxHeight}px` : 'min(440px, 70vh)',
         ...(usePortal
           ? portalPos!.placement === 'above'

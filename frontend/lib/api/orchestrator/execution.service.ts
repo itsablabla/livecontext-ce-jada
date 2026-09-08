@@ -418,10 +418,16 @@ export class ExecutionService {
    * @param runId - The run ID
    * @param stepId - The step ID to re-run from
    * @param plan - Optional plan to persist before re-running (ensures fresh plan is used)
+   * @param epoch - Optional epoch to replay. Omitted, the backend replays the last epoch
+   *   executed by the DAG that OWNS this step, which on a multi-trigger run is not
+   *   necessarily the run's newest one. Named, it replays THAT epoch instead - which is what
+   *   the canvas sends while an older epoch is on screen, so the rerun repairs the epoch the
+   *   user is reading rather than silently redoing another.
    */
-  async rerunFromStep(runId: string, stepId: string, plan?: Record<string, unknown>): Promise<StepRerunResponse> {
+  async rerunFromStep(runId: string, stepId: string, plan?: Record<string, unknown>, epoch?: number): Promise<StepRerunResponse> {
+    const query = epoch != null ? `?epoch=${encodeURIComponent(String(epoch))}` : '';
     return apiClient.post<StepRerunResponse>(
-      `/v2/workflows/dag/runs/${runId}/rerun/${encodeURIComponent(stepId)}`,
+      `/v2/workflows/dag/runs/${runId}/rerun/${encodeURIComponent(stepId)}${query}`,
       plan ? { plan } : {},
       { timeout: EXECUTION_TIMEOUT }
     );

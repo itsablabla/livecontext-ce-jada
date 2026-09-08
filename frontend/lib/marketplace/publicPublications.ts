@@ -28,8 +28,24 @@
  */
 import 'server-only';
 
+import type { NodeIconData } from '@/lib/api/orchestrator/types';
+
 /** How long a public marketplace page may serve stale data, in seconds. */
 export const PUBLIC_MARKETPLACE_REVALIDATE_SECONDS = 900;
+
+/**
+ * Cache window for a showcase render, DELIBERATELY shorter than the listing's.
+ *
+ * <p>A showcase's media are addressed by HMAC-signed anonymous URLs
+ * (`/api/files/proxy-signed?...&sig=...`) that expire after 15 minutes. Caching
+ * the render for the listing's own 900s window would mean a page served late in
+ * that window hands the visitor URLs with seconds of life left, so the app
+ * preview would intermittently render with every image and video broken - and
+ * it would look like a broken publication, not an expired link. The in-app card
+ * previews never hit this because they fetch the render in the browser at view
+ * time; a server-rendered page has to leave itself margin.
+ */
+export const PUBLIC_SHOWCASE_REVALIDATE_SECONDS = 300;
 
 /** A marketplace listing as the public pages need it. */
 export interface PublicPublicationSummary {
@@ -39,6 +55,12 @@ export interface PublicPublicationSummary {
   title: string;
   description: string;
   publisherName: string | null;
+  /**
+   * Internal user id of the publisher. Read ONLY to address their public
+   * avatar (`/api/proxy/users/{id}/avatar`, served anonymously); never
+   * rendered as text.
+   */
+  publisherId: string | null;
   /** Author @handle, or null when the publisher has no public profile. */
   publisherHandle: string | null;
   publisherAvatarUrl: string | null;
@@ -50,6 +72,31 @@ export interface PublicPublicationSummary {
   publishedAt: string | null;
   updatedAt: string | null;
   publicationType: string;
+  /** Accent colour of the category, for the listing's own chrome. */
+  categoryColor: string | null;
+  /** How the publisher presents it: `APPLICATION` or `WORKFLOW`. */
+  displayMode: string | null;
+  /** Credits one run costs an acquirer. 0 = free. */
+  creditsPerUse: number;
+  /** True when the publisher froze a showcase, i.e. a preview can be rendered. */
+  hasShowcase: boolean;
+  /**
+   * Integration + node glyphs the backend already computed for cards. Shaped as
+   * `NodeIcon` props, so the public pages render the SAME icons the app does.
+   */
+  nodeIcons: NodeIconData[];
+  /** What the listing is made of. Zeroes when the publisher published a bare workflow. */
+  agentCount: number;
+  interfaceCount: number;
+  workflowCount: number;
+  skillCount: number;
+  datasourceCount: number;
+  /**
+   * The published plan, credential-scrubbed and position-stripped by the
+   * backend. Left as `unknown`: only `buildPublicGraph` reads it, and it is
+   * defensive about every field, so no shape is asserted here.
+   */
+  planSnapshot: unknown;
 }
 
 /**
@@ -94,6 +141,18 @@ function asNumber(value: unknown): number {
 }
 
 /**
+ * Keep only the entries that can actually drive a `NodeIcon`. An icon row is
+ * decoration: one malformed entry must not cost the page its whole icon strip,
+ * so bad entries are dropped individually rather than failing the list.
+ */
+function asNodeIcons(value: unknown): NodeIconData[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (entry): entry is NodeIconData => typeof entry === 'object' && entry !== null,
+  );
+}
+
+/**
  * Map one raw publication object from the backend into a view model.
  *
  * Defensive on purpose: the public pages render whatever the marketplace
@@ -119,6 +178,7 @@ export function mapPublication(raw: unknown): PublicPublicationSummary | null {
     title,
     description: asString(row.description) ?? '',
     publisherName: asString(row.publisherName),
+    publisherId: asString(row.publisherId),
     publisherHandle: asString(row.publisherHandle),
     publisherAvatarUrl: asString(row.publisherAvatarUrl),
     categorySlug: asString(category.slug),
@@ -129,6 +189,17 @@ export function mapPublication(raw: unknown): PublicPublicationSummary | null {
     publishedAt: asString(row.publishedAt),
     updatedAt: asString(row.updatedAt),
     publicationType: asString(row.publicationType) ?? 'WORKFLOW',
+    categoryColor: asString(category.color),
+    displayMode: asString(row.displayMode),
+    creditsPerUse: asNumber(row.creditsPerUse),
+    hasShowcase: row.hasShowcase === true,
+    nodeIcons: asNodeIcons(row.nodeIcons),
+    agentCount: asNumber(row.agentCount),
+    interfaceCount: asNumber(row.interfaceCount),
+    workflowCount: asNumber(row.workflowCount),
+    skillCount: asNumber(row.skillCount),
+    datasourceCount: asNumber(row.datasourceCount),
+    planSnapshot: row.planSnapshot ?? null,
   };
 }
 
@@ -146,35 +217,33 @@ export function mapPublications(payload: unknown): PublicPublicationSummary[] {
     .filter((item): item is PublicPublicationSummary => item !== null);
 }
 
+/**
+ * How long a public page waits for the gateway before rendering without it.
+ *
+ * Sized as a ceiling, not a target: these reads normally answer in around a
+ * tenth of a second. What it bounds is the case the try/catch below cannot
+ * see, a gateway that accepts the connection and then never answers. Every
+ * caller here is on the critical path of a public page, and the landing's is
+ * also on the critical path of the BUILD, so an unbounded read is a render
+ * that hangs rather than a page that degrades.
+ */
+const GATEWAY_READ_TIMEOUT_MS = 8000;
+
 async function getJson(path: string, revalidateSeconds: number): Promise<unknown | null> {
   try {
     const res = await fetch(`${gatewayBaseUrl()}${path}`, {
       headers: { Accept: 'application/json' },
       next: { revalidate: revalidateSeconds },
+      signal: AbortSignal.timeout(GATEWAY_READ_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     return await res.json();
   } catch {
-    // A public page must not fail because the gateway blipped: callers render
-    // an empty state (or notFound()) instead.
+    // A public page must not fail because the gateway blipped or stalled:
+    // callers render an empty state (or notFound()) instead. An abort from the
+    // timeout above lands here too, which is the point.
     return null;
   }
-}
-
-/**
- * One page of the public marketplace listing, newest first.
- * Returns an empty list on any failure.
- */
-export async function fetchMarketplacePage(
-  page = 0,
-  size = 24,
-  revalidateSeconds = PUBLIC_MARKETPLACE_REVALIDATE_SECONDS,
-): Promise<PublicPublicationSummary[]> {
-  const payload = await getJson(
-    `/api/publications/marketplace?page=${page}&size=${size}`,
-    revalidateSeconds,
-  );
-  return mapPublications(payload);
 }
 
 /**
@@ -228,4 +297,149 @@ export async function fetchPublicationBySlug(
     revalidateSeconds,
   );
   return mapPublication(payload);
+}
+
+/**
+ * The frozen showcase of a publication, as the public render endpoint returns it.
+ * Field names mirror the payload; nothing is renamed, so a template that reads
+ * `htmlTemplate` here reads the same key the authenticated card preview does.
+ */
+export interface PublicShowcaseRender {
+  htmlTemplate: string;
+  cssTemplate: string | null;
+  jsTemplate: string | null;
+  /** Declared interface format (`vertical`, `square`, ...) or null for the default. */
+  format: string | null;
+  /** Newest epoch first. Only the first is previewed. */
+  items: Array<{ data?: Record<string, unknown> | null }>;
+}
+
+/**
+ * Read a publication's frozen showcase for anonymous rendering.
+ *
+ * <p>This is the read that lets a crawlable listing SHOW the application instead
+ * of describing it. It targets the same anonymous endpoint the marketplace cards
+ * use, and it is safe to call from a server render for two reasons: the endpoint
+ * is public at the gateway (no credentials are attached here, per this module's
+ * contract), and it serves only the frozen `showcase_*` clone, never the
+ * publisher's live run.
+ *
+ * <p>Returns null when the publication has no showcase, when the read fails, or
+ * when the payload carries no HTML to render. Callers must treat null as "show
+ * the listing without a preview", never as an error: a listing page must not go
+ * down because one showcase is missing.
+ */
+export async function fetchShowcaseRender(
+  publicationId: string,
+  revalidateSeconds = PUBLIC_SHOWCASE_REVALIDATE_SECONDS,
+): Promise<PublicShowcaseRender | null> {
+  if (!publicationId) return null;
+
+  const payload = await getJson(
+    `/api/publications/by-id/${encodeURIComponent(publicationId)}/showcase-render`,
+    revalidateSeconds,
+  );
+  if (typeof payload !== 'object' || payload === null) return null;
+  const row = payload as Record<string, unknown>;
+
+  const htmlTemplate = asString(row.htmlTemplate);
+  // No markup means nothing to draw. Returning a blank shell would render an
+  // empty white box that reads as a broken application.
+  if (!htmlTemplate) return null;
+
+  return {
+    htmlTemplate,
+    cssTemplate: asString(row.cssTemplate),
+    jsTemplate: asString(row.jsTemplate),
+    format: asString(row.format),
+    items: Array.isArray(row.items)
+      ? row.items.filter(
+          (item): item is { data?: Record<string, unknown> | null } =>
+            typeof item === 'object' && item !== null,
+        )
+      : [],
+  };
+}
+
+/** One publicly readable review of a listing. */
+export interface PublicReview {
+  id: string;
+  reviewerName: string | null;
+  /** 1..5, or null for a comment left without a rating. */
+  rating: number | null;
+  comment: string | null;
+  createdAt: string | null;
+  /** Replies the review has drawn, including the publisher's own. */
+  replyCount: number;
+}
+
+export interface PublicReviewPage {
+  reviews: PublicReview[];
+  /** Total reviews matching the query, not the number returned. */
+  totalElements: number;
+}
+
+/**
+ * Map one review row from the public endpoint.
+ *
+ * <p>Deliberately narrow: it takes only the fields the public page renders, so a
+ * field added to the authenticated payload later cannot reach a crawlable page
+ * just by existing. `reviewerId` is already stripped server-side; not reading it
+ * here is the second half of that.
+ */
+export function mapPublicReview(raw: unknown): PublicReview | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const row = raw as Record<string, unknown>;
+
+  const id = asString(row.id);
+  if (!id) return null;
+
+  const rating = typeof row.rating === 'number' && Number.isFinite(row.rating) ? row.rating : null;
+
+  return {
+    id,
+    reviewerName: asString(row.reviewerName),
+    rating,
+    comment: asString(row.comment),
+    createdAt: asString(row.createdAt),
+    replyCount: asNumber(row.replyCount),
+  };
+}
+
+/**
+ * Reviews of a publication, for the crawlable listing page.
+ *
+ * <p>Reads the anonymous alias under the `/by-id/` prefix, not the bare
+ * `/publications/{id}/reviews` route: that one is behind the gateway's JWT
+ * filter and answers 401 to a visitor. The alias applies the same visibility
+ * gate as the detail read, so a listing this page can render is a listing whose
+ * reviews it can render.
+ *
+ * <p>`onlyWithComment` defaults to true: a bare star with no words is already
+ * summarised by the average shown in the header, and listing a page of empty
+ * rows adds nothing a reader or a crawler can use.
+ *
+ * <p>Degrades to an empty page on any failure. Reviews are secondary content;
+ * a listing must still render without them.
+ */
+export async function fetchPublicationReviews(
+  publicationId: string,
+  { size = 10, onlyWithComment = true, revalidateSeconds = PUBLIC_MARKETPLACE_REVALIDATE_SECONDS } = {},
+): Promise<PublicReviewPage> {
+  const empty: PublicReviewPage = { reviews: [], totalElements: 0 };
+  if (!publicationId) return empty;
+
+  const payload = await getJson(
+    `/api/publications/by-id/${encodeURIComponent(publicationId)}/reviews`
+      + `?page=0&size=${size}&onlyWithComment=${onlyWithComment}`,
+    revalidateSeconds,
+  );
+  if (typeof payload !== 'object' || payload === null) return empty;
+  const body = payload as Record<string, unknown>;
+
+  const reviews = Array.isArray(body.reviews)
+    ? body.reviews.map(mapPublicReview).filter((r): r is PublicReview => r !== null)
+    : [];
+
+  return { reviews, totalElements: asNumber(body.totalElements) };
 }

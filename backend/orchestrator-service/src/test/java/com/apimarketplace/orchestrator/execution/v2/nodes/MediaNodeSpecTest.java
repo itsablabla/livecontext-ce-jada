@@ -31,6 +31,33 @@ class MediaNodeSpecTest {
     }
 
     @Test
+    @DisplayName("definition: the subtitles operation is discoverable - named in the description and the keywords")
+    void subtitlesIsDiscoverable() {
+        NodeDefinition def = spec.definition();
+        // This description and these keywords are how an agent FINDS the operation
+        // before it ever reads the node docs. An operation nothing names is an
+        // operation nobody uses.
+        assertThat(def.description()).containsIgnoringCase("subtitles");
+        assertThat(def.keywords())
+            .contains("subtitles", "captions", "burn-in")
+            .as("the words someone reaches for when looking to caption a video");
+    }
+
+    @Test
+    @DisplayName("definition: the file and duration outputs tell the reader subtitles produces an mp4 with a duration")
+    void subtitlesOutputsAreDocumented() {
+        Map<String, String> byKey = spec.definition().outputs().stream()
+            .collect(Collectors.toMap(OutputFieldDef::key, OutputFieldDef::description));
+        // frame is the operation whose duration is null; every doc that enumerates
+        // operations has to place subtitles on the right side of that line.
+        assertThat(byKey.get("file")).contains("subtitles");
+        assertThat(byKey.get("duration_seconds")).contains("subtitles");
+        assertThat(byKey.get("timestamp_seconds"))
+            .as("timestamp_seconds stays frame-only")
+            .doesNotContain("subtitles");
+    }
+
+    @Test
     @DisplayName("definition: nodeType MEDIA / core category / core variable prefix")
     void coreMetadata() {
         NodeDefinition def = spec.definition();

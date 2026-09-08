@@ -394,6 +394,7 @@ export function GuardrailParametersForm({
         disabled={isRunMode}
         providerLabel={t('provider')}
         modelLabel={t('model')}
+        costProfile="guardrailCheck"
       />
 
       {/* Input to Validate - Required */}

@@ -122,3 +122,5 @@ prisma/migrations/
 playwright-report/
 test-results/
 e2e/.auth/
+# Screenshots and probes written by e2e runs (never source).
+e2e-artifacts/

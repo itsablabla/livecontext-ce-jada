@@ -404,6 +404,7 @@ function NodeDataPreview({
         dataType="output"
         isDraggable={isDraggable}
         dragPrefix={dragPrefix}
+        node={node}
       />
     </div>
   );

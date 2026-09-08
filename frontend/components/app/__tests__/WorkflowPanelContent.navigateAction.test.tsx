@@ -58,6 +58,8 @@ vi.mock('@/contexts/StreamingContext', () => ({
   useStreaming: () => ({ isStreamingConversation: () => false }),
 }));
 vi.mock('@/lib/stores/current-org-store', () => ({
+  // Not a VIEWER: these suites are about the panel, not about role gating.
+  useCanMutateInCurrentOrg: () => true,
   useCurrentOrgStore: Object.assign(
     (sel: (s: any) => any) => sel({ currentOrgId: 'org-1' }),
     { subscribe: () => () => {} },

@@ -97,7 +97,7 @@ export function InvitePanel() {
           </div>
         </div>
         <Link href="/app/settings/cloud-account">
-          <Button variant="contrast" size="sm" className="gap-1">
+          <Button variant="default" size="sm" className="gap-1">
             <Cloud className="h-3.5 w-3.5" />
             {t('connectCta')}
           </Button>
@@ -145,7 +145,7 @@ export function InvitePanel() {
           {copied === 'code' ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
           {copied === 'code' ? t('copied') : t('copy')}
         </Button>
-        <Button onClick={() => void copy(shareUrl, 'link')} variant="contrast" size="sm" className="gap-1">
+        <Button onClick={() => void copy(shareUrl, 'link')} variant="default" size="sm" className="gap-1">
           {copied === 'link' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
           {copied === 'link' ? t('linkCopied') : t('copyLink')}
         </Button>

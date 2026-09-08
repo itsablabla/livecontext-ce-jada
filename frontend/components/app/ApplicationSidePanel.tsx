@@ -48,12 +48,26 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
     appConfigs: ApplicationConfig[];
     /** Frozen publication plan - the only one a preview visitor may render. */
     planOverride?: any;
-    /** The caller may change this workflow: drives the canvas' edit toggle. */
+    /**
+     * The caller may CHANGE the workflow this panel bound: it drives the canvas'
+     * edit toggle and the Share / Save bar. True only for the publisher's
+     * own SOURCE workflow - never for an installed application (a frozen clone
+     * the backend refuses to write) and never for someone else's publication.
+     */
     canEdit: boolean;
     /**
-     * Set only for an INSTALLED application: enables the toolbar's template
-     * actions. Withheld in a preview context (read-only showcase) and for the
-     * publisher's own publication, whose page is bound to the source workflow.
+     * The workflows this tenant can reach from the application are its own, so a
+     * sub-workflow opened from the canvas may be edited even when the application
+     * itself is frozen. False for a publication that is neither owned nor installed
+     * (its whole graph belongs to the publisher) and in a preview, which edits
+     * nothing at all.
+     */
+    tenantOwnsWorkflows: boolean;
+    /**
+     * Names the publication the toolbar's template actions read from. It enables
+     * loading the example values; the reset needs `canReset` on top of it, because
+     * that one writes. Withheld entirely in a preview context - a read-only
+     * showcase has no tenant data to seed or wipe.
      */
     templateSource?: ApplicationTemplateSource;
   } | null>(null);
@@ -93,12 +107,12 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
         // see their own runs, so we resolve the cloned workflow + latest run.
         let effectiveWorkflowId = pub.workflowId;
         let runId: string | undefined = pub.showcaseRunId ?? undefined;
-        // Whether the workflow behind this application is the CALLER's to change.
-        // The panel now mounts a real canvas, so this decides whether it offers
-        // the edit toggle at all: on a publication the caller does not own, the
-        // resolver falls back to the PUBLISHER's workflow and every save there
-        // would 403. Owned publication, or an acquired clone found below.
-        let ownsWorkflow = pub.ownedByMe === true;
+        // An INSTALLED application binds the acquired APPLICATION clone, which is
+        // frozen: the backend refuses every plan write on it (409, "it is a frozen
+        // acquired marketplace clone"). The clone lives in the caller's own tenant,
+        // so ownership of SOMETHING is not the question - what matters is whether
+        // this workflow is an install, which is tracked separately and wins below.
+        let isClonedAcquisition = false;
         const planFromSnapshot = snapshotCtx?.planSnapshot ?? null;
         let interfaces: any[] = Array.isArray(planFromSnapshot?.interfaces)
           ? planFromSnapshot.interfaces
@@ -118,7 +132,7 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
             );
             if (match?.workflowId) {
               effectiveWorkflowId = match.workflowId;
-              ownsWorkflow = true;
+              isClonedAcquisition = true;
             }
           } catch { /* keep publisher's workflowId */ }
           if (interfaces.length === 0) {
@@ -137,7 +151,7 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
             );
             if (match?.workflowId) {
               effectiveWorkflowId = match.workflowId;
-              ownsWorkflow = true;
+              isClonedAcquisition = true;
             }
           } catch {
             // Not acquired - keep publisher's workflow id (published variant).
@@ -230,13 +244,26 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
             planOverride: inPreviewContext
               ? (planFromSnapshot ?? pub.planSnapshot ?? undefined)
               : undefined,
-            canEdit: !inPreviewContext && ownsWorkflow,
-            // Same split as ApplicationDetailView: the example values help anyone whose
-            // run has no data yet, the publisher included; the reset is withheld from the
-            // publisher because this surface resolves their SOURCE workflow while the
-            // endpoint rewrites the APPLICATION clone's tables.
+            // Exactly the rule the application page draws (`canEdit = isOwnerSource`):
+            // only the publisher's own SOURCE workflow is editable here. An
+            // installed application is a frozen clone whose plan the backend
+            // refuses to write, and a publication the caller neither owns nor
+            // installed resolves to the PUBLISHER's workflow, where a save is
+            // refused too - offering an edit toggle and a Save on either is a
+            // promise the surface cannot keep.
+            canEdit: !inPreviewContext && !isClonedAcquisition && pub.ownedByMe === true,
+            tenantOwnsWorkflows: !inPreviewContext && (isClonedAcquisition || pub.ownedByMe === true),
+            // The example values help anyone whose run has no data yet, the publisher
+            // included. The RESET is offered on exactly one condition: this panel is
+            // bound to the installed clone, whose tables are the ones the endpoint
+            // rewrites. Keying it on "not the publisher" was the same conflation the
+            // edit gate above just lost: it offered the reset to anyone who is not the
+            // publisher, install or no install, so a visitor merely looking at an
+            // application got a button whose endpoint has no clone to resolve (404) -
+            // and, on a shared link, one pointed at the OWNER's install. The
+            // application page took the same correction, through `isInstalledClone`.
             templateSource: !inPreviewContext
-              ? { publicationId, remote: !!pub.remote, canReset: !pub.ownedByMe }
+              ? { publicationId, remote: !!pub.remote, canReset: isClonedAcquisition }
               : undefined,
           });
         }
@@ -283,11 +310,26 @@ export function ApplicationPanelContent({ publicationId, runId: runIdOverride }:
         workflowId={panelData.workflowId}
         runId={panelData.runId}
         readOnly={previewActive}
-        /* A publication the caller has not acquired resolves to the PUBLISHER's
-           workflow: readable, but every save, run and publish there would be
-           refused. The application itself stays interactive either way - that is
-           what the panel is for. */
+        /* False for the two workflows a save cannot reach: an INSTALLED
+           application (a frozen APPLICATION clone the backend refuses to write)
+           and someone else's publication (which resolves to the PUBLISHER's
+           workflow). The application itself stays fully interactive either way -
+           that is what the panel is for; only the workflow behind it is locked.
+
+           It also withholds the canvas Run button, which the backend WOULD accept
+           on an installed clone (the execute path skips its pre-run auto-save for
+           exactly this type). That is deliberate, and it is what the application
+           page does: an installed application is started from its own triggers,
+           the ones its author exposed, not by firing the raw workflow from a
+           canvas its owner cannot edit. Offering a Run beside a canvas with no
+           Save would also be the odd one out of a bar that is otherwise gone. */
         canEditWorkflow={panelData.canEdit}
+        /* What a sub-workflow node opens is a DIFFERENT question: an install
+           freezes the application's own plan, but the sub-workflows it calls were
+           cloned as ordinary workflows in this tenant and are writable. What must
+           not be editable is a publication that is neither owned nor installed,
+           where every workflow reachable from here is the publisher's. */
+        canEditRelatedWorkflows={panelData.tenantOwnsWorkflows}
         applicationFirst
         initialApplicationConfigs={panelData.appConfigs}
         applicationTemplateSource={panelData.templateSource}

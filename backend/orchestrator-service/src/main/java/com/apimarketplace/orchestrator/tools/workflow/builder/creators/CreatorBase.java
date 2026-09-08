@@ -35,8 +35,8 @@ public abstract class CreatorBase {
         WAIT("core", "add_wait"),            // Wait is stored in cores but behaves as passthrough step
         DOWNLOAD_FILE("core", "add_download_file"),  // Download file from URL and store for workflow use
         PUBLIC_LINK("core", "add_public_link"),      // Mint a public, time-limited signed URL for a stored file
-        MEDIA("core", "add_media"),                  // Audio/video processing: probe, mux_audio, mix, extract_audio (renderer component)
-        GENERATE("core", "add_generate"),            // Generate an asset from a prompt: image, video, audio, voice, music
+        MEDIA("core", "add_media"),                  // Audio/video processing on the optional renderer component
+        GENERATE("agent", "add_generate"),           // AI: generate an asset from a prompt (image, video, audio, voice, music)
         EXIT("core", "add_exit"),            // Exit branch execution (terminal node, other parallel branches continue)
         RESPONSE("core", "add_response"),    // Send a message response to chat interface
         OPTION("core", "add_option"),        // Multiple choice branching (N choices, first true wins)

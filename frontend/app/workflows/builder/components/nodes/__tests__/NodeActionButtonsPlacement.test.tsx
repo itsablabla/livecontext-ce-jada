@@ -19,7 +19,12 @@ vi.mock('@/contexts/WorkflowModeContext', () => ({
 }));
 
 // shared.tsx pulls UI/provider helpers unrelated to NodeActionButtons - stub them.
-vi.mock('@/components/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light', resolvedTheme: 'light' }) }));
+// `useOptionalTheme` is mocked alongside `useTheme`: the icons in this tree render
+// through `useThemeSafely`, which reads the context OPTIONALLY so the same icons can
+// render on the public marketplace outside any ThemeProvider. A mock missing it throws.
+vi.mock('@/components/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light', resolvedTheme: 'light' }),
+  useOptionalTheme: () => ({ theme: 'light', resolvedTheme: 'light' }),
+}));
 vi.mock('@/components/agents', () => ({ AvatarDisplay: () => null }));
 vi.mock('@/hooks/useModels', () => ({ getEffectiveDefaultProvider: () => 'openai' }));
 vi.mock('@/lib/ai-providers/providerIcons', () => ({ getProviderIconSlug: () => 'openai' }));

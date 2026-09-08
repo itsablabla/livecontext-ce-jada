@@ -108,7 +108,7 @@ services:
     restart: "no"
 
   bridge:
-    image: ghcr.io/livecontext-ai/livecontext-ce-bridge:v0.2.14
+    image: ghcr.io/livecontext-ai/livecontext-ce-bridge:v0.2.15
     container_name: livecontext-bridge
     restart: unless-stopped
     depends_on:
@@ -136,7 +136,7 @@ services:
           memory: 512M
 
   livecontext:
-    image: ghcr.io/livecontext-ai/livecontext-ce:v0.2.14
+    image: ghcr.io/livecontext-ai/livecontext-ce:v0.2.15
     container_name: livecontext-app
     restart: unless-stopped
     depends_on:
@@ -188,6 +188,11 @@ services:
       # entirely (no badge either). See README-CE.md.
       CE_VERSIONCHECK_ENABLED: ${CE_VERSIONCHECK_ENABLED:-true}
       CE_VERSIONCHECK_SENDINSTALLID: ${CE_VERSIONCHECK_SENDINSTALLID:-true}
+      # In-app "What's new": a one-time panel, with an image or a short video, describing the
+      # newest change in the version you are running. It ships INSIDE this image, so it makes no
+      # network request and works offline; it is shown once per user and never replays older
+      # entries. Set CHANGELOG_ENABLED=false to remove it entirely (no panel, no sidebar entry).
+      CHANGELOG_ENABLED: ${CHANGELOG_ENABLED:-true}
       # Browser agent (agent_browse) - OFF by default. Opt in with the
       # `browser-agent` profile + WEBSEARCH_ENABLED=true (both set by
       # docker/.env.ce.browser-agent). When enabled, the orchestrator talks to
@@ -346,7 +351,7 @@ services:
   # secrets - HTML in, bytes out; reached only by the app over the compose network.
   screenshot-renderer:
     profiles: ["renderer"]
-    image: ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer:v0.2.14
+    image: ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer:v0.2.15
     container_name: livecontext-screenshot-renderer
     restart: unless-stopped
     environment:
@@ -370,7 +375,7 @@ services:
           memory: 1024M
 
   frontend:
-    image: ghcr.io/livecontext-ai/livecontext-ce-frontend:v0.2.14
+    image: ghcr.io/livecontext-ai/livecontext-ce-frontend:v0.2.15
     container_name: livecontext-frontend
     restart: unless-stopped
     depends_on:

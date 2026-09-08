@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import type { ColumnDefinition, DataSourceItemRow, PaginationState } from '../types';
 import type { ColumnStylePreset } from '../visualHelpers';
 import { COLUMN_STYLE_PRESETS } from '../visualHelpers';
+import { useRevealWindow } from './useRevealWindow';
 import { authenticatedFetch } from '../utils/authenticatedFetch';
 
 export interface UseColumnOperationsParams {
@@ -34,6 +35,11 @@ export interface UseColumnOperationsReturn {
   showEditColumnModal: boolean;
   columnToEdit: ColumnDefinition | null;
   isEditingColumn: boolean;
+  /**
+   * Field of the column just created, for as long as the grid should point at it
+   * (see {@link useRevealWindow}), then null again.
+   */
+  revealedColumnField: string | null;
 
   // Setters
   setShowAddColumnModal: React.Dispatch<React.SetStateAction<boolean>>;
@@ -56,8 +62,15 @@ export interface UseColumnOperationsReturn {
  * Columns the user cannot delete or edit. Exported so other table-grid
  * components can hide edit/delete affordances on these without redefining
  * the list and risking drift.
+ *
+ * These are the lanes a table view synthesizes at ROOT level, which is the only level where column
+ * management is offered (`ViewConfig.allowColumnManagement` is false during nested navigation).
+ * `value` and `array_index` are deliberately NOT here: they are lanes only while drilling into a
+ * nested path, and at root a column of that name is the table's own, which the user must be able to
+ * rename and delete like any other. Keeping them made such a column the one column in the grid with
+ * no menu.
  */
-export const FIXED_COLUMNS = ['checkbox', 'id', 'priority', 'created_at', 'array_index', 'value'];
+export const FIXED_COLUMNS = ['checkbox', 'id', 'priority', 'created_at'];
 
 /**
  * Maximum number of user-defined columns allowed per DataSource
@@ -87,6 +100,7 @@ export function useColumnOperations({
   const [showDeleteColumnsModal, setShowDeleteColumnsModal] = useState(false);
   const [columnsToDelete, setColumnsToDelete] = useState<string[]>([]);
   const [selectedColumnStyle, setSelectedColumnStyle] = useState<ColumnStylePreset>(COLUMN_STYLE_PRESETS[0]);
+  const [revealedColumnField, revealColumn] = useRevealWindow<string | null>(null, `${dataSourceId}:${jsonPath ?? ''}`);
 
   /**
    * Add a new column to the data source
@@ -153,6 +167,11 @@ export function useColumnOperations({
       await fetchColumns(true);
       await fetchData(pagination.currentPage, pagination.pageSize);
 
+      // Point at it only now that the grid can actually show it - the rows above are what the
+      // cells animate on. The field is the one the backend derives: it keys mapping_spec by the
+      // column name verbatim, so the column is reachable at `data.<name>`.
+      revealColumn(`data.${trimmedName}`);
+
       addToast({
         type: 'success',
         title: 'Column Added Successfully',
@@ -168,7 +187,7 @@ export function useColumnOperations({
     } finally {
       setIsAddingColumn(false);
     }
-  }, [dataSourceId, newColumnName, selectedColumnStyle, columns, fetchColumns, fetchData, pagination, addToast]);
+  }, [dataSourceId, newColumnName, selectedColumnStyle, columns, fetchColumns, fetchData, pagination, addToast, revealColumn]);
 
   /**
    * Open delete confirmation modal for selected columns
@@ -359,6 +378,7 @@ export function useColumnOperations({
     showEditColumnModal,
     columnToEdit,
     isEditingColumn,
+    revealedColumnField,
 
     // Setters
     setShowAddColumnModal,

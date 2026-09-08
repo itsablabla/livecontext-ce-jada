@@ -317,6 +317,58 @@ class SubscriptionServiceTest {
         }
 
         @Test
+        @DisplayName("analytics regression: a renewal webhook (same plan, status and quantity) emits NO subscription_changed")
+        void renewalEmitsNothing() throws Exception {
+            com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics =
+                    mock(com.apimarketplace.auth.analytics.AuthAnalyticsEmitter.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(subscriptionService, "analytics", analytics);
+            User user = createTestUser(1L);
+            BillingCustomer bc = createBillingCustomer(1L, user);
+            Plan starterPlan = createPlan(2L, "STARTER");
+            com.apimarketplace.auth.domain.Subscription existing =
+                    createExistingSubscription(10L, bc, starterPlan, "active");
+            existing.setProviderSubscriptionId("sub_renewal_1");
+            existing.setCreditQuantity(1);
+            setupStripeRetrieve(createStripeSubscription("sub_renewal_1", "cus_test_1", false, 1));
+            when(billingCustomerRepository.findByUserId(1L)).thenReturn(Optional.of(bc));
+            when(planRepository.findById(2L)).thenReturn(Optional.of(starterPlan));
+            when(subscriptionRepository.findByProviderSubscriptionId("sub_renewal_1")).thenReturn(Optional.of(existing));
+            when(subscriptionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(billingEventRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            subscriptionService.onSubscriptionUpsert("evt_renewal", "sub_renewal_1", "active",
+                    2L, null, LocalDateTime.now(), LocalDateTime.now().plusDays(30), 1L, null, 1, null);
+
+            verify(analytics, never()).subscriptionChanged(anyLong(), any(), any(), any(), anyInt(), any());
+        }
+
+        @Test
+        @DisplayName("analytics: a status-only transition (active -> past_due) emits subscription_changed with plan_changed=false")
+        void statusTransitionEmits() throws Exception {
+            com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics =
+                    mock(com.apimarketplace.auth.analytics.AuthAnalyticsEmitter.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(subscriptionService, "analytics", analytics);
+            User user = createTestUser(1L);
+            BillingCustomer bc = createBillingCustomer(1L, user);
+            Plan starterPlan = createPlan(2L, "STARTER");
+            com.apimarketplace.auth.domain.Subscription existing =
+                    createExistingSubscription(10L, bc, starterPlan, "active");
+            existing.setProviderSubscriptionId("sub_status_1");
+            existing.setCreditQuantity(1);
+            setupStripeRetrieve(createStripeSubscription("sub_status_1", "cus_test_1", false, 1));
+            when(billingCustomerRepository.findByUserId(1L)).thenReturn(Optional.of(bc));
+            when(planRepository.findById(2L)).thenReturn(Optional.of(starterPlan));
+            when(subscriptionRepository.findByProviderSubscriptionId("sub_status_1")).thenReturn(Optional.of(existing));
+            when(subscriptionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(billingEventRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            subscriptionService.onSubscriptionUpsert("evt_status", "sub_status_1", "past_due",
+                    2L, null, LocalDateTime.now(), LocalDateTime.now().plusDays(30), 1L, null, 1, null);
+
+            verify(analytics).subscriptionChanged(eq(1L), eq("STARTER"), eq("STARTER"), eq("past_due"), eq(1), eq("stripe"));
+        }
+
+        @Test
         @DisplayName("should create subscription with trialing status")
         void shouldCreateSubscriptionWithTrialingStatus() throws Exception {
             User user = createTestUser(1L);

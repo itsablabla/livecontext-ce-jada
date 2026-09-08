@@ -2,6 +2,7 @@ package com.apimarketplace.orchestrator.execution.v2.adhoc;
 
 import com.apimarketplace.orchestrator.execution.v2.engine.CoreNodeBuilder;
 import com.apimarketplace.orchestrator.execution.v2.engine.ExecutionContext;
+import com.apimarketplace.orchestrator.execution.v2.engine.ExecutionNodeFactory;
 import com.apimarketplace.orchestrator.execution.v2.engine.ExecutionServiceInjector;
 import com.apimarketplace.orchestrator.execution.v2.nodes.ExecutionNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.NodeExecutionResult;
@@ -46,6 +47,9 @@ import static org.mockito.Mockito.lenient;
 class AdHocNodeExecutionServiceBatchTest {
 
     @Mock private CoreNodeBuilder coreNodeBuilder;
+    // Generate is built by the FACTORY, from the plan's agents, so a probe of
+    // an AI node never reaches the core builder at all.
+    @Mock private ExecutionNodeFactory executionNodeFactory;
     @Mock private ExecutionServiceInjector serviceInjector;
     @Mock private OutputSchemaMapper outputSchemaMapper;
     @Mock private com.apimarketplace.orchestrator.services.credit.NodeCreditGate nodeCreditGate;
@@ -55,7 +59,7 @@ class AdHocNodeExecutionServiceBatchTest {
 
     @BeforeEach
     void setUp() {
-        service = new AdHocNodeExecutionService(coreNodeBuilder, serviceInjector, outputSchemaMapper, nodeCreditGate);
+        service = new AdHocNodeExecutionService(coreNodeBuilder, executionNodeFactory, serviceInjector, outputSchemaMapper, nodeCreditGate);
         lenient().when(nodeCreditGate.denyOrNull(any(), any())).thenReturn(null);
         lenient().when(outputSchemaMapper.transformToDbSchema(any(), any())).thenAnswer(inv -> inv.getArgument(0));
     }

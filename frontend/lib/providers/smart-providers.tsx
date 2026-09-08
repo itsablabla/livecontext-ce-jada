@@ -31,7 +31,7 @@ import { SessionGate } from '../../components/auth/SessionGate';
 
 // No need to import old providers - everything is managed by Resource Managers
 import { IS_CE } from '@/lib/edition';
-import { resetAnalytics } from '@/lib/analytics/analytics';
+import { resetAnalytics, track } from '@/lib/analytics/analytics';
 import { isPublicMarketingPath } from './publicMarketingPath';
 
 // CE deployments use embedded auth; cloud uses OIDC. Single source of truth from
@@ -1037,8 +1037,10 @@ const ResourceManagerProvider: React.FC<{ children: ReactNode; queryClient: Quer
   }, [oidc, markSessionExpired]);
 
   const logout = useCallback(async (opts?: { logoutParams?: { returnTo?: string } }) => {
-    // Clear the analytics identity so post-logout events are not attributed to
-    // the previous user (no-op when analytics is off).
+    // Count the deliberate logout while the identity is still attached, then
+    // clear it so post-logout events are not attributed to the previous user
+    // (both no-ops when analytics is off).
+    track('auth_logged_out', {});
     resetAnalytics();
     // Deliberate logout: clear loop-detection state so the post-logout redirect to the
     // Keycloak login form is never mistaken for the login/logout redirect loop. (A real

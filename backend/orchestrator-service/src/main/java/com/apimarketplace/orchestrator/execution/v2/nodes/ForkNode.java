@@ -47,7 +47,7 @@ public class ForkNode extends BaseNode {
 
         // Build resolved_params snapshot for inspector visibility
         Map<String, Object> resolvedParams = new LinkedHashMap<>();
-        resolvedParams.put("branches", branches.size());
+        resolvedParams.put("forkOutputs", branches.size());
 
         // Build output with branch information
         Map<String, Object> output = new HashMap<>();

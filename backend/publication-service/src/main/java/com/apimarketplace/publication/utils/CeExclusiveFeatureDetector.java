@@ -49,6 +49,26 @@ public final class CeExclusiveFeatureDetector {
     public static final Set<String> ALL_FEATURES = Set.of(FEATURE_CLI_AGENT, FEATURE_VECTOR_SEARCH);
 
     /**
+     * The subset that makes a publication genuinely UN-INSTALLABLE on managed cloud, as opposed to
+     * merely priced.
+     *
+     * <p>Until 2026-09-03 both codes blocked, because both named something managed cloud could not
+     * run at all. Vector search stopped being one of those: it runs on cloud from the plan an admin
+     * set on {@code feature:vector_search}, so an app that uses embeddings is no longer refused,
+     * it is sold. A local CLI agent still has no host on cloud at any price, so it stays here.
+     *
+     * <p>Detection is unchanged for both: {@code ce_exclusive_features} still lists everything
+     * found, because the list is what explains the badge and the refusal to a human and to an
+     * agent. Only the BLOCKING decision narrowed.
+     */
+    public static final Set<String> BLOCKING_FEATURES = Set.of(FEATURE_CLI_AGENT);
+
+    /** Whether this feature set makes the publication un-installable on managed cloud. */
+    public static boolean blocksInstall(Collection<String> features) {
+        return features != null && features.stream().anyMatch(BLOCKING_FEATURES::contains);
+    }
+
+    /**
      * Column type that only self-hosted supports. Snapshots carry the enum's
      * JSON form, which is LOWERCASE ({@code ColumnType.VECTOR} is
      * {@code @JsonValue "vector"}); the comparison is case-insensitive so a
@@ -124,13 +144,19 @@ public final class CeExclusiveFeatureDetector {
      * <p>Always assigns both fields, including the empty case - a publication
      * that DROPS its last CLI agent on an update must lose the badge in the
      * same pass, otherwise it stays un-installable on cloud forever.
+     *
+     * <p><b>The two fields answer two different questions since 2026-09-03.</b>
+     * {@code ce_exclusive_features} lists everything detected, and
+     * {@code ce_exclusive} says only whether one of those makes the app impossible here
+     * ({@link #BLOCKING_FEATURES}). They used to be the same question, and collapsing them was
+     * what made a table with an embedding column un-installable on cloud at any price.
      */
     public static void applyTo(WorkflowPublicationEntity publication) {
         if (publication == null) {
             return;
         }
         Set<String> features = detect(publication.getPlanSnapshot(), publication.getAgentSnapshot());
-        publication.setCeExclusive(!features.isEmpty());
+        publication.setCeExclusive(blocksInstall(features));
         publication.setCeExclusiveFeatures(toSortedList(features));
     }
 

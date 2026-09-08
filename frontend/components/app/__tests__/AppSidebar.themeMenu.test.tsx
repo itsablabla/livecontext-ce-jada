@@ -93,7 +93,6 @@ function renderUserSection(themePreference: ThemePreference, onThemeChange = vi.
       user={{ name: 'Owner E2E', email: 'owner@example.com' }}
       avatarUrl={null}
       numericUserId={42}
-      hasActiveSubscription={false}
       planCode={planCode}
       isSubscriptionLoading={false}
       themePreference={themePreference}
@@ -120,6 +119,32 @@ describe('AppSidebar user theme menu', () => {
     cleanup();
     vi.clearAllMocks();
     mockWorkspaces = [];
+  });
+
+  it('cloud: the menu opens on Settings and carries no Pricing row', () => {
+    // The upsell in cloud is the Upgrade CTA inside the credits section at the
+    // top of this menu, so a row leading to the same page said it twice. The
+    // 'Pricing' label is still in the translation mock above, so this assertion
+    // fails when the row returns instead of passing on a missing string.
+    renderUserSection('auto');
+    fireEvent.click(screen.getByRole('button', { name: /Owner E2E/ }));
+
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pricing' })).not.toBeInTheDocument();
+  });
+
+  it('cloud with an unreadable wallet: the menu still opens and the plan stays reachable', () => {
+    // The credits section is the only Upgrade CTA in cloud and it renders
+    // nothing while the wallet is loading or failed, so this is the state where
+    // the removed Pricing row would have been missed. The plan name beside the
+    // avatar still opens the comparison, and Settings still leads to the
+    // pricing page from its nav.
+    renderUserSection('auto');
+    fireEvent.click(screen.getByRole('button', { name: /Owner E2E/ }));
+
+    expect(screen.queryByTestId('sidebar-credit-menu-section')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-plan-name')).toBeInTheDocument();
   });
 
   // Regression: a user with no uploaded photo used to get a generic lucide person icon

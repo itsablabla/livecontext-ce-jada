@@ -51,6 +51,20 @@ public class AgentRemoteExecutionService {
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.apimarketplace.agent.cloud.CeWebSearchRelayGate webSearchRelayGate;
+
+    /**
+     * Builds the workspace's long-term memory block appended to every system
+     * prompt dispatched from here.
+     *
+     * <p>Field-injected rather than added to the {@code @RequiredArgsConstructor}
+     * list on purpose: this class is constructed positionally in a dozen unit
+     * tests, and widening the constructor would break every one of them over a
+     * dependency they do not exercise. Optional, so a test that never wires it
+     * gets a null and the guarded call below leaves the prompt untouched - the
+     * same shape {@code webSearchRelayGate} above already uses.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.agent.memory.MemoryPromptSection memoryPromptSection;
     private final AgentActivityPublisher agentActivityPublisher;
     private final GuardChainFactory guardChainFactory;
     private final ClassifyService classifyService;
@@ -71,13 +85,17 @@ public class AgentRemoteExecutionService {
 
     /**
      * Model execution links (CLOUD only): resolves whether a billed
-     * {@code (provider, model)} pair must be EXECUTED through a CLI bridge while
-     * keeping the billed identity for observability + credit consumption.
-     * Field-injected and optional - null in CE / when the feature flag is off ⇒
-     * no link routing (the billed model runs on its own provider as usual).
+     * {@code (provider, model)} pair must be EXECUTED through a CLI bridge (or
+     * another API provider) while keeping the billed identity for observability +
+     * credit consumption. Shared with the classify, guardrail and sub-agent paths
+     * so all four honour a link identically; in CE, or with the feature off, it
+     * returns no route and the billed model runs on its own provider as usual.
+     *
+     * <p>The router is an unconditional bean, so the null guard below only covers a unit
+     * test that constructs this service directly.
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private ModelExecutionLinkService executionLinkService;
+    private ExecutionLinkRouter executionLinkRouter;
 
     // ========== Full Agent Execution ==========
 
@@ -111,6 +129,42 @@ public class AgentRemoteExecutionService {
         request = request.withProvider(
             modelCatalogService.resolveProvider(request.provider(), request.model()));
         String agentEntityId = request.agentEntityId();
+
+        // ── Long-term memory ──────────────────────────────────────────────────
+        // THE injection point. Every direct-API execution in the product arrives
+        // here - chat (conversation-service dispatches remotely), the workflow
+        // agent node, task and schedule runs - and the split between the bridge
+        // transport and the direct loop happens BELOW, so appending here covers
+        // both without a second call site to keep in step. The one execution path
+        // that does not pass through is the sub-agent handler, which appends the
+        // same block itself; MemoryInjectionCallsiteInvariantTest pins both.
+        //
+        // The org id comes from the thread binding rather than the DTO because the
+        // controller already wraps this call in runWithOrgScope: reading it here means
+        // memory resolves in the SAME workspace as the rest of the run, instead of a
+        // second one carried separately in the payload that could drift from it.
+        // (The binding is not un-spoofable and is not claimed to be: the controller
+        // fills it from the gateway header when there is one and from the request's
+        // own credentials for an internal caller. The property is consistency.)
+        if (memoryPromptSection != null) {
+            try {
+                request = request.withSystemPrompt(memoryPromptSection.appendTo(
+                    request.systemPrompt(),
+                    com.apimarketplace.common.web.TenantResolver.currentRequestOrganizationId(),
+                    com.apimarketplace.agent.memory.MemoryAgentScope.agentIdOrNull(agentEntityId)));
+            } catch (RuntimeException memoryUnavailable) {
+                // The run continues WITHOUT memory rather than failing. Memory is an
+                // enrichment: an agent that runs without it is degraded, an agent that
+                // 500s because a lookup misbehaved is broken, and this is the site every
+                // direct-API execution in the product goes through. render() already
+                // swallows its own failures, so reaching here means something further
+                // out (a proxy, a advice, a future refactor of appendTo) threw - which
+                // is exactly the case a guard is for. Same policy as the bridge site in
+                // conversation-service.
+                log.warn("[MEMORY] Prompt enrichment failed for agent {}; running without it: {}",
+                    agentEntityId, memoryUnavailable.toString());
+            }
+        }
         // Prefer the dispatcher-minted executionId so WS payloads, MCP credentials, and
         // the persisted agent_executions.id share the same UUID. Falls back to a local
         // mint only when the upstream caller hasn't been updated yet (e.g. legacy
@@ -130,26 +184,17 @@ public class AgentRemoteExecutionService {
         // A link can be scoped to one app surface, so resolve passes this run's activity
         // source (CHAT / WORKFLOW / WEBHOOK / ...): an exact-surface link wins, else the ALL
         // wildcard. The service bean is absent in CE, so this is inert there.
-        ModelExecutionLinkService.ExecutionRoute executionRoute = executionLinkService != null
-            ? executionLinkService.resolve(request.provider(), request.model(), resolveActivitySource(request)).orElse(null)
+        // The router already drops a bridge-targeted link when the bridge transport is not
+        // wired here, so what comes back is always runnable (never a silent bridge fail).
+        ModelExecutionLinkService.ExecutionRoute executionRoute = executionLinkRouter != null
+            ? executionLinkRouter.runnableRoute(request.provider(), request.model(), resolveActivitySource(request))
             : null;
 
         // Billed identity (kept for billing) vs execution identity (where the run actually goes).
         final String billedProvider = request.provider();
         final String billedModel = request.model();
-        String execProvider = executionRoute != null ? executionRoute.executionProvider() : request.provider();
-        String execModel = executionRoute != null ? executionRoute.executionModel() : request.model();
-
-        // A link that targets a CLI bridge needs the bridge transport wired; if it isn't,
-        // drop the link and run the billed model on its own provider (never a silent bridge
-        // fail). A link to a regular API provider is unaffected.
-        if (executionRoute != null
-                && SubAgentBridgeClient.isBridgeProvider(execProvider)
-                && !bridgeDispatcher.isAvailable()) {
-            executionRoute = null;
-            execProvider = billedProvider;
-            execModel = billedModel;
-        }
+        final String execProvider = executionRoute != null ? executionRoute.executionProvider() : billedProvider;
+        final String execModel = executionRoute != null ? executionRoute.executionModel() : billedModel;
 
         // Bridge path iff the EXECUTION provider is a CLI bridge (and the bridge is wired).
         // executeAgentViaBridge consumes the route (exec target + billed relabel + restricted

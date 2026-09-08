@@ -17,6 +17,7 @@ import com.apimarketplace.orchestrator.services.completion.StepCompletionOrchest
 import com.apimarketplace.orchestrator.services.streaming.NodeEventEmitterService;
 import com.apimarketplace.orchestrator.services.streaming.bus.WorkflowEventPublisher;
 import com.apimarketplace.orchestrator.services.streaming.state.RunningNodeTracker;
+import com.apimarketplace.orchestrator.services.usage.NodeUsageRecorder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -49,6 +50,7 @@ class NodeCompletionServiceTest {
     @Mock private ExecutionNode node;
     @Mock private TriggerItem triggerItem;
     @Mock private ExecutionContext context;
+    @Mock private NodeUsageRecorder nodeUsageRecorder;
 
     private NodeCompletionService service;
 
@@ -71,6 +73,33 @@ class NodeCompletionServiceTest {
             verify(nodeEventEmitterService).recordNodeExecution(eq("run-1"), eq("step1"), eq(0), eq(0), eq("RUNNING"));
             verify(eventPublisher).emitStep(eq("run-1"), eq("mcp:step1"), anyMap(), any());
             // P2.3.1: legacy 4-arg emitNodeStart delegates to per-epoch overload with epoch=0
+            verify(runningNodeTracker).markRunning("run-1", 0, "mcp:step1");
+        }
+
+        @Test
+        @DisplayName("Counts the launch in the platform-wide usage ledger")
+        void shouldRecordTheLaunchInTheUsageLedger() {
+            // The ledger is fed from HERE and nowhere else. Unwired, every ranking it
+            // backs quietly stays at whatever order it had - no error, no empty screen,
+            // just numbers that never move.
+            org.springframework.test.util.ReflectionTestUtils.setField(service, "nodeUsageRecorder", nodeUsageRecorder);
+            when(execution.getRunId()).thenReturn("run-1");
+            when(node.getNodeId()).thenReturn("mcp:step1");
+            when(node.usageKey()).thenReturn("tool:slack-post-message");
+
+            service.emitNodeStart(execution, node, triggerItem, 0, 0);
+
+            verify(nodeUsageRecorder).record("tool:slack-post-message");
+        }
+
+        @Test
+        @DisplayName("Starts the node normally when no usage ledger is wired in")
+        void shouldStartTheNodeWithoutAUsageRecorder() {
+            // Optional dependency: a counter must never be the reason a node cannot start.
+            when(execution.getRunId()).thenReturn("run-1");
+            when(node.getNodeId()).thenReturn("mcp:step1");
+
+            assertDoesNotThrow(() -> service.emitNodeStart(execution, node, triggerItem, 0, 0));
             verify(runningNodeTracker).markRunning("run-1", 0, "mcp:step1");
         }
 

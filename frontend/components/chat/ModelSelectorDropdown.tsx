@@ -27,12 +27,15 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { clampMenuLeft } from '@/lib/utils/menuPlacement';
 import { ChevronDown } from 'lucide-react';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
+import { track } from '@/lib/analytics/analytics';
 import { PROVIDER_ICON_MAP } from '@/lib/ai-providers/providerIcons';
 import { SelectedModel, modelMatches, selectedModelFromAIModel, AIModel } from '@/hooks/useModels';
 import { ModelOptionDisplay, ModelInfoPopover } from '@/components/ai/ModelInfo';
+import { useModelCostBasis } from '@/lib/hooks/useModelCostBasis';
 import { REASONING_EFFORT_LEVELS, supportsReasoningEffort } from '@/lib/ai-providers/reasoningEffort';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SELECT_EMPTY_VALUE_SENTINEL } from '@/components/ui/select';
 
@@ -47,7 +50,7 @@ export { PROVIDER_ICON_MAP };
  */
 type DropdownModel = AIModel & { iconSlug: string };
 
-const MENU_WIDTH = 320; // w-80
+const MENU_WIDTH = 320;
 
 type MenuPos =
   | { left: number; placement: 'above'; bottom: number; maxHeight: number }
@@ -101,6 +104,12 @@ export function ModelSelectorDropdown({
   reasoningEffortLabel?: string;
   effortAutoLabel?: string;
 }) {
+  // One answer for the whole menu, handed down to each presentational row: the
+  // multiplier and the cost profiles are about the install, not about any one
+  // model, so a query behind every option would re-observe the same cached
+  // answer once per catalogue entry.
+  const { basis: costBasis } = useModelCostBasis();
+
   // Per-instance positioning + outside-click ref (see the file header for why it
   // must NOT be shared across composer copies).
   const modelSelectorRef = useRef<HTMLDivElement>(null);
@@ -131,8 +140,10 @@ export function ModelSelectorDropdown({
       const spaceAbove = rect.top - MARGIN - GAP;
       const spaceBelow = window.innerHeight - rect.bottom - MARGIN - GAP;
       // Left-clamp: the trigger sits on the right of the composer, so anchoring
-      // the 320px menu at rect.left would overflow the right edge.
-      const left = Math.max(MARGIN, Math.min(rect.left, window.innerWidth - MENU_WIDTH - MARGIN));
+      // the 320px menu at rect.left would overflow the right edge. Shared with
+      // every other hand-positioned menu, which adds the case this hand-rolled
+      // clamp got wrong: a screen narrower than the menu itself.
+      const left = clampMenuLeft(rect.left, MENU_WIDTH, MARGIN);
       // Prefer opening downward when there is enough room below (the welcome view,
       // where the composer sits high on the page) or below is the roomier side;
       // fall back to above when the composer is docked at the bottom.
@@ -220,8 +231,10 @@ export function ModelSelectorDropdown({
         <div
           data-testid="model-selector-menu"
           data-model-selector-keep-open
-          className="fixed w-80 bg-theme-primary border border-theme rounded-xl shadow-lg z-[10000] p-2 flex flex-col"
+          className="fixed max-w-[calc(100vw-1rem)] bg-theme-primary border border-theme rounded-xl shadow-lg z-[10000] p-2 flex flex-col"
           style={{
+            // From MENU_WIDTH, the same number the clamp above measures with.
+            width: MENU_WIDTH,
             left: menuPos.left,
             maxHeight: menuPos.maxHeight,
             ...(menuPos.placement === 'above' ? { bottom: menuPos.bottom } : { top: menuPos.top }),
@@ -259,6 +272,11 @@ export function ModelSelectorDropdown({
                   onClick={() => {
                     setSelectedModel(selectedModelFromAIModel(model));
                     setShowModelSelector(false);
+                    track('chat_model_changed', {
+                      model_id: model.id,
+                      provider: model.provider,
+                      previous_model_id: selectedModel.id || null,
+                    });
                   }}
                   className={cn(
                     "group flex items-start gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-colors",
@@ -274,10 +292,15 @@ export function ModelSelectorDropdown({
                     className="w-[18px] h-[18px] flex-shrink-0 mt-0.5"
                   />
                   <div className="flex-1 min-w-0">
-                    <ModelOptionDisplay model={model} upgradeRequired={upgradeRequired} />
+                    <ModelOptionDisplay
+                      model={model}
+                      upgradeRequired={upgradeRequired}
+                      costBasis={costBasis}
+                      costProfile="agentConversation"
+                    />
                   </div>
                   <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <ModelInfoPopover model={model} />
+                    <ModelInfoPopover model={model} costBasis={costBasis} costProfile="agentConversation" />
                   </div>
                 </div>
               );

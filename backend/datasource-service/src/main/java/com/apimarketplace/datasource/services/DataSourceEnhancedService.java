@@ -46,6 +46,7 @@ public class DataSourceEnhancedService {
     private final VectorRepository vectorRepository;
     private final DataSourceService dataSourceService;
     private final DatasourceRowEventPublisher rowEventPublisher;
+    private final com.apimarketplace.datasource.crud.service.MediaCellHydrator mediaCellHydrator;
     private final VectorFeatureGate vectorFeatureGate;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
@@ -53,12 +54,14 @@ public class DataSourceEnhancedService {
                                      VectorRepository vectorRepository,
                                      DataSourceService dataSourceService,
                                      DatasourceRowEventPublisher rowEventPublisher,
+                                     com.apimarketplace.datasource.crud.service.MediaCellHydrator mediaCellHydrator,
                                      VectorFeatureGate vectorFeatureGate,
                                      org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.repositories = repositories;
         this.vectorRepository = vectorRepository;
         this.dataSourceService = dataSourceService;
         this.rowEventPublisher = rowEventPublisher;
+        this.mediaCellHydrator = mediaCellHydrator;
         this.vectorFeatureGate = vectorFeatureGate;
         this.eventPublisher = eventPublisher;
     }
@@ -347,7 +350,7 @@ public class DataSourceEnhancedService {
         if (rowEventPublisher != null && lastKnown != null) {
             try {
                 rowEventPublisher.publishDeleted(dataSourceId, itemId, effectiveTenantId,
-                        resolveOrgIdForEvent(dataSourceId), lastKnown);
+                        orgIdOf(dataSourceForEvent(dataSourceId)), lastKnown);
             } catch (Exception e) {
                 log.warn("Failed to publish row_deleted for datasource={} row={}: {}",
                         dataSourceId, itemId, e.getMessage());
@@ -579,16 +582,23 @@ public class DataSourceEnhancedService {
             throw new IllegalArgumentException("dataSourceId, tenantId, and columnName cannot be null or empty");
         }
 
-        // Type-level fail-fast: reserved names, valid type, edition gate (vector =
-        // self-hosted only), and display contract for select / multi_select / vector.
+        // The OWNER of the table decides whether it may carry a vector column, so resolve it
+        // before validating rather than after. Gating on the caller instead would refuse a FREE
+        // member adding a column to their PRO workspace's table, and would let a PRO member add
+        // one to a FREE workspace's table: a column that every subsequent write and search, all
+        // owner-gated, would then refuse.
+        String effectiveTenantId = resolveWritableTenantId(dataSourceId, tenantId, orgId, orgRole);
+
+        // Type-level fail-fast: reserved names, valid type, plan gate (vector = a paid capability
+        // on managed cloud), and display contract for select / multi_select / vector.
         // Same chokepoint as the agent tool path.
         String validationError = com.apimarketplace.datasource.tools.datasource.ToolParameterUtils
             .validateColumnDefinition(columnName, columnType, displayConfig,
-                vectorFeatureGate.isVectorAllowed());
+                vectorFeatureGate.isVectorAllowed(effectiveTenantId),
+                () -> vectorFeatureGate.deniedMessage(effectiveTenantId));
         if (validationError != null) {
             throw new IllegalArgumentException(validationError);
         }
-        String effectiveTenantId = resolveWritableTenantId(dataSourceId, tenantId, orgId, orgRole);
 
         // 🇫🇷 Verification de l'existence de la DataSource
         if (!repositories.dataSourceExists(dataSourceId, effectiveTenantId)) {
@@ -611,16 +621,9 @@ public class DataSourceEnhancedService {
         // HNSW index build for a new vector column - post-commit async event
         // (CREATE INDEX CONCURRENTLY self-deadlocks inside the open transaction).
         if (added && columnType != null && "vector".equalsIgnoreCase(columnType.trim())) {
-            Object dimRaw = displayConfig != null ? displayConfig.get("dimension") : null;
-            int dimension = dimRaw instanceof Number n ? n.intValue() : 0;
-            if (dimension <= 0 && dimRaw instanceof String s) {
-                try { dimension = Integer.parseInt(s.trim()); } catch (NumberFormatException ignored) { }
-            }
-            if (dimension > 0) {
-                String metric = displayConfig.get("metric") instanceof String m ? m : "cosine";
-                eventPublisher.publishEvent(new com.apimarketplace.datasource.events.VectorColumnCreatedEvent(
-                    dataSourceId, dimension, metric));
-            }
+            com.apimarketplace.datasource.events.VectorColumnCreatedEvent
+                    .forColumn(dataSourceId, displayConfig)
+                    .ifPresent(eventPublisher::publishEvent);
         }
         return added;
     }
@@ -700,34 +703,58 @@ public class DataSourceEnhancedService {
         return flat;
     }
 
+    /**
+     * The same row, with its media cells inflated - the shape a workflow gets when it READS the
+     * table. Rows leaving this service as trigger events must match, or the shape of
+     * {@code trigger:<label>.output.row.<media column>} would depend on WHICH route wrote the row
+     * (this service for a grid edit, the CRUD service for an agent or workflow write) rather than
+     * on the column's declared type.
+     */
+    private Map<String, Object> flattenItemRowForEvent(DataSourceModels.DataSource dataSource,
+                                                       DataSourceItemRow row) {
+        return mediaCellHydrator.hydrateRow(flattenItemRow(row),
+                dataSource != null ? dataSource.mappingSpec() : null);
+    }
+
+    private static String orgIdOf(DataSourceModels.DataSource dataSource) {
+        return dataSource != null ? dataSource.organizationId() : null;
+    }
+
     private Map<String, Object> findFlattenedById(Long dataSourceId, String tenantId, Long itemId) {
         List<DataSourceItemRow> rows = repositories.findByIds(dataSourceId, tenantId, List.of(itemId));
         if (rows == null || rows.isEmpty()) return null;
-        return flattenItemRow(rows.get(0));
+        return flattenItemRowForEvent(dataSourceForEvent(dataSourceId), rows.get(0));
     }
 
     private Map<Long, Map<String, Object>> snapshotFlattenedByIds(Long dataSourceId, String tenantId, List<Long> ids) {
         if (ids == null || ids.isEmpty()) return Map.of();
         Map<Long, Map<String, Object>> out = new LinkedHashMap<>();
+        // Resolved once for the batch: these rows all belong to the same table.
+        DataSourceModels.DataSource dataSource = dataSourceForEvent(dataSourceId);
         for (DataSourceItemRow row : repositories.findByIds(dataSourceId, tenantId, ids)) {
-            out.put(row.id(), flattenItemRow(row));
+            out.put(row.id(), flattenItemRowForEvent(dataSource, row));
         }
         return out;
     }
 
     /**
-     * Resolves the datasource's workspace org once for an event emission. The
-     * downstream listener carries this through the @Async / AFTER_COMMIT
-     * boundary so {@code DatasourceTriggerDispatchService} can refuse
-     * cross-workspace fan-out. Adds one extra cheap getDataSource lookup per
-     * write - acceptable since events are async and fire-and-forget.
+     * The datasource behind an event emission, resolved ONCE for both things the emission needs:
+     * its workspace org (the downstream listener carries it through the @Async / AFTER_COMMIT
+     * boundary so {@code DatasourceTriggerDispatchService} can refuse cross-workspace fan-out) and
+     * its column spec (so media cells go out in the shape a workflow reading the same row sees).
+     * One cheap getDataSource per write - resolving them separately cost two.
      */
-    private String resolveOrgIdForEvent(Long dataSourceId) {
+    private DataSourceModels.DataSource dataSourceForEvent(Long dataSourceId) {
         try {
-            return dataSourceService.getDataSource(dataSourceId)
-                    .map(DataSourceModels.DataSource::organizationId)
-                    .orElse(null);
+            return dataSourceService.getDataSource(dataSourceId).orElse(null);
         } catch (Exception e) {
+            // Logged, not swallowed in silence: without it the event still goes out, but its media
+            // cells stay in the stored text form - the one shape a workflow reading the same row
+            // will NOT see - and the workspace scope is unset. A run of these lines explains an
+            // otherwise baffling "sometimes it is a string" report.
+            log.warn("Could not read datasource={} while emitting a row event - its media cells "
+                    + "keep their stored text form and the workspace scope is unset: {}",
+                    dataSourceId, e.getMessage());
             return null;
         }
     }
@@ -735,8 +762,9 @@ public class DataSourceEnhancedService {
     private void publishCreatedEvent(Long dataSourceId, String tenantId, DataSourceItemRow created) {
         if (rowEventPublisher == null || created == null) return;
         try {
+            DataSourceModels.DataSource dataSource = dataSourceForEvent(dataSourceId);
             rowEventPublisher.publishCreated(dataSourceId, created.id(), tenantId,
-                    resolveOrgIdForEvent(dataSourceId), flattenItemRow(created));
+                    orgIdOf(dataSource), flattenItemRowForEvent(dataSource, created));
         } catch (Exception e) {
             log.warn("Failed to publish row_created for datasource={} row={}: {}",
                     dataSourceId, created.id(), e.getMessage());
@@ -747,9 +775,9 @@ public class DataSourceEnhancedService {
                                      DataSourceItemRow updated, Map<String, Object> before) {
         if (rowEventPublisher == null || updated == null) return;
         try {
+            DataSourceModels.DataSource dataSource = dataSourceForEvent(dataSourceId);
             rowEventPublisher.publishUpdated(dataSourceId, updated.id(), tenantId,
-                    resolveOrgIdForEvent(dataSourceId),
-                    flattenItemRow(updated), before);
+                    orgIdOf(dataSource), flattenItemRowForEvent(dataSource, updated), before);
         } catch (Exception e) {
             log.warn("Failed to publish row_updated for datasource={} row={}: {}",
                     dataSourceId, updated.id(), e.getMessage());
@@ -761,7 +789,7 @@ public class DataSourceEnhancedService {
                                    Map<Long, Map<String, Object>> beforeSnapshots) {
         if (rowEventPublisher == null) return;
         // Resolve org once for the whole bulk batch to avoid one lookup per row.
-        String orgId = resolveOrgIdForEvent(dataSourceId);
+        String orgId = orgIdOf(dataSourceForEvent(dataSourceId));
         BulkOperationType op = request.op();
         if (op == BulkOperationType.DELETE) {
             for (Long id : request.ids()) {

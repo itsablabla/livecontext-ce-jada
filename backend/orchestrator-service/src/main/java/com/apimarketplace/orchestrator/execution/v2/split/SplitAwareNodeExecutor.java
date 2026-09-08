@@ -2661,7 +2661,8 @@ public class SplitAwareNodeExecutor {
             logger.warn("[SplitAware] No parent split context found for nested split: nodeId={}", nodeId);
             // Fallback: execute as a normal split
             return splitNodeExecutor.execute(
-                runId, nodeId, node.getListExpression(), node.getSplitMaxItems(), workflowItemIndex, context);
+                runId, nodeId, node.getListExpression(), node.getSplitMaxItems(),
+                node.getSplitStrategy(), workflowItemIndex, context);
         }
 
         SplitContext parentContext = parentContextOpt.get();
@@ -2713,7 +2714,7 @@ public class SplitAwareNodeExecutor {
                         // This creates a context with a unique scoped key (e.g., core:inner_loop:0/s0)
                         NodeExecutionResult splitResult = splitNodeExecutor.execute(
                             runId, nodeId, node.getListExpression(), node.getSplitMaxItems(),
-                            workflowItemIndex, itemContext);
+                            node.getSplitStrategy(), workflowItemIndex, itemContext);
 
                         if (splitResult.isSuccess()) {
                             // Traverse successors with the enriched context
@@ -2825,7 +2826,7 @@ public class SplitAwareNodeExecutor {
             // This creates a scoped context, but we'll replace it with a flat one.
             NodeExecutionResult splitResult = splitNodeExecutor.execute(
                 runId, nodeId, node.getListExpression(), node.getSplitMaxItems(),
-                workflowItemIndex, itemContext);
+                node.getSplitStrategy(), workflowItemIndex, itemContext);
 
             if (splitResult.isFailure()) {
                 logger.error("[SplitAware] Nested split expression failed for parent item {}: nodeId={}", i, nodeId);

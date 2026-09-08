@@ -60,12 +60,15 @@ interface CanvasRunTriggerButtonProps {
  * every other trigger fires immediately through the step-by-step context - the
  * single run-mode execution path.
  */
+/** Widest the menu can get; the clamp and the class below read the same number. */
+const TRIGGER_MENU_WIDTH = 320;
+
 export function CanvasRunTriggerButton({ nodes }: CanvasRunTriggerButtonProps) {
   const t = useTranslations('workflowBuilder.canvas');
   const ctx = useStepByStep();
   const { workflowId, runId, setViewingEpoch } = useWorkflowMode();
   // Anchored ABOVE the button: the toolbar sits at the bottom of the canvas.
-  const { open, isVisible, toggle, close, triggerRef, menuRef, menuStyle } = usePortalMenu('above');
+  const { open, isVisible, toggle, close, triggerRef, menuRef, menuStyle } = usePortalMenu('above', TRIGGER_MENU_WIDTH);
 
   const triggers = React.useMemo<TriggerEntry[]>(() => {
     if (!ctx) return [];
@@ -138,7 +141,7 @@ export function CanvasRunTriggerButton({ nodes }: CanvasRunTriggerButtonProps) {
         <div
           ref={menuRef}
           role="menu"
-          className="fixed z-[9999] min-w-[220px] max-w-[320px] bg-theme-primary rounded-2xl p-2 border border-gray-300/70 dark:border-gray-600/70 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-150"
+          className="fixed z-[9999] min-w-[220px] max-w-[min(320px,calc(100vw-1rem))] bg-theme-primary rounded-2xl p-2 border border-gray-300/70 dark:border-gray-600/70 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-150"
           style={menuStyle}
           onMouseDown={(e) => e.stopPropagation()}
         >

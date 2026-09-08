@@ -19,9 +19,16 @@ FROM mcr.microsoft.com/playwright:v1.60.0-jammy
 # /internal/render/video webm->mp4 transcode (Playwright records webm only). Build runs as
 # root; the runtime user is set by the k8s securityContext, so this stays least-privilege at
 # run time.
+#
+# fonts-dejavu-core is REQUIRED, not cosmetic: it provides "DejaVu Sans", the default family
+# the media `subtitles` operation burns captions in. libass never errors on a missing family,
+# it silently substitutes one, so dropping this package would ship videos captioned in the
+# wrong face with every request still answering 200. The operation cross-checks the family
+# with fc-match at run time and refuses the render rather than substituting, which turns a
+# missing package into a loud failure instead of a silent one.
 USER root
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji ffmpeg \
+    && apt-get install -y --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji fonts-dejavu-core ffmpeg \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 

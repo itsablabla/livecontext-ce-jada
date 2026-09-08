@@ -57,7 +57,7 @@ export function WorkflowTriggerParametersForm({
   }, [data, workflowTriggerData, isRunMode, onUpdate]);
 
   const [isInfoOpen, setIsInfoOpen] = React.useState(false);
-  const { buttonRef: infoButtonRef, popoverPosition } = usePopoverPosition(isInfoOpen, 280);
+  const { buttonRef: infoButtonRef, popoverStyle } = usePopoverPosition(isInfoOpen, 288);
 
   return (
     <div className="space-y-4 pt-2">
@@ -82,8 +82,8 @@ export function WorkflowTriggerParametersForm({
                 onClick={() => setIsInfoOpen(false)}
               />
               <div
-                className="fixed z-[9999] w-72 p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-lg"
-                style={{ top: popoverPosition.top, left: popoverPosition.left }}
+                className="fixed z-[9999] p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-lg"
+                style={popoverStyle}
               >
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <span className="font-medium text-sm text-slate-700 dark:text-slate-200">

@@ -671,14 +671,14 @@ class ToolParameterUtilsTest {
                 Map.of("name", "title", "type", "text"),
                 Map.of("name", "score", "type", "number")
             );
-            assertThat(ToolParameterUtils.validateColumnDefinitions(cols, true)).isNull();
+            assertThat(ToolParameterUtils.validateColumnDefinitions(cols, true, null)).isNull();
         }
 
         @Test
         @DisplayName("Rejects a reserved name")
         void rejectsReserved() {
             List<Map<String, Object>> cols = List.of(Map.of("name", "id", "type", "text"));
-            String err = ToolParameterUtils.validateColumnDefinitions(cols, true);
+            String err = ToolParameterUtils.validateColumnDefinitions(cols, true, null);
             assertThat(err).isNotNull().contains("reserved");
         }
 
@@ -686,7 +686,7 @@ class ToolParameterUtilsTest {
         @DisplayName("Rejects an unknown type")
         void rejectsUnknownType() {
             List<Map<String, Object>> cols = List.of(Map.of("name", "x", "type", "nope"));
-            String err = ToolParameterUtils.validateColumnDefinitions(cols, true);
+            String err = ToolParameterUtils.validateColumnDefinitions(cols, true, null);
             assertThat(err).isNotNull().contains("Invalid column type");
         }
 
@@ -697,7 +697,7 @@ class ToolParameterUtilsTest {
                 Map.of("name", "Foo", "type", "text"),
                 Map.of("name", "FOO", "type", "number")
             );
-            String err = ToolParameterUtils.validateColumnDefinitions(cols, true);
+            String err = ToolParameterUtils.validateColumnDefinitions(cols, true, null);
             assertThat(err).isNotNull().contains("Duplicate");
         }
 
@@ -705,7 +705,7 @@ class ToolParameterUtilsTest {
         @DisplayName("Sanitizes data. prefix before reserved-name check")
         void sanitizesBeforeReservedCheck() {
             List<Map<String, Object>> cols = List.of(Map.of("name", "data.id", "type", "text"));
-            String err = ToolParameterUtils.validateColumnDefinitions(cols, true);
+            String err = ToolParameterUtils.validateColumnDefinitions(cols, true, null);
             assertThat(err).isNotNull().contains("reserved");
         }
 
@@ -715,7 +715,7 @@ class ToolParameterUtilsTest {
             List<Map<String, Object>> cols = new ArrayList<>();
             cols.add(Map.of("name", "ok", "type", "text"));
             cols.add(null);
-            assertThat(ToolParameterUtils.validateColumnDefinitions(cols, true)).isNull();
+            assertThat(ToolParameterUtils.validateColumnDefinitions(cols, true, null)).isNull();
         }
     }
 
@@ -838,7 +838,7 @@ class ToolParameterUtilsTest {
         @DisplayName("select without display rejected with actionable error")
         void selectWithoutDisplayRejected() {
             List<Map<String, Object>> cols = List.of(Map.of("name", "threat_level", "type", "select"));
-            String err = ToolParameterUtils.validateColumnDefinitions(cols, true);
+            String err = ToolParameterUtils.validateColumnDefinitions(cols, true, null);
             assertThat(err)
                 .isNotNull()
                 .contains("threat_level")
@@ -854,7 +854,7 @@ class ToolParameterUtilsTest {
             col.put("name", "status");
             col.put("type", "select");
             col.put("display", Map.of("options", List.of()));
-            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true);
+            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true, null);
             assertThat(err).isNotNull().contains("display.options");
         }
 
@@ -865,7 +865,7 @@ class ToolParameterUtilsTest {
             col.put("name", "status");
             col.put("type", "select");
             col.put("display", Map.of("color", "#22c55e")); // wrong shape
-            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true);
+            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true, null);
             assertThat(err).isNotNull().contains("display.options");
         }
 
@@ -873,7 +873,7 @@ class ToolParameterUtilsTest {
         @DisplayName("multi_select without options also rejected")
         void multiSelectWithoutOptionsRejected() {
             List<Map<String, Object>> cols = List.of(Map.of("name", "tags", "type", "multi_select"));
-            String err = ToolParameterUtils.validateColumnDefinitions(cols, true);
+            String err = ToolParameterUtils.validateColumnDefinitions(cols, true, null);
             assertThat(err).isNotNull().contains("type=multi_select").contains("display.options");
         }
 
@@ -887,7 +887,7 @@ class ToolParameterUtilsTest {
                 Map.of("label", "Low", "value", "Low", "color", "#22c55e"),
                 Map.of("label", "High", "value", "High", "color", "#ef4444")
             )));
-            assertThat(ToolParameterUtils.validateColumnDefinitions(List.of(col), true)).isNull();
+            assertThat(ToolParameterUtils.validateColumnDefinitions(List.of(col), true, null)).isNull();
         }
 
         @Test
@@ -898,14 +898,14 @@ class ToolParameterUtilsTest {
                 Map.of("name", "count", "type", "number"),
                 Map.of("name", "due", "type", "date")
             );
-            assertThat(ToolParameterUtils.validateColumnDefinitions(cols, true)).isNull();
+            assertThat(ToolParameterUtils.validateColumnDefinitions(cols, true, null)).isNull();
         }
 
         @Test
         @DisplayName("case-insensitive type matching: 'SELECT' still requires options")
         void uppercaseSelectRequiresOptions() {
             List<Map<String, Object>> cols = List.of(Map.of("name", "x", "type", "SELECT"));
-            String err = ToolParameterUtils.validateColumnDefinitions(cols, true);
+            String err = ToolParameterUtils.validateColumnDefinitions(cols, true, null);
             assertThat(err).isNotNull().contains("display.options");
         }
 
@@ -931,7 +931,7 @@ class ToolParameterUtilsTest {
             col.put("name", "level");
             col.put("type", "select");
             col.put("display", "should-be-an-object");
-            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true);
+            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true, null);
             assertThat(err).isNotNull().contains("display.options");
         }
 
@@ -944,7 +944,7 @@ class ToolParameterUtilsTest {
             col.put("name", "level");
             col.put("type", "select");
             col.put("display", Map.of("options", Map.of("Low", "Low", "High", "High")));
-            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true);
+            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true, null);
             assertThat(err).isNotNull().contains("display.options");
         }
     }
@@ -963,7 +963,7 @@ class ToolParameterUtilsTest {
         @DisplayName("vector without display rejected")
         void vectorWithoutDisplayRejected() {
             List<Map<String, Object>> cols = List.of(Map.of("name", "embedding", "type", "vector"));
-            String err = ToolParameterUtils.validateColumnDefinitions(cols, true);
+            String err = ToolParameterUtils.validateColumnDefinitions(cols, true, null);
             assertThat(err)
                 .isNotNull()
                 .contains("embedding")
@@ -979,7 +979,7 @@ class ToolParameterUtilsTest {
             col.put("name", "embedding");
             col.put("type", "vector");
             col.put("display", Map.of("dimension", 1536, "metric", "cosine"));
-            assertThat(ToolParameterUtils.validateColumnDefinitions(List.of(col), true)).isNull();
+            assertThat(ToolParameterUtils.validateColumnDefinitions(List.of(col), true, null)).isNull();
         }
 
         @Test
@@ -990,7 +990,7 @@ class ToolParameterUtilsTest {
             col.put("name", "embedding");
             col.put("type", "vector");
             col.put("display", Map.of("dimension", "768"));
-            assertThat(ToolParameterUtils.validateColumnDefinitions(List.of(col), true)).isNull();
+            assertThat(ToolParameterUtils.validateColumnDefinitions(List.of(col), true, null)).isNull();
         }
 
         @Test
@@ -1000,7 +1000,7 @@ class ToolParameterUtilsTest {
             col.put("name", "embedding");
             col.put("type", "vector");
             col.put("display", Map.of("dimension", 0));
-            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true);
+            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true, null);
             assertThat(err).isNotNull().contains("display.dimension");
         }
 
@@ -1011,7 +1011,7 @@ class ToolParameterUtilsTest {
             col.put("name", "embedding");
             col.put("type", "vector");
             col.put("display", Map.of("dimension", -5));
-            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true);
+            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true, null);
             assertThat(err).isNotNull().contains("display.dimension");
         }
 
@@ -1022,7 +1022,7 @@ class ToolParameterUtilsTest {
             col.put("name", "embedding");
             col.put("type", "vector");
             col.put("display", Map.of("dimension", ToolParameterUtils.MAX_VECTOR_DIMENSION + 1));
-            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true);
+            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true, null);
             assertThat(err).isNotNull().contains("display.dimension");
         }
 
@@ -1033,7 +1033,7 @@ class ToolParameterUtilsTest {
             col.put("name", "embedding");
             col.put("type", "vector");
             col.put("display", Map.of("dimension", "not-a-number"));
-            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true);
+            String err = ToolParameterUtils.validateColumnDefinitions(List.of(col), true, null);
             assertThat(err).isNotNull().contains("display.dimension");
         }
 
@@ -1062,35 +1062,35 @@ class ToolParameterUtilsTest {
         @Test
         @DisplayName("reserved name rejected even when type+display valid")
         void reservedNameRejected() {
-            String err = ToolParameterUtils.validateColumnDefinition("id", "text", null, true);
+            String err = ToolParameterUtils.validateColumnDefinition("id", "text", null, true, null);
             assertThat(err).isNotNull().contains("reserved");
         }
 
         @Test
         @DisplayName("invalid type rejected")
         void invalidTypeRejected() {
-            String err = ToolParameterUtils.validateColumnDefinition("foo", "not_a_type", null, true);
+            String err = ToolParameterUtils.validateColumnDefinition("foo", "not_a_type", null, true, null);
             assertThat(err).isNotNull().contains("Invalid column type");
         }
 
         @Test
         @DisplayName("select without options rejected")
         void selectWithoutOptionsRejected() {
-            String err = ToolParameterUtils.validateColumnDefinition("status", "select", null, true);
+            String err = ToolParameterUtils.validateColumnDefinition("status", "select", null, true, null);
             assertThat(err).isNotNull().contains("display.options");
         }
 
         @Test
         @DisplayName("vector without dimension rejected")
         void vectorWithoutDimensionRejected() {
-            String err = ToolParameterUtils.validateColumnDefinition("emb", "vector", null, true);
+            String err = ToolParameterUtils.validateColumnDefinition("emb", "vector", null, true, null);
             assertThat(err).isNotNull().contains("display.dimension");
         }
 
         @Test
         @DisplayName("text column with no display accepted")
         void textNoDisplayAccepted() {
-            assertThat(ToolParameterUtils.validateColumnDefinition("title", "text", null, true)).isNull();
+            assertThat(ToolParameterUtils.validateColumnDefinition("title", "text", null, true, null)).isNull();
         }
 
         @Test
@@ -1098,7 +1098,7 @@ class ToolParameterUtilsTest {
         void prefixStrippedBeforeReservedCheck() {
             // sanitizeColumnName drops "data." prefix; reserved-name lookup runs on the
             // sanitized form. This pins that behaviour.
-            String err = ToolParameterUtils.validateColumnDefinition("data.id", "text", null, true);
+            String err = ToolParameterUtils.validateColumnDefinition("data.id", "text", null, true, null);
             assertThat(err).isNotNull().contains("reserved");
         }
     }

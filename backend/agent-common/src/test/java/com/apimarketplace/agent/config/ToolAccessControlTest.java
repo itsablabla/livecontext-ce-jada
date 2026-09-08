@@ -301,4 +301,51 @@ class ToolAccessControlTest {
         assertThat(ToolAccessControl.checkWriteAccess(
                 new HashMap<>(), "workflow", "finish")).isEmpty();
     }
+    // ==================== memory read/write actions (memoryAccessMode) ====================
+    //
+    // Memory is the one family where a write reaches every OTHER agent: what one agent
+    // saves is injected into every agent's context in the workspace. A read-only agent
+    // must therefore keep get/list/search/help and lose save/delete.
+
+    @Test
+    @DisplayName("memory read-mode allows recall, including search, which is what the injected index is for")
+    void memoryReadModeAllowsEveryRead() {
+        for (String readAction : List.of("get", "list", "search", "help")) {
+            assertThat(ToolAccessControl.checkWriteAccess(
+                    Map.of("__memoryAccessMode__", "read"), "memory", readAction))
+                .as("memory read action '%s' must pass in read-mode", readAction)
+                .isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("memory read-mode denies save and delete, the only two actions that change what other agents see")
+    void memoryReadModeDeniesTheWrites() {
+        for (String writeAction : List.of("save", "delete")) {
+            var denied = ToolAccessControl.checkWriteAccess(
+                    Map.of("__memoryAccessMode__", "read"), "memory", writeAction);
+            assertThat(denied)
+                .as("memory write action '%s' must be denied in read-mode", writeAction)
+                .isPresent();
+            assertThat(denied.orElseThrow()).contains("read-only").contains(writeAction);
+        }
+    }
+
+    @Test
+    @DisplayName("search is registered as a READ, not merely allowed by accident")
+    void searchIsARead() {
+        // If search were classed as a write, a recall-only agent would carry a memory
+        // index in its context with no way to open anything in it, which is worse than
+        // giving it no memory at all.
+        assertThat(ToolAccessControl.isReadAction("memory", "search")).isTrue();
+        assertThat(ToolAccessControl.isReadAction("memory", "save")).isFalse();
+        assertThat(ToolAccessControl.isReadAction("memory", "delete")).isFalse();
+    }
+
+    @Test
+    @DisplayName("an agent with no memory mode set keeps full access, the default every family has")
+    void memoryDefaultsToWrite() {
+        assertThat(ToolAccessControl.checkWriteAccess(Map.of(), "memory", "save")).isEmpty();
+        assertThat(ToolAccessControl.checkWriteAccess(null, "memory", "save")).isEmpty();
+    }
 }

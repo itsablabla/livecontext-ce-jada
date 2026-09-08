@@ -900,7 +900,7 @@ public class MonolithSecurityFilter implements Filter {
                             + "publications/(?:acquired|[0-9a-fA-F\\-]{36}(?:/application-workflow|/reviews(?:/comments-count|/mine|/[0-9a-fA-F\\-]{36}/replies)?)?)"
                             + "|workflows/[0-9a-fA-F\\-]{36}(?:/runs/(?:application|pinned))?"
                             + "|v2/workflows/dag/(?:[0-9a-fA-F\\-]{36}/versions|runs/[^/]+/(?:state|signals))"
-                            + "|interfaces/[^/]+(?:/render)?"
+                            + "|interfaces/[0-9a-fA-F\\-]{36}(?:/render)?"
                             + "|files/by-id/[^/]+/raw"
                             + "|users/[^/]+/avatar"
                             + ")$");

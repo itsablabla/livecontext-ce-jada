@@ -35,6 +35,15 @@ public class ScheduledExecutionDto {
     private String description;
     private boolean isActive = true;
     private String sourceNodeId;
+    /**
+     * Why the row was last disabled ({@code USER_DISABLED}, {@code PLAN_TRIGGER_REMOVED},
+     * {@code MAX_EXEC_REACHED}, ...), or null if it never was.
+     *
+     * <p>Carried across the wire because "paused" alone is not enough to decide whether
+     * offering a Resume button is honest: a user pause is resumable, a platform suspension
+     * is a symptom whose cause resuming does not touch. Additive and read-only.
+     */
+    private String lastDisabledReason;
 
     public ScheduledExecutionDto() {}
 
@@ -105,6 +114,10 @@ public class ScheduledExecutionDto {
 
     public boolean getIsActive() { return isActive; }
     public void setIsActive(boolean isActive) { this.isActive = isActive; }
+
+    public String getLastDisabledReason() { return lastDisabledReason; }
+
+    public void setLastDisabledReason(String lastDisabledReason) { this.lastDisabledReason = lastDisabledReason; }
 
     public String getSourceNodeId() { return sourceNodeId; }
     public void setSourceNodeId(String sourceNodeId) { this.sourceNodeId = sourceNodeId; }

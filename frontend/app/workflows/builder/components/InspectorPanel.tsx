@@ -37,7 +37,12 @@ import { useInspectorToolDetails } from './inspector/useInspectorToolDetails';
 import { AI_TYPES, CORE_LOGIC_TYPES, CORE_DIRECT_TYPES, TRIGGER_TYPES } from './inspector/nodeTypes';
 import { InspectorMultiSelection } from './inspector/InspectorMultiSelection';
 import { useInspectorViewMode } from './inspector/useInspectorViewMode';
-import { useInspectorLayout } from './inspector/useInspectorLayout';
+import {
+  useInspectorLayout,
+  shouldUseTabbedLayout,
+  shouldRenderMinimizedPill,
+  shouldConstrainPanelToContainer,
+} from './inspector/useInspectorLayout';
 import { useInspectorValidation } from './inspector/useInspectorValidation';
 import { useDataSourceColumnsInit } from './inspector/useDataSourceColumnsInit';
 import type { ConnectionPropsBundle } from './inspector/types/connectionProps';
@@ -47,6 +52,7 @@ import { nodeRegistry } from '../registry/nodeRegistry';
 import { useApprovalReviewLayout } from './inspector/useApprovalReviewLayout';
 import { InspectorMobileContent } from './inspector/InspectorMobileContent';
 import { InspectorDesktopContent } from './inspector/InspectorDesktopContent';
+import { inspectorGeometryClass } from './inspector/inspectorGeometry';
 import { extractAliasFromNodeId, extractStepAliasFromNode } from '../services/idMatcherUtils';
 import { isReviewTargetForNode, useApprovalReviewTarget } from '../services/approvalReviewStore';
 import { normalizeLabel } from '../utils/labelNormalizer';
@@ -95,16 +101,28 @@ interface InspectorPanelProps {
   isMinimized?: boolean; // Controlled minimized state (lifted to parent to survive unmount)
   onMinimizedChange?: (minimized: boolean) => void;
   containerSize?: { width: number; height: number }; // Canvas container size for adaptive sizing
+  /**
+   * Where the panel is being rendered.
+   *
+   * `floating` (default) is the historical draggable window over the canvas.
+   * `panel` means it was portalled into the side panel's Inspector sub-tab: the
+   * host owns the geometry, so the panel fills it and drops the affordances that
+   * only make sense while floating (drag, minimize-to-pill).
+   */
+  dockMode?: 'floating' | 'panel';
 }
 
 // Connection and HandlePosition types moved to useInspectorConnections
 
 
-export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, isAdvanced = false, onAdvancedChange, isFullscreen = false, onFullscreenChange, onDeleteNode, onDuplicateNode, onUndo, canUndo = false, connectionType = 'bezier', allNodes = [], edges = [], onSelectNode, runId: propRunId, workflowId, onDragHandleMouseDown, webhookTokens, isMinimized = false, onMinimizedChange, containerSize }: InspectorPanelProps) {
+export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, isAdvanced: isAdvancedRequested = false, onAdvancedChange, isFullscreen = false, onFullscreenChange, onDeleteNode, onDuplicateNode, onUndo, canUndo = false, connectionType = 'bezier', allNodes = [], edges = [], onSelectNode, runId: propRunId, workflowId, onDragHandleMouseDown, webhookTokens, isMinimized = false, onMinimizedChange, containerSize, dockMode = 'floating' }: InspectorPanelProps) {
   const { isRunMode, isPreviewOnly, runId: contextRunId, pinnedVersion } = useWorkflowMode();
   // Use context runId if available (set after workflow execution), fallback to prop
   const runId = contextRunId || propRunId;
   const isMultiSelection = selectedNodeIds.length > 1;
+  // Docked into the side panel: the host sizes us, and drag / minimize-to-pill
+  // are meaningless there (the panel has its own resize handle and close button).
+  const isDocked = dockMode === 'panel';
 
   // Step-by-step context for runtime parameter editing
   const stepByStepContext = useStepByStep();
@@ -137,11 +155,19 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
   // Step-by-step execution status for the current node
   const stepByStepStatus = useNodeExecutionStatus(node?.id || '', {
     label: node?.data?.label,
-    kind: node?.data?.kind
+    kind: node?.data?.kind,
+    // While one epoch is focused this is THAT epoch's outcome - what the run controls
+    // must speak about there (the context's own sets accumulate across every epoch).
+    status: node?.data?.status,
   });
 
   // Layout management (columns, resize, mobile detection)
-  const { columns, resize, isMobile, activeTab, setActiveTab } = useInspectorLayout({ isAdvanced, isFullscreen });
+  // The REQUESTED value, because `shouldForceSmallMode` needs node-kind predicates that are
+  // not computed until further down. The column widths this hook manages are only read by
+  // the advanced layout, which a forced-small node does not render, so that half is a
+  // no-op - but the hook ALSO owns `activeTab`, and its only reset to 'parameter' hangs off
+  // this same flag. See `activeTabForNode` below, which is what now covers that.
+  const { columns, resize, isMobile: isWindowMobile, isNarrowPanel, measurePanel, activeTab, setActiveTab } = useInspectorLayout({ isAdvanced: isAdvancedRequested, isFullscreen });
   const { inputCollapsed, setInputCollapsed, outputCollapsed, setOutputCollapsed, inputWidth, outputWidth } = columns;
   const { handleInputResizeStart, handleOutputResizeStart, isResizingInput, isResizingOutput } = resize;
 
@@ -176,9 +202,15 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
   // variable picker instead of the item's data.
   const inspectorReviewTarget = useApprovalReviewTarget();
   const isNodeUnderApprovalReview = isReviewTargetForNode(inspectorReviewTarget, node?.id);
+  // A node EXECUTING right now, or parked on a signal, also opens on the run
+  // view: it has no rows yet, but that view is the one that says so (and shows
+  // the parameters it was launched with). Opening it on the configuration form
+  // instead reported nothing at all about the live state.
   const nodeHasRunData =
     (!!node?.data?.statusCounts && Object.keys(node.data.statusCounts).length > 0)
-    || isNodeUnderApprovalReview;
+    || isNodeUnderApprovalReview
+    || stepByStepStatus.isRunning
+    || stepByStepStatus.isAwaitingSignal;
   const { viewMode, handleViewModeChange, showExecutionData, handleShowExecutionDataChange } = useInspectorViewMode({
     isRunMode,
     runId,
@@ -189,6 +221,17 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
 
   // Panel ref for connections hook
   const panelRef = React.useRef<HTMLDivElement>(null);
+
+  // One ref for two consumers: the connections hook reads the element through
+  // panelRef, the layout hook measures it. Stable so React does not detach and
+  // re-attach (and so re-create the ResizeObserver) on every render.
+  const setPanelRef = React.useCallback(
+    (element: HTMLDivElement | null) => {
+      panelRef.current = element;
+      measurePanel(element);
+    },
+    [measurePanel],
+  );
 
   // Use connections hook to manage all connection logic
   const {
@@ -478,13 +521,42 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
   const hasNavigation = !isToolNode && (hasTriggerNavigation || isAiGenericNode || isCoreNode || isMcpNode);
   const shouldForceSmallMode = (isApiNode || isMcpGenericNode || hasNavigation) && !isToolNode;
 
-  // Force small mode for API, generic MCP nodes, and nodes with navigation - they should always display in compact mode
-  // Tool nodes can use advanced mode
-  React.useEffect(() => {
-    if (shouldForceSmallMode && isAdvanced && onAdvancedChange) {
-      onAdvancedChange(false);
-    }
-  }, [shouldForceSmallMode, isAdvanced, onAdvancedChange]);
+  // What this inspector actually renders. API nodes, generic MCP nodes and anything with a
+  // navigation step have no three-column view to show, so they are always compact.
+  //
+  // Resolved HERE rather than by calling `onAdvancedChange(false)`, which is what it used
+  // to do, and that was a per-NODE constraint writing a per-SESSION value: the flag it
+  // reset is the builder's, shared by every node. Opening one unconfigured node therefore
+  // turned advanced mode off for the whole session, and since nothing restores it until
+  // the selection empties, every node clicked after it opened compact too. Invisible while
+  // the session default was a hardcoded `false`; with a user preference behind that
+  // default it is the preference quietly ceasing to apply, which is the shape of bug that
+  // gets reported as "it works sometimes".
+  const isAdvanced = isAdvancedRequested && !shouldForceSmallMode;
+
+  // The tabbed layout is used when the WINDOW is narrow (as before) and also
+  // when the PANEL is: docked into a side panel the user dragged in, the
+  // three-column layout no longer fits and used to scroll sideways, hiding the
+  // Output column off-screen.
+  //
+  // CONTENT ONLY. The panel-derived half of this flag must never reach the
+  // panel's own geometry: `maxWidth` and the minimized pill stay gated on
+  // `isWindowMobile`, because a style that constrains the panel cannot also be
+  // switched off by "the panel is constrained" without oscillating.
+  const isMobile = shouldUseTabbedLayout({ isWindowMobile, isNarrowPanel, isAdvanced, isFullscreen });
+
+  // A forced-small node offers ONE tab, so the active one has to be it.
+  //
+  // DERIVED, not synced, for the same reason `isAdvanced` above is: an effect would leave
+  // the first render of the forced-small node pointing at a tab that is not mounted, which
+  // is one frame of a blank inspector - and this is exactly the frame the whole problem is
+  // made of. It used to be handled by accident: forcing the requested flag to false fired
+  // useInspectorLayout's `else` branch, whose single job is that reset. Leaving the flag
+  // alone removed the accident, so the rule is stated here instead.
+  //
+  // The stored `activeTab` is deliberately NOT overwritten: a user who was reading Output
+  // on a normal node, glances at a forced-small one and comes back, finds Output again.
+  const activeTabForNode = shouldForceSmallMode ? 'parameter' : activeTab;
 
   // Prevent fullscreen mode for nodes with navigation (like API and MCP)
   React.useEffect(() => {
@@ -644,8 +716,9 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
 
   // Connection rendering and path creation moved to InspectorConnections component
 
-  // Minimized mode: compact pill with icon + label (desktop only)
-  if (isMinimized && !isMobile) {
+  // Minimized mode: compact pill with icon + label (desktop only).
+  // The gate is extracted so it can be tested; see shouldRenderMinimizedPill.
+  if (shouldRenderMinimizedPill({ isMinimized, isWindowMobile, isDocked })) {
     return (
       <div
         onClick={(e) => e.stopPropagation()}
@@ -674,6 +747,8 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
     );
   }
 
+  const geometryClass = inspectorGeometryClass({ isFullscreen, isDocked, isAdvanced });
+
   return (
     <div
       onClick={(e) => {
@@ -687,32 +762,22 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
       onMouseUp={(e) => {
         e.stopPropagation();
       }}
-      className="relative"
+      className={clsx('relative', isDocked && !isFullscreen && 'h-full w-full min-h-0 min-w-0')}
     >
       <div
-        ref={panelRef}
+        ref={setPanelRef}
         data-inspector-panel
         className={clsx(
-          // Mobile et tablette : plein écran
-          "fixed inset-0 w-full h-full max-w-full max-h-full rounded-none",
-          // Desktop : taille normale, ou fullscreen
-          isFullscreen
-            ? "lg:fixed lg:inset-0 lg:w-full lg:h-full lg:max-w-full lg:max-h-full lg:rounded-none"
-            : "lg:relative lg:inset-auto",
-          !isFullscreen && (
-            isAdvanced
-              ? "lg:w-[900px]"
-              : "lg:w-[300px]"
-          ),
-          // rounded-2xl, the floating-surface step of the radius ladder: the
-          // inspector sits on the canvas next to the toolbar and the palette,
-          // and rounded-[32px] made it the one capsule among them.
-          !isFullscreen && "lg:rounded-2xl",
-          "bg-white dark:bg-gray-800 flex flex-col pointer-events-auto overflow-hidden z-[9999] lg:z-[150]",
+          geometryClass,
+          "bg-white dark:bg-gray-800 flex flex-col pointer-events-auto overflow-hidden",
+          // Docked, we are INSIDE the side panel's own stacking: a z-[9999] here
+          // would lift the inspector over the panel's tab bar and header.
+          isDocked && !isFullscreen ? "z-auto" : "z-[9999] lg:z-[150]",
           !isFullscreen && "group/inspector",
           draggingFromHandle && "select-none"
         )}
-        style={!isFullscreen && !isMobile ? {
+        // Extracted so it can be tested; see shouldConstrainPanelToContainer.
+        style={shouldConstrainPanelToContainer({ isFullscreen, isDocked, isWindowMobile }) ? {
           ...(containerSize && containerSize.width > 0 ? {
             maxWidth: `${containerSize.width - 32}px`,
             maxHeight: `${containerSize.height - 32}px`,
@@ -764,7 +829,7 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
           onFullscreenChange={onFullscreenChange}
           onClose={onClose}
           onDragHandleMouseDown={onDragHandleMouseDown}
-          onMinimize={() => onMinimizedChange?.(true)}
+          onMinimize={isDocked ? undefined : () => onMinimizedChange?.(true)}
           onReportNode={handleReportNode}
         />
         {/* Approval review: approve/reject the targeted pending item without
@@ -782,7 +847,13 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
         )}
         <div className={clsx(
           "flex-1 min-h-0 relative",
-          !isMobile ? "overflow-hidden p-0 flex flex-row" : "overflow-y-auto p-5 block"
+          // Docked, the panel is only as wide as the user's side panel, while the
+          // advanced layout needs its two 280px side columns plus a 200px minimum
+          // for the parameters. Clipping there would cut the Output column off with
+          // nothing on screen saying so, hence a scroll rather than overflow-hidden.
+          !isMobile
+            ? clsx('p-0 flex flex-row', isDocked && !isFullscreen ? 'overflow-x-auto overflow-y-hidden' : 'overflow-hidden')
+            : "overflow-y-auto p-5 block"
         )}>
           {isMobile && (
             <InspectorMobileContent
@@ -792,11 +863,17 @@ export function InspectorPanel({ node, selectedNodeIds = [], onUpdate, onClose, 
               edges={edges}
               isRunMode={isRunMode}
               isRunModeForForms={effectiveRunModeForForms}
-              isAdvanced={isAdvanced || !shouldForceSmallMode}
+              // NOT the effective `isAdvanced`: the mobile inspector shows its three tabs
+              // for any node that HAS them, independently of the header toggle and of the
+              // open-mode preference. This used to read `isAdvanced || !shouldForceSmallMode`,
+              // whose first operand cannot change the result (`isAdvanced` already implies
+              // `!shouldForceSmallMode`) and invited the reader to believe mobile follows
+              // the toggle.
+              isAdvanced={!shouldForceSmallMode}
               isInterfaceNode={isInterfaceNode}
               isToolNode={isToolNode}
               isAiAgent={isAiAgent}
-              activeTab={activeTab}
+              activeTab={activeTabForNode}
               setActiveTab={setActiveTab}
               viewMode={viewMode as ViewMode}
               onViewModeChange={handleViewModeChange}

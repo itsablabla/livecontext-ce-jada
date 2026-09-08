@@ -575,6 +575,7 @@ public class BackEdgeHandler implements RunScopedCache {
                 if (loopCoreNode != null) {
                     Map<String, Object> terminationOutput = new LinkedHashMap<>();
                     terminationOutput.put("node_type", "LOOP");
+                    terminationOutput.put("resolved_params", loopResolvedParams(loopCoreNode, terminatedState));
                     terminationOutput.put("loop_node", loopCoreKey);
                     terminationOutput.put("iteration", terminatedState.iteration());
                     terminationOutput.put("maxIterations", terminatedState.maxIterations());
@@ -811,6 +812,7 @@ public class BackEdgeHandler implements RunScopedCache {
                 if (loopCoreNode != null && eventService != null) {
                     Map<String, Object> terminationOutput = new LinkedHashMap<>();
                     terminationOutput.put("node_type", "LOOP");
+                    terminationOutput.put("resolved_params", loopResolvedParams(loopCoreNode, terminatedState));
                     terminationOutput.put("loop_node", loopCoreKey);
                     terminationOutput.put("iteration", terminatedState.iteration());
                     terminationOutput.put("maxIterations", terminatedState.maxIterations());
@@ -1275,5 +1277,31 @@ public class BackEdgeHandler implements RunScopedCache {
             logger.error("[BackEdge] Condition evaluation failed: condition={}, error={}", condition, e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * The loop's configuration, reported the way LoopNode.execute reports it.
+     *
+     * <p>The termination row is re-persisted AFTER the loop ends and is the last
+     * row for that node, so it is the one the inspector reads. Writing it without
+     * the node's parameters left every terminated loop with an empty Params
+     * column, which reads as "this loop was never configured".
+     *
+     * <p>The condition here is the CONFIGURED expression, not the resolved value
+     * {@code LoopNode.execute} reports: this row is written after the loop ended,
+     * and re-resolving then would show a value from a context the loop no longer
+     * runs in. Same key, same meaning, and the honest value for this moment.
+     */
+    private Map<String, Object> loopResolvedParams(ExecutionNode loopCoreNode,
+                                                   BackEdgeState terminatedState) {
+        Map<String, Object> resolvedParams = new LinkedHashMap<>();
+        if (loopCoreNode instanceof com.apimarketplace.orchestrator.execution.v2.nodes.LoopNode loopNode) {
+            String condition = loopNode.getLoopCondition();
+            resolvedParams.put("loopCondition", condition != null ? condition : "(none)");
+            resolvedParams.put("maxIterations", loopNode.getMaxIterations());
+        } else if (terminatedState != null) {
+            resolvedParams.put("maxIterations", terminatedState.maxIterations());
+        }
+        return resolvedParams;
     }
 }

@@ -93,7 +93,7 @@ class SimplifiedSplitFlowTest {
             // Step 1: Split spawns items and completes immediately
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(items);
             NodeExecutionResult splitResult = splitExecutor.execute(
-                RUN_ID, "core:split1", "{{items}}", 0, 0, context);
+                RUN_ID, "core:split1", "{{items}}", 0, null, 0, context);
 
             assertThat(splitResult.status()).isEqualTo(NodeStatus.COMPLETED);
             assertThat(splitResult.output().get("item_count")).isEqualTo(3);
@@ -140,7 +140,7 @@ class SimplifiedSplitFlowTest {
 
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(items);
             NodeExecutionResult splitResult = splitExecutor.execute(
-                RUN_ID, "core:split1", "{{items}}", 0, 0, context);
+                RUN_ID, "core:split1", "{{items}}", 0, null, 0, context);
 
             assertThat(splitResult.status()).isEqualTo(NodeStatus.COMPLETED);
             assertThat(splitResult.output().get("item_count")).isEqualTo(0);
@@ -163,7 +163,7 @@ class SimplifiedSplitFlowTest {
             setupNodeMap(items);
 
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(items);
-            splitExecutor.execute(RUN_ID, "core:split1", "{{items}}", 0, 0, context);
+            splitExecutor.execute(RUN_ID, "core:split1", "{{items}}", 0, null, 0, context);
 
             TestNode step1Node = (TestNode) nodeMap.get("mcp:step1");
             NodeExecutionResult step1Result = awareExecutor.execute(step1Node, context, RUN_ID, nodeMap);
@@ -203,7 +203,7 @@ class SimplifiedSplitFlowTest {
 
             // First run
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(items);
-            splitExecutor.execute(RUN_ID, "core:split1", "{{items}}", 0, 0, context);
+            splitExecutor.execute(RUN_ID, "core:split1", "{{items}}", 0, null, 0, context);
 
             assertThat(contextManager.hasContexts(RUN_ID)).isTrue();
 
@@ -216,7 +216,7 @@ class SimplifiedSplitFlowTest {
             List<Object> newItems = List.of("x", "y", "z");
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(newItems);
             NodeExecutionResult rerunResult = splitExecutor.execute(
-                RUN_ID, "core:split1", "{{items}}", 0, 0, context);
+                RUN_ID, "core:split1", "{{items}}", 0, null, 0, context);
 
             assertThat(rerunResult.status()).isEqualTo(NodeStatus.COMPLETED);
             assertThat(rerunResult.output().get("item_count")).isEqualTo(3);
@@ -234,7 +234,7 @@ class SimplifiedSplitFlowTest {
                 .thenThrow(new RuntimeException("Expression error"));
 
             NodeExecutionResult result = splitExecutor.execute(
-                RUN_ID, "core:split1", "{{invalid}}", 0, 0, context);
+                RUN_ID, "core:split1", "{{invalid}}", 0, null, 0, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.FAILED);
             assertThat(result.errorMessage()).isPresent();
@@ -249,7 +249,7 @@ class SimplifiedSplitFlowTest {
             List<Object> items = List.of("a", "b", "c");
 
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(items);
-            splitExecutor.execute(RUN_ID, "core:split1", "{{items}}", 0, 0, context);
+            splitExecutor.execute(RUN_ID, "core:split1", "{{items}}", 0, null, 0, context);
 
             int[] itemIndex = {0};
             TestNode failingNode = new TestNode("mcp:failing", NodeType.MCP, List.of("core:split1"));
@@ -281,7 +281,7 @@ class SimplifiedSplitFlowTest {
             List<Object> items = List.of("x", "y");
 
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(items);
-            splitExecutor.execute(RUN_ID, "core:split1", "{{items}}", 0, 0, context);
+            splitExecutor.execute(RUN_ID, "core:split1", "{{items}}", 0, null, 0, context);
 
             // Setup node chain: split → step1 → step2 → merge
             nodeMap.put("core:split1", new TestNode("core:split1", NodeType.SPLIT, List.of()));

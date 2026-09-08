@@ -132,6 +132,16 @@ class BackEdgeTerminationSemanticsTest {
         verify(eventService).rePublishNodeOutput(any(), any(), published.capture(), any(), anyInt(), any(), anyInt());
         assertFalse(published.getValue().isFailure());
         assertEquals("iterations_exhausted", published.getValue().output().get("reason"));
+
+        // The termination row is re-persisted after the loop ends and is the LAST
+        // row for the node, so it is the one the inspector reads. Without the
+        // node's parameters on it, every terminated loop showed an empty Params
+        // column, reading as "this loop was never configured".
+        @SuppressWarnings("unchecked")
+        Map<String, Object> resolvedParams =
+            (Map<String, Object>) published.getValue().output().get("resolved_params");
+        assertNotNull(resolvedParams, "the loop's termination row must carry its configuration");
+        assertEquals(3, resolvedParams.get("maxIterations"));
     }
 
     @Test
@@ -215,5 +225,82 @@ class BackEdgeTerminationSemanticsTest {
         verify(eventService).rePublishNodeOutput(any(), any(), published.capture(), any(), anyInt(), any(), anyInt());
         assertFalse(published.getValue().isFailure());
         assertEquals("condition_false", published.getValue().output().get("reason"));
+    }
+
+    @Test
+    @DisplayName("A real LoopNode's termination row carries its own loopCondition and maxIterations")
+    void terminationRowCarriesTheLoopNodesOwnConfiguration() {
+        WorkflowPlan plan = hubPlan(null, 3);
+        ExecutionContext ctx = contextAtCap(plan, null, 3);
+        ExecutionNode exitNode = mock(ExecutionNode.class);
+        com.apimarketplace.orchestrator.execution.v2.nodes.LoopNode loopCoreNode =
+            com.apimarketplace.orchestrator.execution.v2.nodes.LoopNode.builder()
+                .nodeId("core:retry")
+                .loopCondition("{{keep_going}}")
+                .maxIterations(3)
+                .templateEngine(templateEngine)
+                .build();
+
+        handler.handleBackEdge(bodyLast(), ctx, execution, eventService, null,
+            id -> switch (id) {
+                case "mcp:after_loop" -> exitNode;
+                case "core:retry" -> loopCoreNode;
+                default -> null;
+            },
+            (n, c, e, es, i) -> c);
+
+        ArgumentCaptor<NodeExecutionResult> published = ArgumentCaptor.forClass(NodeExecutionResult.class);
+        verify(eventService).rePublishNodeOutput(any(), any(), published.capture(), any(), anyInt(), any(), anyInt());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> params =
+            (Map<String, Object>) published.getValue().output().get("resolved_params");
+        // The CONFIGURED expression, not a re-resolved one: this row is written
+        // after the loop ended, and resolving then would show a value from a
+        // context the loop no longer runs in.
+        assertEquals("{{keep_going}}", params.get("loopCondition"));
+        assertEquals(3, params.get("maxIterations"));
+    }
+
+    @Test
+    @DisplayName("The step-by-step re-publish carries the same configuration as the automatic one")
+    void stepByStepTerminationRowCarriesTheSameConfiguration() {
+        // Two call sites re-persist the loop's termination row, one per execution
+        // mode. Fixing only the automatic one would leave step-by-step users with
+        // the empty Params column this work removed.
+        WorkflowPlan plan = hubPlan(null, 3);
+        ExecutionContext ctx = contextAtCap(plan, null, 3);
+        com.apimarketplace.orchestrator.execution.v2.nodes.LoopNode loopCoreNode =
+            com.apimarketplace.orchestrator.execution.v2.nodes.LoopNode.builder()
+                .nodeId("core:retry")
+                .loopCondition("{{keep_going}}")
+                .maxIterations(3)
+                .templateEngine(templateEngine)
+                .build();
+
+        handler.executeBackEdgeIteration(
+            bodyLast(), "mcp:body_last",
+            NodeExecutionResult.success("mcp:body_last", Map.of()),
+            ctx, execution, eventService, mock(TriggerItem.class), 0,
+            Map.of("core:retry", loopCoreNode));
+
+        ArgumentCaptor<NodeExecutionResult> published = ArgumentCaptor.forClass(NodeExecutionResult.class);
+        verify(eventService, atLeastOnce()).rePublishNodeOutput(any(), any(), published.capture(),
+            any(), anyInt(), any(), anyInt());
+
+        // Selected BY NODE ID, not by "the last row that happens to carry
+        // parameters": this branch's whole direction is more nodes reporting
+        // resolved_params, so a heuristic would silently start asserting on
+        // someone else's row the day one is added to this path.
+        NodeExecutionResult loopCoreRow = published.getAllValues().stream()
+            .filter(r -> "core:retry".equals(r.nodeId()))
+            .filter(r -> r.output().containsKey("resolved_params"))
+            .reduce((first, second) -> second)
+            .orElseThrow(() -> new AssertionError(
+                "the step-by-step termination row for core:retry must carry the loop's configuration"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> params = (Map<String, Object>) loopCoreRow.output().get("resolved_params");
+        assertEquals("{{keep_going}}", params.get("loopCondition"));
+        assertEquals(3, params.get("maxIterations"));
     }
 }

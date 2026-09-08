@@ -145,7 +145,7 @@ export default function VersionCard() {
                         <button
                           type="button"
                           onClick={() => setShowUpdate(true)}
-                          className="rounded-md bg-black px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-black/90 dark:bg-white dark:text-black dark:hover:bg-white/90 cursor-pointer"
+                          className="rounded-md bg-[var(--accent-primary)] px-3 py-1 text-xs font-medium text-[var(--accent-foreground)] transition-colors hover:bg-[var(--accent-hover)] cursor-pointer"
                         >
                           {t('howToUpdate')}
                         </button>

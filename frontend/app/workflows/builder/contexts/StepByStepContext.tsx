@@ -3,6 +3,7 @@
 import * as React from 'react';
 import type { WorkflowRunState, StepState, CoreExecutionResponse, StepRerunResponse } from '@/lib/api';
 import type { PendingSignal } from '@/lib/websocket/ws-types';
+import type { DerivedNodeStatus } from '../types';
 import { normalizeLabel, extractLabelFromKey } from '../utils/labelNormalizer';
 import { getPrefixForKind } from '../registry/nodeRegistry';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
@@ -43,7 +44,7 @@ export interface StepByStepContextValue {
   isCore: (nodeId: string) => boolean;
 
   // Re-run actions
-  rerunStep: (stepId: string) => Promise<StepRerunResponse | null>;
+  rerunStep: (stepId: string, epoch?: number) => Promise<StepRerunResponse | null>;
   canRerunStep: (stepId: string) => boolean;
   isRerunning: boolean;
 
@@ -97,7 +98,7 @@ interface StepByStepProviderProps {
   onExecuteStep: (stepId: string, epoch?: number) => Promise<void>;
   onExecuteCore?: (coreId: string) => Promise<CoreExecutionResponse | null>;
   // Re-run support
-  onRerunStep?: (stepId: string) => Promise<StepRerunResponse | null>;
+  onRerunStep?: (stepId: string, epoch?: number) => Promise<StepRerunResponse | null>;
   isRerunning?: boolean;
   // Approval support
   onResolveApproval?: (nodeId: string, resolution: 'APPROVED' | 'REJECTED', epoch?: number, itemId?: string) => Promise<void>;
@@ -114,6 +115,8 @@ interface StepByStepProviderProps {
  */
 interface PendingRerun {
   stepId: string;
+  /** The epoch the confirmed rerun must replay, or undefined for the run's most recent one. */
+  epoch?: number;
   resolve: (value: StepRerunResponse | null) => void;
   reject: (reason: unknown) => void;
 }
@@ -240,15 +243,15 @@ export function StepByStepProvider({
   // spend paid calls and send real messages. That asymmetry is invisible on the button, so
   // the gate lives here rather than on each surface: the canvas bar, the context menu and
   // the inspector all call this one function and inherit it.
-  const rerunStep = React.useCallback(async (stepId: string): Promise<StepRerunResponse | null> => {
+  const rerunStep = React.useCallback(async (stepId: string, epoch?: number): Promise<StepRerunResponse | null> => {
     if (!onRerunStep) return null;
-    if (isEnabled) return await onRerunStep(stepId);
+    if (isEnabled) return await onRerunStep(stepId, epoch);
     return await new Promise<StepRerunResponse | null>((resolve, reject) => {
       setPendingRerun((previous) => {
         // A second rerun click while the gate is open supersedes the first; the superseded
         // caller must not be left awaiting forever.
         previous?.resolve(null);
-        return { stepId, resolve, reject };
+        return { stepId, epoch, resolve, reject };
       });
     });
   }, [onRerunStep, isEnabled]);
@@ -259,7 +262,7 @@ export function StepByStepProvider({
     pendingRerunRef.current = null;
     setPendingRerun(null);
     try {
-      pending.resolve(onRerunStep ? await onRerunStep(pending.stepId) : null);
+      pending.resolve(onRerunStep ? await onRerunStep(pending.stepId, pending.epoch) : null);
     } catch (err) {
       // Surface the failure to whoever awaited the rerun, exactly as the ungated path does.
       pending.reject(err);
@@ -291,6 +294,28 @@ export function StepByStepProvider({
   // point - restarting mid-graph on a completed run is the common case.
   const canRerunStep = React.useCallback((stepId: string): boolean => {
     if (isRunUnrevivable) return false;
+    // A node executing RIGHT NOW on a run nobody is stepping, refused BEFORE the terminal
+    // check because that check is satisfied by cumulative counts: a node that completed in an
+    // earlier epoch and is running in this one reads as rerunnable, and restarting it would
+    // race the in-flight execution, which still writes its own completion (double execution,
+    // lost write). The backend refuses it for that reason. This lives here, not on one
+    // surface, because the canvas bar happened to be covered by `showsNodeRunActions`'s
+    // `!isRunning` while the context menu and the inspector header gate on `canRerun` alone
+    // and offered the restart anyway.
+    //
+    // A node PARKED on a signal is excluded from that, and the overlap it needs excluding from
+    // is PERMANENT, not a blink: `applyTrackingFromApi` derives its sets from the step rows and
+    // puts an `AWAITING_SIGNAL` node in `runningSteps` (deliberately - the node keeps its
+    // running shimmer while it waits) as well as in `awaitingSignalSteps`. So on any run
+    // hydrated over REST, every parked approval sits in both sets for as long as it waits.
+    // (`setRunningSteps` adds a second, transient overlap of up to MIN_SHIMMER_MS, and the
+    // socket path keeps the two apart - neither changes the conclusion.)
+    //
+    // The backend's own `runningNodeIds` drops the node the moment it parks
+    // (EpochState.markNodeAwaitingSignal), so it ACCEPTS that restart. Without this clause the
+    // canvas would refuse every waiting approval, which is a node whose restart is the whole
+    // point of the affordance.
+    if (!isEnabled && runningSteps.has(stepId) && !awaitingSignalSteps.has(stepId)) return false;
     if (completedSteps.has(stepId) || failedSteps.has(stepId)) return true;
     // A node still RUNNING is only an escape hatch for a run the user drives by hand (a stuck
     // while-loop, a long agent). On an automatic run the invocation is genuinely in flight and
@@ -298,7 +323,7 @@ export function StepByStepProvider({
     // epoch completed the node - so offering it here buys a double execution and a lost write,
     // not a clean refusal.
     return isEnabled && runningSteps.has(stepId);
-  }, [isEnabled, isRunUnrevivable, completedSteps, failedSteps, runningSteps]);
+  }, [isEnabled, isRunUnrevivable, completedSteps, failedSteps, runningSteps, awaitingSignalSteps]);
 
   // Resolve a user approval signal
   const resolveApproval = React.useCallback(async (nodeId: string, resolution: 'APPROVED' | 'REJECTED', epoch?: number, itemId?: string) => {
@@ -412,6 +437,7 @@ export function StepByStepProvider({
       {pendingRerun && (
         <RerunConfirmModal
           stepLabel={stepDisplayLabel(pendingRerun.stepId)}
+          epoch={pendingRerun.epoch}
           onConfirm={confirmPendingRerun}
           onCancel={cancelPendingRerun}
         />
@@ -427,11 +453,17 @@ export function useStepByStep(): StepByStepContextValue | null {
 /**
  * Hook to get execution status for a specific node (step or core node)
  * @param nodeId - The frontend node ID
- * @param nodeData - Optional node data containing label and kind for accurate backend ID mapping
+ * @param nodeData - Optional node data containing label and kind for accurate backend ID mapping,
+ *   plus the status the canvas currently paints on the node. While ONE epoch is focused that
+ *   status is that epoch's (useEpochStateViewing writes it), which is the only per-epoch fact
+ *   this hook can see: the context's own sets accumulate across every epoch of the run.
  */
-export function useNodeExecutionStatus(nodeId: string, nodeData?: { label?: string; kind?: string; crudOperation?: string }) {
+export function useNodeExecutionStatus(
+  nodeId: string,
+  nodeData?: { label?: string; kind?: string; crudOperation?: string; status?: DerivedNodeStatus | null },
+) {
   const ctx = useStepByStep();
-  const { viewingEpoch } = useWorkflowMode();
+  const { viewingEpoch, isPreviewOnly } = useWorkflowMode();
 
   // Interactive in the "All epochs" view (viewingEpoch == null) AND while reading
   // the run's NEWEST epoch - only a HISTORICAL epoch is read-only.
@@ -447,8 +479,20 @@ export function useNodeExecutionStatus(nodeId: string, nodeData?: { label?: stri
   //
   // Reading the live state through its own epoch is not history, so it stays
   // interactive; an older epoch is a record of what happened and stays read-only.
+  //
+  // Decided by epoch IDENTITY alone. This used to also demand `currentEpoch > 0`, to keep an
+  // absent value (the store defaults the field to 0) from unlocking controls - but epoch 0 is
+  // a real, common FIRST fire, so the guard killed every play and rerun on a run that had
+  // fired exactly once and was being read through its only epoch.
+  //
+  // What the old guard bought is nearly nothing. `currentEpoch` is written by `applyMetadata`,
+  // which every load runs BEFORE the step sets land, and until those sets land every control is
+  // gated off by them anyway. The one residual it covered was a payload that carries the sets
+  // but NOT an epoch, which the store would have coalesced to 0 - so that coalesce is now
+  // conditional (see RunStateStore.applyMetadata), and a payload without the field leaves the
+  // epoch the client already knew instead of silently claiming 0.
   const isInteractive = viewingEpoch == null
-    || (ctx != null && ctx.currentEpoch > 0 && viewingEpoch === ctx.currentEpoch);
+    || (ctx != null && viewingEpoch === ctx.currentEpoch);
 
   if (!ctx) {
     return {
@@ -490,12 +534,118 @@ export function useNodeExecutionStatus(nodeId: string, nodeData?: { label?: stri
   // SSE sets are the PRIMARY source - they update in real-time during streaming.
   // Backend stepStates (REST) may be stale during SSE streaming.
   // deriveNodeStatus() handles priority: running > failed > skipped > completed > ready > pending
-  const isRunning = ctx.runningSteps.has(normalizedId);
-  const isFailed = ctx.failedSteps.has(normalizedId);
-  const isSkipped = ctx.skippedSteps.has(normalizedId);
-  const isCompleted = ctx.completedSteps.has(normalizedId);
+  //
+  // Those sets are RUN-wide: they are derived from cumulative NodeCounts, so a node that
+  // completed in ANY epoch reads COMPLETED in all of them. That is right for the all-epochs
+  // view and wrong for a FOCUSED one, where the canvas paints the epoch's own outcome - a
+  // node whose branch was not taken in the epoch on screen shows SKIPPED there while these
+  // sets still say COMPLETED. Inside a focused epoch the node's painted status is therefore
+  // the source of truth for the terminal flags, so every control derived from them (the
+  // play/rerun button's status, the rerun gate below) speaks about the epoch being read.
+  //
+  // "Focused" = an epoch that is not the one the run is living in, the exact complement of
+  // `isInteractive` above. It holds whether or not the epoch painted anything on this node:
+  // "that epoch has no result for it" is itself the epoch's answer, and falling back to the
+  // run-wide sets there would paint a node the epoch never reached with another epoch's
+  // outcome (InterfacePreviewNode reads these flags with no viewingEpoch short-circuit).
+  //
+  // Two things `currentEpoch` is NOT, both of which put ordinary epochs on this side of the
+  // line rather than the "live" one:
+  //   - it is not the newest EXECUTED epoch. A settled automatic run has already staged the
+  //     next fire (DagState.prepareNextCycle points currentEpoch at a dormant epoch holding
+  //     nothing but the trigger), so the last epoch the selector offers reads as focused and
+  //     its restart NAMES it. That is the common case, not an exception, and it is the same
+  //     work: the epoch-less path resolves to that very epoch and reopens it too.
+  //   - it is not per-DAG; it is the MAX across the run's DAGs. On a multi-trigger run a node
+  //     whose own DAG is behind that max reads as focused while sitting on its DAG's live
+  //     epoch, and its restart names it.
+  // Naming an epoch is not free, but it is not harmful either: it reopens nothing the default
+  // would not have reopened, leaves the same `dagLastEpoch` behind (StepRerunService keys that
+  // skip on the pointer moving BACKWARD, not on the parameter being present), and takes a
+  // spawn FLOOR that is never below what the default would have taken. What it adds is one
+  // check the default skips - that the node really ran in the named epoch - which is a refusal
+  // this gate has already applied client-side.
+  const readsFocusedEpoch = viewingEpoch != null && viewingEpoch !== ctx.currentEpoch;
+  const focusedEpochStatus = readsFocusedEpoch ? (nodeData?.status ?? null) : null;
+  const isRunning = readsFocusedEpoch
+    ? focusedEpochStatus === 'running'
+    : ctx.runningSteps.has(normalizedId);
+  const isFailed = readsFocusedEpoch
+    ? focusedEpochStatus === 'failed'
+    : ctx.failedSteps.has(normalizedId);
+  const isSkipped = readsFocusedEpoch
+    ? focusedEpochStatus === 'skipped'
+    : ctx.skippedSteps.has(normalizedId);
+  // 'partial_success' is a COMPLETED node carrying a failure in its tally - the same bucket
+  // the run-wide sets put it in, and what keeps its rerun button.
+  const isCompleted = readsFocusedEpoch
+    ? (focusedEpochStatus === 'completed' || focusedEpochStatus === 'partial_success')
+    : ctx.completedSteps.has(normalizedId);
+  // Readiness is deliberately NOT switched: it is a fact about what the run can execute next,
+  // which a historical epoch has no opinion on - and the returned `isReady` is gated on
+  // `isInteractive` anyway, so a focused epoch reports false whatever this reads.
   const isReady = ctx.readySteps.has(normalizedId);
-  const isAwaitingSignal = ctx.awaitingSignalSteps.has(normalizedId);
+  const isAwaitingSignal = readsFocusedEpoch
+    ? focusedEpochStatus === 'awaiting_signal'
+    : ctx.awaitingSignalSteps.has(normalizedId);
+
+  // A rerun stays available while an OLDER epoch is on screen, on an AUTOMATIC run.
+  //
+  // Reading a past epoch is read-only for everything that ADVANCES the run, but a rerun
+  // replays a fire that already happened: the backend takes the epoch by name (?epoch=N) and
+  // `rerunStep` below sends the focused one, so the restart repairs the epoch the user is
+  // reading instead of silently redoing the newest. Without this the button was reachable
+  // only from the run's last epoch, which is the one epoch that rarely needs repairing.
+  //
+  // Stepped runs are excluded: the backend refuses to REOPEN an epoch on one (nothing on a
+  // hand-stepped run closes a cycle, so the reopened epoch would stay open indefinitely), and
+  // reopening is exactly what reading an older epoch asks for. It does accept a named epoch
+  // there when that epoch is already the DAG's current one, but that is the same work as
+  // omitting it - so nothing is lost by declining the whole shape.
+  //
+  // Gated on the epoch's OWN outcome (terminal in THIS epoch), so a node the epoch skipped -
+  // or never reached - offers no button in the cases the canvas can SEE. Not full parity, and
+  // it cannot be, in three ways this side cannot close:
+  //   - it reads the epoch's COUNTER ROWS (useEpochStateViewing) while the backend checks that
+  //     epoch HEADER's own node sets, and StepRerunService says outright that the two can
+  //     disagree (a node a previous rerun cleared without re-executing is absent from the
+  //     header while its step rows remain);
+  //   - it asks for the epoch across ALL triggers, while the backend checks the OWNING one -
+  //     and epoch numbers are per-DAG, so on a multi-trigger run the paint can come from
+  //     another trigger's fire of the same number;
+  //   - a run with no epoch header at all (a legacy one, or a fire never closed through the
+  //     epoch service) still paints from its counter rows, and the backend refuses a NAMED
+  //     replay there rather than degrading into the dormant epoch the way the epoch-less path
+  //     does. Refusing is the safer half of that trade: degrading would run the node with its
+  //     upstream resolving to nothing, on a run that reports success.
+  // So a refusal still gets through, which is why it is reported rather than assumed away. Deliberately NARROWER than
+  // the backend, which also replays a node left AWAITING_SIGNAL or READY in the named epoch:
+  // neither offers a restart in the all-epochs view either, and inventing one here would make
+  // a focused epoch the only place a parked approval can be restarted from.
+  //
+  // Two more refusals the backend owns, mirrored here because a button that only ever answers
+  // with an error is worse than no button:
+  //   - another epoch of this run is still executing. Reopening an older one then runs two
+  //     fires of the same DAG at once, so the replay is refused while that holds. The set read
+  //     here is a SUPERSET of the one the refusal reads: the backend looks at the owning
+  //     trigger's DAG, this is the union across every DAG (epoch 1 of trigger A and epoch 1 of
+  //     trigger B are the same number here). So on a multi-trigger run this can hide a button
+  //     the backend would have accepted - the safe direction, and the only one available
+  //     without a per-node owning-trigger map the canvas does not have.
+  // The node executing RIGHT NOW in ANOTHER epoch is refused too, by `canRerunStep` (which
+  // every branch below is ANDed with). It has to be checked there rather than here: `isRunning`
+  // in this scope speaks about the epoch on screen, so on its own it says nothing about a node
+  // completed in epoch 1 and running in epoch 3.
+  //
+  // One backend refusal is knowingly NOT mirrored: a run migrated from the V2 engine can own
+  // its nodes through the `trigger:default` sentinel beside a real DAG, and a named-epoch
+  // replay is refused there outright. The canvas has no node-to-owning-trigger map and the
+  // snapshot's DAG keys never reach it, so there is nothing here to test - the click is
+  // answered by the reported refusal instead of a hidden button. Legacy runs only.
+  const canRerunFocusedEpoch = readsFocusedEpoch
+    && !ctx.isSteppedRun
+    && (isCompleted || isFailed)
+    && !ctx.activeEpochs.some((epoch) => epoch !== viewingEpoch);
 
   return {
     // Only true if explicitly in step-by-step mode AND interactive.
@@ -533,11 +683,29 @@ export function useNodeExecutionStatus(nodeId: string, nodeData?: { label?: stri
     // returns to the all-epochs view, so the clicked trigger actually fires.
     fireFromAnyEpoch: () => ctx.executeStep(normalizedId, undefined),
     executeCore: () => ctx.executeCore(normalizedId),
-    // Re-run: available for COMPLETED, FAILED steps (only in live view)
-    // For triggers: rerun = fire again (new epoch), determined by canRerunStep using backend state
-    canRerun: isInteractive && ctx.canRerunStep(normalizedId),
+    // Re-run: available for COMPLETED / FAILED steps, in the live view and - on an automatic
+    // run - on any focused epoch that finished this node (see canRerunFocusedEpoch above).
+    // Triggers are NOT re-fired by this: StepRerunService increments the spawn, never the
+    // epoch, so a trigger restart replays its DAG in place. Every surface excludes them anyway
+    // (the canvas bar, the context menu and the inspector header all test isTriggerNode),
+    // because "restart from here" on a trigger is the whole DAG and none of them label it so.
+    // Never on a read-only surface (marketplace preview, an application a visitor has not
+    // acquired): a restart there resets the publisher's run. FlowNode already drops its whole
+    // bar under preview, but the ten other node renderers gate their bar on
+    // `showsNodeRunActions` alone, so the refusal belongs on the flag they all read.
+    //
+    // It does not reach a SHARE-TOKEN visitor: that page mounts the mode provider without
+    // `readOnly`, so `isPreviewOnly` is false there and the control still renders (the gateway
+    // then 403s the non-GET). Pre-existing and not narrowed to this feature - every run action
+    // on that page has it - so it is named here rather than papered over from this flag.
+    canRerun: !isPreviewOnly && (isInteractive || canRerunFocusedEpoch) && ctx.canRerunStep(normalizedId),
     isRerunning: ctx.isRerunning,
-    rerunStep: () => ctx.rerunStep(normalizedId),
+    // The focused epoch is named ONLY when the view is not the one the run is living in. The
+    // all-epochs view always stays epoch-less; a single epoch usually does not, including the
+    // newest EXECUTED one on a settled run (`currentEpoch` points at the fire staged for next
+    // time by then - see `readsFocusedEpoch` above). Naming it resolves to the same replay the
+    // default would have run.
+    rerunStep: () => ctx.rerunStep(normalizedId, canRerunFocusedEpoch ? viewingEpoch ?? undefined : undefined),
     // Approval - epochOverride lets per-signal UIs (item rows, ApprovalReviewBar)
     // target the signal's OWN epoch: in 'All epochs' view viewingEpoch is null,
     // which would otherwise leave the backend to guess when several epochs are pending.
@@ -572,10 +740,12 @@ function isCoreNodeId(nodeId: string): boolean {
  * |------------|----------|--------------------------------------------------------|
  * | trigger:   | Entry    | All triggers (webhook, chat, schedule, etc.)            |
  * | mcp:       | Action   | Tools, CRUD (external API calls)                        |
- * | agent:     | AI       | Agent, Guardrail, Classify                              |
+ * | agent:     | AI       | Agent, Browser Agent, Guardrail, Classify, Generate     |
  * | core:      | Control  | Loop, Split, Decision, Switch, Merge, Transform, Wait, Fork, Stop, Response, Download File, HTTP Request, Data Input, User Approval |
  */
-function normalizeNodeId(nodeId: string): string {
+/** Exported for its own tests: every branch here fails by producing a key that
+ *  addresses nothing, which reads downstream as a node that simply never ran. */
+export function normalizeNodeId(nodeId: string): string {
   // Already has a valid prefix - return as is
   if (nodeId.startsWith('trigger:') ||
       nodeId.startsWith('mcp:') ||
@@ -620,8 +790,11 @@ function normalizeNodeId(nodeId: string): string {
     return `core:${normalized}`;
   }
 
-  // Agent nodes
-  if (nodeId.includes('ai-agent') || nodeId.startsWith('agent-') || nodeId.startsWith('agent:')) {
+  // Agent nodes. Generate ids are minted `generate-<ts>-<rand>`, so the prefix
+  // test below never matches one; without naming it the node falls to the mcp
+  // default and the step key addresses nothing.
+  if (nodeId.includes('ai-agent') || nodeId.startsWith('agent-') || nodeId.startsWith('agent:')
+      || nodeId === 'generate' || nodeId.startsWith('generate-')) {
     return `agent:${normalized}`;
   }
 

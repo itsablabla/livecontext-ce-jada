@@ -19,6 +19,14 @@ const globalsCssSrc = readFileSync(
   path.resolve(__dirname, '../../../app/globals.css'),
   'utf8',
 );
+// The landing's brand logos left the page with the trust strip, then with the
+// integrations section that replaced it; both are gone and the catalogue is a page of
+// its own, so the contract is asserted where the markup lives: IntegrationLogo, which
+// renders every logo on /integrations and is shown inside the landing chrome there.
+const integrationLogoSrc = readFileSync(
+  path.resolve(__dirname, '../../integrations/IntegrationLogo.tsx'),
+  'utf8',
+);
 
 describe('public-site self-contained theme contract', () => {
   it('defines a LIGHT palette on .landing-root and a DARK palette on .landing-root.dark', () => {
@@ -85,8 +93,14 @@ describe('public-site self-contained theme contract', () => {
     // The two former body-theme dependencies are now landing-scoped:
     expect(landingPageSrc).not.toMatch(/dark:text-slate-100/); // feature-node icon
     expect(landingPageSrc).toMatch(/feature-node-icon/);
-    expect(landingPageSrc).not.toMatch(/monoDarkInvertClass/); // mono logos
-    expect(landingPageSrc).toMatch(/logo-mono/);
+
+    // Mono brand logos. `monoDarkInvertClass` is the body-`dark:` utility and must appear
+    // in NEITHER: on the public site the theme lives on `.landing-root`, so a body-scoped
+    // utility silently never fires.
+    for (const src of [landingPageSrc, integrationLogoSrc]) {
+      expect(src).not.toMatch(/monoDarkInvertClass/);
+    }
+    expect(integrationLogoSrc).toMatch(/logo-mono/);
   });
 });
 

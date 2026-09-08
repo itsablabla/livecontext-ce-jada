@@ -1,10 +1,13 @@
 'use client';
 
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { memo, useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { usePathname, useRouter } from '@/i18n/navigation';
 import { useSearchParams } from 'next/navigation';
-import { useConversationHistory } from '@/hooks/useConversationHistory';
+import { useSidebarConversations } from '@/hooks/conversation/useSidebarConversations';
 import { Conversation, conversationApi } from '@/lib/api/conversationApi';
+// Keys live in one place: a raw array here collides by prefix with conversations.detail(id) and is
+// missed by the invalidation that heals the list after a conversation is created.
+import { queryKeys } from '@/lib/query-client';
 import { DeleteConversationModal } from './DeleteConversationModal';
 import {
   Trash2,
@@ -14,27 +17,18 @@ import {
   Plus,
   Search,
   Workflow,
-  Table,
-  Store,
-  Monitor,
   Bot,
   CalendarClock,
   Webhook,
   MoreVertical,
   ExternalLink,
-  AppWindow,
-  Columns3,
   ListFilter,
   Briefcase,
   Share2,
-  Eraser,
-  Home,
-  Folder
+  Eraser
 } from 'lucide-react';
 import { getProjectIcon } from '@/components/project/ProjectMultiStepModal';
 import { conversationDisplayTitle } from '@/lib/utils/conversationTitle';
-import { sortByRecency } from '@/lib/utils/conversationRecency';
-import { useUnifiedApp } from '@/contexts/UnifiedAppContext';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
 import { useTranslations } from 'next-intl';
 import { useCurrentView } from '@/hooks/useCurrentView';
@@ -56,6 +50,7 @@ import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { ProjectMultiStepModal } from '@/components/project/ProjectMultiStepModal';
 import type { Project } from '@/lib/api/orchestrator/project.types';
 import { ShareLinkDialog } from '@/components/sharing/ShareLinkDialog';
+import { SidebarNavigation } from '@/components/app/SidebarNavigation';
 
 /**
  * Hook to check if conversation is streaming (for use in render callbacks)
@@ -84,15 +79,27 @@ interface ConversationSidebarProps {
   onTitleUpdated?: (conversationId: string, title: string, isTemporary: boolean) => void;
   onNewChat?: () => void;
   onSearchClick?: () => void;
-  onSearchWorkflows?: () => void;
-  onSearchDataSources?: () => void;
-  onMarketPlaceClick?: () => void;
   onNavigate?: (path: string) => void;
-  onSignOut?: () => void;
-  user?: any;
 }
 
-export function ConversationSidebar({
+/**
+ * The conversations half of the sidebar: projects, the chat list, and the
+ * navigation block it draws through {@link SidebarNavigation}.
+ *
+ * memo()'d because its parent re-renders far more often than this list changes.
+ * The shell subscribes to auth, the user profile, the subscription, the credit
+ * balance, the theme and its own search-modal state; none of that is drawn here,
+ * and every one of those used to redraw the whole list - every row, every
+ * popover trigger.
+ *
+ * It is NOT a blanket shield: this component reads the unified app context
+ * itself (through its conversation hook), so a change there still re-renders it,
+ * as it should. What the memo removes is the churn that has nothing to do with
+ * conversations. It only works while every prop the shell passes is stable -
+ * one inline arrow up there defeats it entirely, which is why they are all
+ * memoized (see AppSidebar).
+ */
+export const ConversationSidebar = memo(function ConversationSidebar({
   onConversationSelect,
   currentConversationId,
   className = '',
@@ -101,11 +108,6 @@ export function ConversationSidebar({
   onTitleUpdated,
   onNewChat,
   onSearchClick,
-  onSearchWorkflows,
-  onSearchDataSources,
-  onMarketPlaceClick,
-  onSignOut,
-  user: userProp,
   onNavigate,
 }: ConversationSidebarProps) {
   // Hooks must be called in the same order every render
@@ -131,7 +133,7 @@ export function ConversationSidebar({
     setMessagesMode((prev) => !prev);
     onNewChat?.();
   }, [onNewChat]);
-  const [chatFilter, setChatFilter] = useState<'all' | 'agents' | 'workflows'>('all');
+  const [chatFilter, setChatFilter] = useState<'all' | 'agents' | 'workflows' | 'studio'>('all');
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   // Messages (DM) mode: header-driven conversation filter (workspace teammates vs other
   // conversations) + search toggle; both consumed by DmSidebarList.
@@ -156,7 +158,7 @@ export function ConversationSidebar({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Check authentication state
-  const { isAuthenticated, isLoading: authLoading, user } = useAuthGuard();
+  const { isAuthenticated, isLoading: authLoading } = useAuthGuard();
 
   // Agent avatar map: lightweight (id, avatarUrl) projection - avoids loading
   // full agent entities (system_prompt LOB, config blob) when the sidebar only
@@ -195,11 +197,6 @@ export function ConversationSidebar({
     }
     return map;
   }, [fleetTriggers]);
-  const tenantId = user?.sub || user?.email || 'demo';
-
-  // Use userProp if provided, otherwise use user from useAuthGuard
-  const effectiveUser = userProp || user;
-
   // Projects state
   const [projectsCollapsed, setProjectsCollapsed] = useState(false);
   const [showProjectModal, setShowProjectModal] = useState(false);
@@ -215,13 +212,22 @@ export function ConversationSidebar({
   // backend-side, so the "+" stays for everyone.
   const canMutateProjects = useCanMutateInCurrentOrg();
 
-  // Get current view from URL
-  const { view: currentView, conversationId: urlConversationId, isDetailPage } = useCurrentView();
+  // Get current view from URL. Which navigation entry is ACTIVE is not decided
+  // here any more: SidebarNavigation resolves that once for the rail and the
+  // panel together. What is left is the question this component owns - whether
+  // the surface is one that lists conversations.
+  const { view: currentView, conversationId: urlConversationId } = useCurrentView();
   const isConversationSurface = (
     currentView === 'chat' ||
+    // The studio lists the same conversations in the same sidebar. It used to be covered only
+    // because /app/studio fell through to the 'chat' view; giving it a view of its own would
+    // otherwise have moved the studio home onto the 1200ms deferred load AND made every switch
+    // between /app and /app/studio count as LEAVING a conversation surface, firing a full refresh.
+    currentView === 'studio' ||
     urlConversationId !== null ||
     pathname?.startsWith('/app/chat') ||
-    pathname?.startsWith('/app/c/')
+    pathname?.startsWith('/app/c/') ||
+    pathname?.startsWith('/app/studio')
   );
 
   // Auto-load conversations on every primary app surface (incl. the aggregated Board)
@@ -251,18 +257,16 @@ export function ConversationSidebar({
   }, [shouldAutoLoad, isConversationSurface]);
 
   const {
-    conversations: rawConversations,
+    conversations,
     loading,
     error,
-    hasMore,
-    selectConversation,
-    loadMessages,
-    deleteConversation,
-    loadMoreConversations,
+    hasMore: hasMoreFromServer,
+    loadMore: loadMoreConversations,
     loadConversationById,
+    deleteConversation,
     clearMessages,
-    forceRefreshConversations,
-  } = useConversationHistory({ autoLoad: deferredAutoLoad });
+    refresh: refreshConversations,
+  } = useSidebarConversations({ autoLoad: deferredAutoLoad, currentConversationId });
 
   // Reconcile the conversation list with the server when the user LEAVES a
   // conversation surface (chat -> any other page).
@@ -273,31 +277,22 @@ export function ConversationSidebar({
   // emitted from the chat page); off that surface those updates stop. So a
   // conversation started right before navigating away can be missed (missing
   // row, placeholder title, wrong order) and, with no refetch, stay stale until
-  // a full page reload. forceRefreshConversations rewinds to page 0 and
-  // refetches from the server, healing membership, titles and order regardless
-  // of which live event was dropped (and even when the user had paginated the
-  // sidebar); the shared context backstops the rows during the refetch so the
-  // list does not flicker. Gating on the surface transition (not every
-  // navigation) keeps it to one refetch per chat exit.
-  const forceRefreshConversationsRef = useRef(forceRefreshConversations);
-  forceRefreshConversationsRef.current = forceRefreshConversations;
+  // a full page reload. refresh() rewinds to page 0 and refetches from the
+  // server, healing membership, titles and order regardless of which live event
+  // was dropped (and even when the user had paginated the sidebar); the shared
+  // context backstops the rows during the refetch so the list does not flicker.
+  // Gating on the surface transition (not every navigation) keeps it to one
+  // refetch per chat exit.
+  const refreshConversationsRef = useRef(refreshConversations);
+  refreshConversationsRef.current = refreshConversations;
   const wasConversationSurfaceRef = useRef(isConversationSurface);
   useEffect(() => {
     const leftConversationSurface = wasConversationSurfaceRef.current && !isConversationSurface;
     wasConversationSurfaceRef.current = isConversationSurface;
     if (!leftConversationSurface) return;
     if (!isAuthenticated || !shouldAutoLoad) return;
-    void forceRefreshConversationsRef.current();
+    void refreshConversationsRef.current();
   }, [isConversationSurface, isAuthenticated, shouldAutoLoad]);
-
-  // Utiliser le context unifie pour les conversations partagees
-  const { state: appState } = useUnifiedApp();
-  const sharedConversations = appState.conversations;
-  const sharedHasMore = appState.hasMore;
-
-  // Combiner les conversations du hook et de la variable partagee
-  // Utiliser rawConversations si sharedConversations est vide ou incomplet
-  const conversationsToUse = sharedConversations.length >= rawConversations.length ? sharedConversations : rawConversations;
 
   // Fonctions pour gerer les evenements de titre
   const handleConversationCreated = useCallback((conversationId: string, title: string | null, isTemporary: boolean) => {
@@ -351,74 +346,73 @@ export function ConversationSidebar({
     return synthesizingTitles.has(conversationId);
   }, [synthesizingTitles]);
 
-  // Dedupliquer les conversations par ID et convertir les conversations partagees
-  // Utilise Map pour O(1) lookup et evite de creer de nouveaux objets si non necessaire
-  const conversations = React.useMemo(() => {
-    const seen = new Map<string, Conversation>();
-    // sharedConversations only carries a compact projection (no timestamps /
-    // provider / messageCount), so when an entry exists in rawConversations
-    // - which holds the full DTO from the API - we prefer that copy. Without
-    // this lookup the hover pill reads `updatedAt`/`createdAt` from the
-    // synthetic placeholder below and every row reports the same relative
-    // time.
-    const rawById = new Map<string, Conversation>();
-    for (const c of rawConversations) rawById.set(c.id, c);
-
-    for (const conv of conversationsToUse) {
-      if (seen.has(conv.id)) continue;
-
-      const full = rawById.get(conv.id);
-      if (full) {
-        seen.set(conv.id, full);
-        continue;
-      }
-
-      // Si c'est une conversation partagee (minimale), la convertir en Conversation complete
-      if ('id' in conv && 'title' in conv && !('userId' in conv)) {
-        seen.set(conv.id, {
-          id: conv.id,
-          title: conv.title,
-          userId: '',
-          model: '',
-          provider: '',
-          createdAt: (conv as any).createdAt ?? new Date().toISOString(),
-          updatedAt: (conv as any).updatedAt ?? new Date().toISOString(),
-          messageCount: 0,
-          workflowId: (conv as any).workflowId,
-          agentId: (conv as any).agentId
-        } as Conversation);
-      } else {
-        seen.set(conv.id, conv as Conversation);
-      }
-    }
-
-    // Order by most-recent activity (shared sortByRecency, same ordering as the
-    // UnifiedAppContext cache). The merge above prefers the full server DTO when
-    // present, so this sorts on authoritative timestamps and keeps a
-    // just-created conversation (updatedAt = now) at the top. Without it the
-    // display order followed the context's insertion order, which drifts from
-    // the server when a conversation's activity is not reflected back into the
-    // context.
-    return sortByRecency(Array.from(seen.values()));
-  }, [conversationsToUse, rawConversations]);
-
-  // Check if filter chips should be shown (at least one agent or workflow conversation)
+  // Check if filter chips should be shown (at least one agent, workflow or studio conversation)
   const hasAgentConversations = useMemo(() => conversations.some(c => c.agentId), [conversations]);
   const hasWorkflowConversations = useMemo(() => conversations.some(c => c.workflowId), [conversations]);
-  const showFilterChips = hasAgentConversations || hasWorkflowConversations;
+  // Whether this workspace has ANY studio conversation, asked of the server rather than read off the
+  // loaded page. Deriving it from the page would hide the chip from exactly the reader who needs it:
+  // someone with forty studio threads and twenty recent chats has none in the window, so the chip
+  // would not appear and the correctly-filtered list behind it would be unreachable.
+  //
+  // One row is enough to answer it, and the answer holds for the session.
+  const { data: anyStudioPage } = useQuery({
+    queryKey: queryKeys.conversations.hasKind('studio'),
+    queryFn: () => conversationApi.getConversations(0, 1, 'studio'),
+    enabled: isAuthenticated && deferredAutoLoad,
+    // Never stale on its own. The answer only flips when a studio conversation is created, and that
+    // path already invalidates ['conversations'], which prefix-matches this key. A time window
+    // would buy nothing and cost a request per window.
+    staleTime: Infinity,
+  });
+  const hasStudioConversations = useMemo(() => {
+    const content = (anyStudioPage as { content?: unknown[] } | undefined)?.content;
+    return Array.isArray(content) && content.length > 0;
+  }, [anyStudioPage]);
+  const showFilterChips = hasAgentConversations || hasWorkflowConversations || hasStudioConversations;
+
+  // Studio conversations are fetched with the filter IN THE QUERY rather than narrowed out of the
+  // list above.
+  //
+  // The list above is a page chosen by recency. Narrowing it answers "the studio conversations
+  // among the most recent ones", which is empty for anyone whose recent activity is chat and looks
+  // exactly like having none. The agents and workflows filters have that shape and are left alone
+  // here: changing them is a separate decision about a shipped behaviour, and this one is new.
+  //
+  // Its own query key, so it neither reads nor disturbs the shared sidebar cache, and it is not
+  // requested at all until the reader picks the filter.
+  const { data: studioPage, isLoading: studioLoading } = useQuery({
+    queryKey: queryKeys.conversations.ofKind('studio'),
+    queryFn: () => conversationApi.getConversations(0, 50, 'studio'),
+    enabled: isAuthenticated && chatFilter === 'studio',
+    staleTime: 30_000,
+  });
+  const studioConversations = useMemo(() => {
+    const content = (studioPage as { content?: Conversation[] } | undefined)?.content;
+    return Array.isArray(content) ? content : [];
+  }, [studioPage]);
+  // While the studio query is in flight the list is empty, and an empty list renders the same
+  // "nothing here" as a workspace that really has none. The loading state is kept distinct so the
+  // list below shows the spinner it already has for the unfiltered case.
+  const listLoading = chatFilter === 'studio' ? studioLoading : loading;
 
   // Filter conversations based on selected chip
   const filteredConversations = useMemo(() => {
     if (chatFilter === 'agents') return conversations.filter(c => c.agentId);
     if (chatFilter === 'workflows') return conversations.filter(c => c.workflowId);
+    if (chatFilter === 'studio') return studioConversations;
     return conversations;
-  }, [conversations, chatFilter]);
+  }, [conversations, chatFilter, studioConversations]);
 
   // Agent avatars are derived from the ['agents', 'avatars'] query above
   // (CreateAgentModal invalidates ['agents'] - prefix-matches and refreshes us)
 
-  // Calculer hasMoreConversations apres la declaration de conversations
-  const hasMoreConversations = sharedHasMore !== undefined ? sharedHasMore : hasMore;
+  // The studio filter reads its own query, not the paged list below it. Leaving the pager armed
+  // would page the UNFILTERED list in the background - invisible work that never adds a row to what
+  // is on screen, and an auto-loader that keeps firing because the visible list stays short.
+  //
+  // The studio list is therefore one page. That is a real cap, not a hidden one: it is the same
+  // page size the sidebar shows for everything else, and the conversation search reaches the rest.
+  const hasMoreConversations = chatFilter === 'studio' ? false : hasMoreFromServer;
 
 
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -499,29 +493,17 @@ export function ConversationSidebar({
   const handleConversationClick = async (conversation: Conversation) => {
     console.log('🔄 Selecting conversation:', conversation.id, conversation.title);
 
-    // Verifier si la conversation est dans la liste chargee
-    const existingConversation = conversations.find(conv => conv.id === conversation.id);
-    if (!existingConversation) {
+    // A row the list has not cached yet (reached from search, or created in
+    // another tab): pull it in so it stays in the sidebar behind the surface
+    // that is about to open it. Fire-and-forget - navigation does not wait on it.
+    if (!conversations.some((conv) => conv.id === conversation.id)) {
       console.log('🔄 Conversation not in loaded list, attempting to load it...');
-
-      // Essayer de charger la conversation manquante
-      const loadedConversation = await loadConversationById(conversation.id);
-      if (loadedConversation) {
-        console.log('✅ Conversation loaded successfully:', loadedConversation.id);
-        selectConversation(loadedConversation);
-      } else {
-        console.warn('⚠️ Could not load conversation, using provided data');
-        selectConversation(conversation);
-      }
-    } else {
-      selectConversation(conversation);
+      void loadConversationById(conversation.id);
     }
 
-    // Don't load messages here - let ChatPage handle it via route navigation
-    // This prevents double loading when AppSidebar calls navigateToChat
-    // The messages will be loaded by ChatPage's useEffect that reacts to conversationId changes
-
-    // Notify parent to trigger navigation (AppSidebar will call navigateToChat)
+    // Messages are NOT loaded here: the chat surface loads them from the route
+    // it is about to be on, and doing it twice raced two fetches for the same
+    // conversation.
     onConversationSelect?.(conversation);
   };
 
@@ -537,13 +519,13 @@ export function ConversationSidebar({
     setIsDeleting(true);
     try {
       if (conversationToDelete.agentId) {
-        // Agent conversations: clear messages only, keep the conversation
+        // Agent conversations: clear messages only, keep the conversation.
+        // clearMessages announces the wipe, so the surface actually SHOWING the
+        // transcript empties it. The sidebar used to clear a private copy of the
+        // messages that nothing rendered, leaving the open conversation on
+        // screen until a reload.
         console.log('🧹 [SIDEBAR] Clearing messages for agent conversation:', conversationToDelete.id);
-        await conversationApi.clearConversationMessages(conversationToDelete.id);
-
-        if (currentConversationId === conversationToDelete.id) {
-          clearMessages();
-        }
+        await clearMessages(conversationToDelete.id);
 
         console.log('✅ [SIDEBAR] Agent conversation messages cleared');
       } else {
@@ -724,6 +706,143 @@ export function ConversationSidebar({
     </ConversationStreamingIndicator>
   );
 
+  // Projects: the sidebar's own content, drawn inside the navigation block's
+  // scroll region. Handed to SidebarNavigation as a slot so that component stays
+  // the only thing that knows the block's shape, while the rows keep living here.
+  //
+  // Deliberately NOT memoized, though it is a prop of a memo()'d component. A
+  // `useMemo` here would need a hand-written list of everything the block reads
+  // (`projectMenuId` among them, which decides whether a project's menu is
+  // open), and a value missing from that list renders as a dead button rather
+  // than as a caching bug - invisible to the tests, because the `next-intl`
+  // mock returns a fresh translator each render and so defeats the memo in the
+  // test environment specifically. The saving would be small anyway: what is
+  // expensive is the ROWS, and those are memoized per entry inside
+  // SidebarNavigation with stable props, so they short-circuit whether or not
+  // their parent re-renders.
+  const projectsSection = !sidebarCollapsed ? (
+    <div className="flex-shrink-0">
+      <SidebarSection
+        title={t('sidebar.projects')}
+        collapsed={projectsCollapsed}
+        onToggleCollapse={() => setProjectsCollapsed(!projectsCollapsed)}
+        items={projects}
+        loading={projectsLoading}
+        icon={sidebarCollapsed ? Briefcase : undefined}
+        iconClassName="text-theme-muted group-hover:text-[var(--bg-primary)]"
+        titleClassName="text-theme-muted"
+        chevronClassName="text-theme-muted opacity-0 group-hover:opacity-100"
+        actions={
+          <Button
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditingProject(null);
+              setShowProjectModal(true);
+            }}
+            variant="ghostGray"
+            className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
+            title={t('sidebar.newProject')}
+          >
+            <Plus className="w-4 h-4 flex-shrink-0" />
+          </Button>
+        }
+        renderItem={(project: Project) => (
+          <div
+            key={project.id}
+            onClick={() => {
+              if (onNavigate) {
+                onNavigate(`/app/project/${project.id}`);
+              } else {
+                router.push(`/app/project/${project.id}`);
+              }
+            }}
+            className="group relative cursor-pointer transition-all duration-200 rounded-lg px-1 py-1.5 my-0.5 hover:bg-surface-hover"
+          >
+            <div className="flex items-center w-full min-w-0 pr-6">
+              {(() => {
+                const IconComp = getProjectIcon(project.icon);
+                return <IconComp className="w-4 h-4 mr-2 flex-shrink-0" style={{ color: project.color }} />;
+              })()}
+              <h3 className="text-sm font-normal truncate text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary min-w-0">{project.name}</h3>
+            </div>
+
+            {/* 3-dot menu - hidden for VIEWER (ProjectService update/delete
+                run the central canWrite gate and would 403). */}
+            {canMutateProjects && (
+            <Popover
+              open={projectMenuId === project.id}
+              onOpenChange={(open) => setProjectMenuId(open ? project.id : null)}
+            >
+              <PopoverTrigger asChild>
+                <Button
+                  onClick={(e) => e.stopPropagation()}
+                  variant="ghostGray"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 p-0 rounded-lg text-theme-muted opacity-0 group-hover:opacity-100 group-hover:bg-surface-hover transition-opacity"
+                >
+                  <MoreVertical className="w-3 h-3" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                sideOffset={5}
+                className="w-auto min-w-[160px] p-2 bg-theme-primary rounded-2xl border border-gray-300/70 dark:border-gray-600/70"
+              >
+                <div className="space-y-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setProjectMenuId(null);
+                      setEditingProject(project);
+                      setShowProjectModal(true);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors text-theme-primary hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    <Briefcase className="h-4 w-4" />
+                    <span className="text-sm">{t('project.editProject')}</span>
+                  </button>
+                  {project.currentUserRole === 'OWNER' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setProjectMenuId(null);
+                        if (window.confirm(t('project.deleteConfirm'))) {
+                          deleteProject.mutate(project.id);
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span className="text-sm">{t('project.deleteProject')}</span>
+                    </button>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+            )}
+          </div>
+        )}
+        emptyMessage=""
+        sidebarCollapsed={sidebarCollapsed}
+        isAuthenticated={isAuthenticated}
+      />
+    </div>
+  ) : null;
+
+  // The two things a navigation entry can do, in the panel exactly as in the
+  // rail: open a fresh conversation, or go to a page under the app's navigation
+  // guard. Both are handed to SidebarNavigation, which adds the click reporting.
+  const handleNewChat = useCallback(() => onNewChat?.(), [onNewChat]);
+  const handleNavItemNavigate = useCallback(
+    (path: string) => {
+      if (onNavigate) {
+        onNavigate(path);
+      } else {
+        router.push(path);
+      }
+    },
+    [onNavigate, router],
+  );
+
   // Render conversation list. Single TooltipProvider scoped to the sidebar so
   // every conversation row's hover pill shares one delayed timer + portal -
   // cheaper than mounting one provider per row.
@@ -732,348 +851,18 @@ export function ConversationSidebar({
     <div className={`bg-theme-secondary flex flex-col h-full relative overflow-hidden ${className}`}>
       {/* Conversation View */}
       <div className="flex flex-col h-full">
-        {/* Home - opens the new-chat landing page (above Marketplace) */}
-        {!sidebarCollapsed && (
-          <div className="flex-shrink-0">
-            <div className="">
-              <div className="flex items-center px-4">
-                <button
-                  onClick={() => onNewChat?.()}
-                  // Highlight Home whenever the main panel is actually on Home (new chat) - including
-                  // while the sidebar is in Messages mode, since Messages is a pure view that keeps us
-                  // on Home. Only an open DM thread (/app/messages/[threadId]) un-highlights it.
-                  className={`flex items-center group rounded-lg px-1 py-1.5 my-0.5 transition-all duration-200 cursor-pointer w-full ${currentView === 'chat' && !isDetailPage && !currentConversationId && !pathname?.includes('/app/messages')
-                    ? 'bg-surface-hover'
-                    : 'bg-transparent hover:bg-surface-hover'
-                    }`}
-                >
-                  <Home className="w-4 h-4 text-theme-secondary mr-2 group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary transition-colors" />
-                  <h2 className="text-sm text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary group-[.bg-surface-hover]:font-medium transition-colors">{t('sidebar.home')}</h2>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Market Place - Always visible, clickable */}
-        {!sidebarCollapsed && (
-          <div className="flex-shrink-0">
-            <div className="">
-              <div className="flex items-center px-4">
-                <button
-                  onClick={onMarketPlaceClick}
-                  className={`flex items-center group rounded-lg px-1 py-1.5 my-0.5 transition-all duration-200 cursor-pointer w-full ${currentView === 'marketplace'
-                    ? 'bg-surface-hover'
-                    : 'bg-transparent hover:bg-surface-hover'
-                    }`}
-                >
-                  <Store className="w-4 h-4 text-theme-secondary mr-2 group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary transition-colors" />
-                  <h2 className="text-sm text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary group-[.bg-surface-hover]:font-medium transition-colors">{t('sidebar.marketplace')}</h2>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Navigation block (Projects ... Files): height-capped at 40% of the
-            sidebar with its own scrollbar, so the Chats list below always stays
-            visible. Home + Marketplace above stay fixed, outside this block.
-            The wrapper is a pure layout container (no !sidebarCollapsed guard):
-            each inner section keeps its own guard, so when collapsed this div is
-            simply empty (0 height) and the existing visibility logic is untouched. */}
-        <div className="flex-shrink-0 max-h-[40%] overflow-y-auto sidebar-scroll">
-        {/* Projects Section */}
-        {!sidebarCollapsed && (
-          <div className="flex-shrink-0">
-            <SidebarSection
-              title={t('sidebar.projects')}
-              collapsed={projectsCollapsed}
-              onToggleCollapse={() => setProjectsCollapsed(!projectsCollapsed)}
-              items={projects}
-              loading={projectsLoading}
-              icon={sidebarCollapsed ? Briefcase : undefined}
-              iconClassName="text-theme-muted group-hover:text-[var(--bg-primary)]"
-              titleClassName="text-theme-muted"
-              chevronClassName="text-theme-muted opacity-0 group-hover:opacity-100"
-              actions={
-                <Button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingProject(null);
-                    setShowProjectModal(true);
-                  }}
-                  variant="ghostGray"
-                  className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
-                  title={t('sidebar.newProject')}
-                >
-                  <Plus className="w-4 h-4 flex-shrink-0" />
-                </Button>
-              }
-              renderItem={(project: Project) => (
-                <div
-                  key={project.id}
-                  onClick={() => {
-                    if (onNavigate) {
-                      onNavigate(`/app/project/${project.id}`);
-                    } else {
-                      router.push(`/app/project/${project.id}`);
-                    }
-                  }}
-                  className="group relative cursor-pointer transition-all duration-200 rounded-lg px-1 py-1.5 my-0.5 hover:bg-surface-hover"
-                >
-                  <div className="flex items-center w-full min-w-0 pr-6">
-                    {(() => {
-                      const IconComp = getProjectIcon(project.icon);
-                      return <IconComp className="w-4 h-4 mr-2 flex-shrink-0" style={{ color: project.color }} />;
-                    })()}
-                    <h3 className="text-sm font-normal truncate text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary min-w-0">{project.name}</h3>
-                  </div>
-
-                  {/* 3-dot menu - hidden for VIEWER (ProjectService update/delete
-                      run the central canWrite gate and would 403). */}
-                  {canMutateProjects && (
-                  <Popover
-                    open={projectMenuId === project.id}
-                    onOpenChange={(open) => setProjectMenuId(open ? project.id : null)}
-                  >
-                    <PopoverTrigger asChild>
-                      <Button
-                        onClick={(e) => e.stopPropagation()}
-                        variant="ghostGray"
-                        className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 p-0 rounded-lg text-theme-muted opacity-0 group-hover:opacity-100 group-hover:bg-surface-hover transition-opacity"
-                      >
-                        <MoreVertical className="w-3 h-3" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      align="end"
-                      sideOffset={5}
-                      className="w-auto min-w-[160px] p-2 bg-theme-primary rounded-2xl border border-gray-300/70 dark:border-gray-600/70"
-                    >
-                      <div className="space-y-1">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setProjectMenuId(null);
-                            setEditingProject(project);
-                            setShowProjectModal(true);
-                          }}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors text-theme-primary hover:bg-gray-100 dark:hover:bg-gray-800"
-                        >
-                          <Briefcase className="h-4 w-4" />
-                          <span className="text-sm">{t('project.editProject')}</span>
-                        </button>
-                        {project.currentUserRole === 'OWNER' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setProjectMenuId(null);
-                              if (window.confirm(t('project.deleteConfirm'))) {
-                                deleteProject.mutate(project.id);
-                              }
-                            }}
-                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            <span className="text-sm">{t('project.deleteProject')}</span>
-                          </button>
-                        )}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                  )}
-                </div>
-              )}
-              emptyMessage=""
-              sidebarCollapsed={sidebarCollapsed}
-              isAuthenticated={isAuthenticated}
-            />
-          </div>
-        )}
-
-        {/* Board Button - aggregated Tasks / Applications / Workflows board (above Agents) */}
-        {!sidebarCollapsed && (
-          <div className="flex-shrink-0">
-            <div className="">
-              <div className="flex items-center px-4">
-                <button
-                  onClick={() => {
-                    if (onNavigate) {
-                      onNavigate('/app/board');
-                    } else {
-                      router.push('/app/board');
-                    }
-                  }}
-                  className={`flex items-center group rounded-lg px-1 py-1.5 my-0.5 transition-all duration-200 cursor-pointer w-full ${currentView === 'board'
-                    ? 'bg-surface-hover'
-                    : 'bg-transparent hover:bg-surface-hover'
-                    }`}
-                >
-                  <Columns3 className="w-4 h-4 text-theme-secondary mr-2 group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary transition-colors" />
-                  <h2 className="text-sm text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary group-[.bg-surface-hover]:font-medium transition-colors">{t('sidebar.board')}</h2>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Agents Button */}
-        {!sidebarCollapsed && (
-          <div className="flex-shrink-0">
-            <div className="">
-              <div className="flex items-center px-4">
-                <button
-                  onClick={() => {
-                    if (onNavigate) {
-                      onNavigate('/app/agent');
-                    } else {
-                      router.push('/app/agent');
-                    }
-                  }}
-                  className={`flex items-center group rounded-lg px-1 py-1.5 my-0.5 transition-all duration-200 cursor-pointer w-full ${currentView === 'agent'
-                    ? 'bg-surface-hover'
-                    : 'bg-transparent hover:bg-surface-hover'
-                    }`}
-                >
-                  <Bot className="w-4 h-4 text-theme-secondary mr-2 group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary transition-colors" />
-                  <h2 className="text-sm text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary group-[.bg-surface-hover]:font-medium transition-colors">{t('sidebar.agents')}</h2>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Applications Button */}
-        {!sidebarCollapsed && (
-          <div className="flex-shrink-0">
-            <div className="">
-              <div className="flex items-center px-4">
-                <button
-                  onClick={() => {
-                    if (onNavigate) {
-                      onNavigate('/app/applications');
-                    } else {
-                      router.push('/app/applications');
-                    }
-                  }}
-                  className={`flex items-center group rounded-lg px-1 py-1.5 my-0.5 transition-all duration-200 cursor-pointer w-full ${currentView === 'applications'
-                    ? 'bg-surface-hover'
-                    : 'bg-transparent hover:bg-surface-hover'
-                    }`}
-                >
-                  <AppWindow className="w-4 h-4 text-theme-secondary mr-2 group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary transition-colors" />
-                  <h2 className="text-sm text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary group-[.bg-surface-hover]:font-medium transition-colors">{t('sidebar.applications')}</h2>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Workflows Button */}
-        {!sidebarCollapsed && (
-          <div className="flex-shrink-0">
-            <div className="">
-              <div className="flex items-center px-4">
-                <button
-                  onClick={() => {
-                    if (onNavigate) {
-                      onNavigate('/app/workflow');
-                    } else {
-                      router.push('/app/workflow');
-                    }
-                  }}
-                  className={`flex items-center group rounded-lg px-1 py-1.5 my-0.5 transition-all duration-200 cursor-pointer w-full ${currentView === 'workflow'
-                    ? 'bg-surface-hover'
-                    : 'bg-transparent hover:bg-surface-hover'
-                    }`}
-                >
-                  <Workflow className="w-4 h-4 text-theme-secondary mr-2 group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary transition-colors" />
-                  <h2 className="text-sm text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary group-[.bg-surface-hover]:font-medium transition-colors">{t('sidebar.workflows')}</h2>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Interface Button */}
-        {!sidebarCollapsed && (
-          <div className="flex-shrink-0">
-            <div className="">
-              <div className="flex items-center px-4">
-                <button
-                  onClick={() => {
-                    if (onNavigate) {
-                      onNavigate('/app/interface');
-                    } else {
-                      router.push('/app/interface');
-                    }
-                  }}
-                  className={`flex items-center group rounded-lg px-1 py-1.5 my-0.5 transition-all duration-200 cursor-pointer w-full ${currentView === 'interface'
-                    ? 'bg-surface-hover'
-                    : 'bg-transparent hover:bg-surface-hover'
-                    }`}
-                >
-                  <Monitor className="w-4 h-4 text-theme-secondary mr-2 group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary transition-colors" />
-                  <h2 className="text-sm text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary group-[.bg-surface-hover]:font-medium transition-colors">{t('sidebar.interfaces')}</h2>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Data Button */}
-        {!sidebarCollapsed && (
-          <div className="flex-shrink-0">
-            <div className="">
-              <div className="flex items-center px-4">
-                <button
-                  onClick={() => {
-                    if (onNavigate) {
-                      onNavigate('/app/tables');
-                    } else {
-                      router.push('/app/tables');
-                    }
-                  }}
-                  className={`flex items-center group rounded-lg px-1 py-1.5 my-0.5 transition-all duration-200 cursor-pointer w-full ${currentView === 'data'
-                    ? 'bg-surface-hover'
-                    : 'bg-transparent hover:bg-surface-hover'
-                    }`}
-                >
-                  <Table className="w-4 h-4 text-theme-secondary mr-2 group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary transition-colors" />
-                  <h2 className="text-sm text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary group-[.bg-surface-hover]:font-medium transition-colors">{t('sidebar.tables')}</h2>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Files Button */}
-        {!sidebarCollapsed && (
-          <div className="flex-shrink-0">
-            <div className="">
-              <div className="flex items-center px-4">
-                <button
-                  onClick={() => {
-                    if (onNavigate) {
-                      onNavigate('/app/files');
-                    } else {
-                      router.push('/app/files');
-                    }
-                  }}
-                  className={`flex items-center group rounded-lg px-1 py-1.5 my-0.5 transition-all duration-200 cursor-pointer w-full ${currentView === 'files'
-                    ? 'bg-surface-hover'
-                    : 'bg-transparent hover:bg-surface-hover'
-                    }`}
-                >
-                  <Folder className="w-4 h-4 text-theme-secondary mr-2 group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary transition-colors" />
-                  <h2 className="text-sm text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary group-[.bg-surface-hover]:font-medium transition-colors">{t('sidebar.nav.files')}</h2>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        </div>
-        {/* end navigation block (Projects ... Files) */}
+        {/* Every navigation entry the sidebar draws, in the panel's shape. The
+            SAME component draws the collapsed rail in the header above (see
+            AppSidebar), off the same resolved list, so the two states of the
+            sidebar cannot show different pages or light different entries. */}
+        <SidebarNavigation
+          variant="panel"
+          active={!sidebarCollapsed}
+          currentConversationId={currentConversationId}
+          onNewChat={handleNewChat}
+          onNavigate={handleNavItemNavigate}
+          projectsSlot={projectsSection}
+        />
 
         {/* Conversations List */}
         {!sidebarCollapsed && (
@@ -1204,7 +993,7 @@ export function ConversationSidebar({
                           className="w-auto min-w-[140px] p-1.5 bg-theme-primary rounded-xl border border-gray-300/70 dark:border-gray-600/70"
                         >
                           <div className="space-y-0.5">
-                            {(['all', 'agents', 'workflows'] as const).map((filter) => (
+                            {(['all', 'agents', 'workflows', 'studio'] as const).map((filter) => (
                               <button
                                 key={filter}
                                 onClick={(e) => {
@@ -1218,7 +1007,13 @@ export function ConversationSidebar({
                                     : 'text-theme-muted hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-theme-primary'
                                 }`}
                               >
-                                {filter === 'all' ? t('sidebar.allChats') : filter === 'agents' ? t('sidebar.agentChats') : t('sidebar.workflowChats')}
+                                {filter === 'all'
+                                  ? t('sidebar.allChats')
+                                  : filter === 'agents'
+                                    ? t('sidebar.agentChats')
+                                    : filter === 'workflows'
+                                      ? t('sidebar.workflowChats')
+                                      : t('sidebar.studioChats')}
                               </button>
                             ))}
                           </div>
@@ -1246,7 +1041,7 @@ export function ConversationSidebar({
                         }}
                         variant="ghostGray"
                         className="w-5 h-5 min-w-[20px] min-h-[20px] p-0 rounded-lg text-theme-muted hover:text-[var(--bg-primary)] transition-colors font-normal flex items-center justify-center"
-                        title={t('sidebar.newChat')}
+                        title={t('sidebar.nav.newChat')}
                       >
                         <Plus className="w-4 h-4 flex-shrink-0" />
                       </Button>
@@ -1263,7 +1058,7 @@ export function ConversationSidebar({
                 customContent={
                   messagesMode ? (
                     <DmSidebarList filter={dmFilter} searchOpen={dmSearchOpen} />
-                  ) : loading && conversations.length === 0 && sharedConversations.length === 0 ? (
+                  ) : loading && conversations.length === 0 ? (
                     // Skeleton loading for conversations
                     <div className="h-full flex flex-col px-4">
                       <div className="flex-1 space-y-0.5">
@@ -1305,6 +1100,14 @@ export function ConversationSidebar({
                               </div>
                             )}
                           </>
+                        ) : listLoading ? (
+                          // An empty list and a list still arriving look identical otherwise, and
+                          // the first reads as "you have none" for conversations that exist. Only
+                          // reachable for a filter that fetches its own rows; the unfiltered list is
+                          // already on screen by the time this renders.
+                          <div className="p-2 text-center">
+                            <LoadingSpinner size="sm" className="text-theme-secondary" />
+                          </div>
                         ) : null}
                       </div>
                     </div>
@@ -1356,4 +1159,4 @@ export function ConversationSidebar({
     </div>
     </TooltipProvider>
   );
-}
+});

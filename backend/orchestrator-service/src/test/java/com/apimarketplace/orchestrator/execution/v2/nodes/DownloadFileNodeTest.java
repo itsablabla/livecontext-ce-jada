@@ -568,4 +568,28 @@ class DownloadFileNodeTest {
             assertEquals("text/plain", node.getMimeTypeExpression());
         }
     }
+
+    @Test
+    @DisplayName("reports url / filename / mimeType on the FAILURE path too, the same names the success path uses")
+    @SuppressWarnings("unchecked")
+    void failurePathReportsPlanKeyNames() {
+        // No services wired: the node fails before resolving anything, which is the
+        // path that used to report url_expression / filename_expression /
+        // mime_type_expression - three keys the plan does not have and the label
+        // registry has no entry for, while the success path already said url /
+        // filename / mimeType. One setting, two names, decided by the exit taken.
+        DownloadFileNode node = new DownloadFileNode(
+            "mcp:download", "{{trigger:start.url}}", "report.pdf", "application/pdf");
+
+        NodeExecutionResult result = node.execute(context);
+
+        assertFalse(result.isSuccess());
+        Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+        assertEquals("{{trigger:start.url}}", params.get("url"));
+        assertEquals("report.pdf", params.get("filename"));
+        assertEquals("application/pdf", params.get("mimeType"));
+        assertFalse(params.containsKey("url_expression"));
+        assertFalse(params.containsKey("filename_expression"));
+        assertFalse(params.containsKey("mime_type_expression"));
+    }
 }

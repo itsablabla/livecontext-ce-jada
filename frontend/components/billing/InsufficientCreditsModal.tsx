@@ -367,8 +367,10 @@ export default function InsufficientCreditsModal() {
               {tBilling('taxNote')}
             </p>
 
-            {/* Footer link */}
-            <div className="mt-4 text-center">
+            {/* Footer links. The plan comparison used to open over this modal;
+                it lives on the pricing page now, which "View all plans" leads
+                to, so the modal states its three cards and gets out of the way. */}
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
               <button
                 onClick={() => { setOpen(false); router.push('/app/settings/pricing'); }}
                 className="text-xs text-theme-muted hover:text-theme-primary underline"

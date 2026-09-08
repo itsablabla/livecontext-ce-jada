@@ -464,9 +464,20 @@ export class PublicationService {
     size: number = 20,
     categorySlug?: string,
     refinements?: MarketplaceRefinements,
+    /**
+     * Keep only the applications that PRODUCE a media asset. A SECOND AXIS: it composes with the
+     * category rather than replacing it, so a studio application keeps saying what it is about.
+     */
+    studioOnly?: boolean,
   ): Promise<MarketplacePublicationsResponse> {
     return apiClient.get<MarketplacePublicationsResponse>('/publications/marketplace', {
-      params: { page, size, category: categorySlug, ...marketplaceRefinementParams(refinements) },
+      params: {
+        page,
+        size,
+        category: categorySlug,
+        ...(studioOnly ? { studio: true } : {}),
+        ...marketplaceRefinementParams(refinements),
+      },
       optionalAuth: true,
     });
   }
@@ -486,21 +497,23 @@ export class PublicationService {
   /**
    * Onboarding "suggested applications" - personalized public marketplace
    * applications derived from the caller's onboarding choices. The backend
-   * (OnboardingCategoryMapper) maps interests / useCases / profession to
-   * category slugs and returns matching applications, with a top-applications
-   * fallback when none match. Array params are comma-joined (Spring binds them
-   * back to a List<String>).
+   * (OnboardingCategoryMapper) maps primaryGoal / interests / useCases /
+   * profession to category slugs and returns matching applications, with a
+   * top-applications fallback when none match. Array params are comma-joined
+   * (Spring binds them back to a List<String>).
    */
   async getSuggestedApplications(opts: {
     interests?: string[];
     useCases?: string[];
     profession?: string;
+    primaryGoal?: string | null;
     limit?: number;
   } = {}): Promise<PublicationsListResponse> {
     const params: Record<string, string> = { limit: String(opts.limit ?? 8) };
     if (opts.interests?.length) params.interests = opts.interests.join(',');
     if (opts.useCases?.length) params.useCases = opts.useCases.join(',');
     if (opts.profession) params.profession = opts.profession;
+    if (opts.primaryGoal) params.primaryGoal = opts.primaryGoal;
     return apiClient.get<PublicationsListResponse>('/publications/suggestions', { params });
   }
 
@@ -574,8 +587,14 @@ export class PublicationService {
     query: string,
     category?: string,
     refinements?: MarketplaceRefinements,
+    /**
+     * The studio axis, forwarded so a search inside the Studio shelf narrows what the reader is
+     * already looking at instead of answering with the whole marketplace.
+     */
+    studioOnly?: boolean,
   ): Promise<PublicationsListResponse> {
     const params: Record<string, string> = { q: query, ...marketplaceRefinementParams(refinements) };
+    if (studioOnly) params.studio = 'true';
     if (category) params.category = category;
     return apiClient.get<PublicationsListResponse>('/publications/search', {
       params,
@@ -664,9 +683,20 @@ export class PublicationService {
     size: number = 50,
     categorySlug?: string,
     refinements?: MarketplaceRefinements,
+    /**
+     * Keep only the applications that PRODUCE a media asset. A SECOND AXIS: it composes with the
+     * category rather than replacing it, so a studio application keeps saying what it is about.
+     */
+    studioOnly?: boolean,
   ): Promise<MarketplacePublicationsResponse> {
     return apiClient.get<MarketplacePublicationsResponse>('/publications/remote/marketplace', {
-      params: { page, size, category: categorySlug, ...marketplaceRefinementParams(refinements) },
+      params: {
+        page,
+        size,
+        category: categorySlug,
+        ...(studioOnly ? { studio: true } : {}),
+        ...marketplaceRefinementParams(refinements),
+      },
     });
   }
 
@@ -675,8 +705,14 @@ export class PublicationService {
     query: string,
     category?: string,
     refinements?: MarketplaceRefinements,
+    /**
+     * The studio axis, forwarded so a search inside the Studio shelf narrows what the reader is
+     * already looking at instead of answering with the whole marketplace.
+     */
+    studioOnly?: boolean,
   ): Promise<PublicationsListResponse> {
     const params: Record<string, string> = { q: query, ...marketplaceRefinementParams(refinements) };
+    if (studioOnly) params.studio = 'true';
     if (category) params.category = category;
     return apiClient.get<PublicationsListResponse>('/publications/remote/search', { params });
   }

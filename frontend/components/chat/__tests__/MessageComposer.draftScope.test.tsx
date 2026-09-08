@@ -11,6 +11,14 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import * as React from 'react';
 import { readDraft, writeDraft } from '@/lib/chat/draftStorage';
 
+// The Generate control leads to the studio through the LOCALE-AWARE router, and next-intl's
+// navigation module cannot resolve 'next/navigation' under vitest. Stood in for here because this
+// suite is not about where that control goes (that is pinned in the generate-entry-point suites).
+vi.mock('@/i18n/navigation', () => ({
+  useRouter: () => ({ push: () => undefined, replace: () => undefined, prefetch: () => undefined }),
+  usePathname: () => '/app',
+  Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+}));
 vi.mock('next-intl', () => ({
   useTranslations: () => (key: string) => key,
 }));

@@ -123,7 +123,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -149,7 +149,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         // The snapshot stored on the entity should have the rewritten path
         Map<String, Object> stored = pub.getShowcaseSnapshot();
@@ -190,7 +190,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         Map<String, Object> runState = (Map<String, Object>) pub.getShowcaseSnapshot().get("runState");
@@ -219,7 +219,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         Map<String, Object> runState = (Map<String, Object>) pub.getShowcaseSnapshot().get("runState");
@@ -248,7 +248,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         verify(orchestratorClient, atLeastOnce()).copyFile(any(), any());
     }
@@ -269,7 +269,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         verify(orchestratorClient, never()).copyFile(any(), any());
     }
@@ -292,7 +292,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         // Original path preserved (not nulled, not replaced)
         Map<String, Object> stored = pub.getShowcaseSnapshot();
@@ -320,7 +320,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -376,7 +376,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -427,7 +427,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -456,7 +456,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
                 PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, true,
-                Map.of(externalUrl, generatedPath));
+                Map.of(externalUrl, generatedPath), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -503,7 +503,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -564,7 +564,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         // Verify the proxy URL was first normalized to FileRef, then copyFile was invoked
         @SuppressWarnings("unchecked")
@@ -612,7 +612,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         // Both embedded proxy URLs should trigger file copies
         verify(orchestratorClient, times(2)).copyFile(any(), any());
@@ -650,7 +650,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         // No file copy should be triggered - no proxy URLs and no FileRefs
         verify(orchestratorClient, never()).copyFile(any(), any());
@@ -677,7 +677,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -704,7 +704,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -724,7 +724,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         verify(orchestratorClient, never()).copyFile(any(), any());
     }
@@ -892,10 +892,10 @@ class WorkflowPublicationServiceFileRefCopyTest {
     }
 
     @Test
-    @DisplayName("re-homing a landing file recomputes the CE-exclusive label - a deliberate side effect on the repair path, where an old publication is re-labelled with today's rules")
+    @DisplayName("re-homing a landing file recomputes the capability label - a deliberate side effect on the repair path, where an old publication is re-labelled with today's rules")
     void materializeLandingRecomputesCeExclusiveLabel() {
-        // A table carrying a vector column is CE-only. This publication is stored with the
-        // label unset, as one published before the detector knew that rule would be.
+        // A table carrying a vector column is labelled VECTOR_SEARCH. This publication is stored
+        // with no label at all, as one published before the detector knew that rule would be.
         Map<String, Object> agentSnapshot = landingSnapshot(fileRef(FILE_OWNER_TENANT + "/run/hero.png"));
         // In an AGENT snapshot a standalone table carries its spec under `mappingSpec`
         // (the `_snapshot_ds_` prefix is the PLAN-side shape).
@@ -911,8 +911,10 @@ class WorkflowPublicationServiceFileRefCopyTest {
 
         service.materializeLandingFiles(pub, PUBLISHER_TENANT);
 
-        assertThat(pub.isCeExclusive()).isTrue();
         assertThat(pub.getCeExclusiveFeatures()).contains("VECTOR_SEARCH");
+        // The label is recomputed with TODAY's rules, and today embeddings are priced rather than
+        // impossible: the row records the capability without becoming un-installable.
+        assertThat(pub.isCeExclusive()).isFalse();
     }
 
     @Test
@@ -1096,7 +1098,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         // Malformed proxy URL → no normalization → no copy
         verify(orchestratorClient, never()).copyFile(any(), any());
@@ -1126,7 +1128,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         verify(orchestratorClient, never()).copyFile(any(), any());
     }
@@ -1151,7 +1153,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         verify(orchestratorClient, never()).copyFile(any(), any());
         assertThat(data.get("doc")).isEqualTo(url);
@@ -1177,7 +1179,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
                 PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false,
-                Map.of("__flagged__", "3/private/contract.pdf"));
+                Map.of("__flagged__", "3/private/contract.pdf"), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -1199,7 +1201,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
                 PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false,
-                Map.of("__flagged__", PUBLISHER_TENANT + "/screening/clean.png"));
+                Map.of("__flagged__", PUBLISHER_TENANT + "/screening/clean.png"), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -1251,7 +1253,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -1376,7 +1378,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -1411,7 +1413,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         verify(orchestratorClient, never()).copyFile(any(), any());
         @SuppressWarnings("unchecked")
@@ -1450,7 +1452,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         verify(orchestratorClient, times(1)).copyFile(any(), any());
         assertThat(inRunState).containsEntry("path", newPath).containsEntry("id", "st-new");
@@ -1517,7 +1519,7 @@ class WorkflowPublicationServiceFileRefCopyTest {
                 WORKFLOW_ID, PUBLISHER_TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         assertThat(first).doesNotContainKey("id");
         assertThat(second).doesNotContainKey("id");

@@ -2231,3 +2231,51 @@ describe('WorkflowRunManager - Seq-Based Stale Event Filtering', () => {
     });
   });
 });
+
+/**
+ * The epoch a caller chose has to reach the request. The manager is the last hop before the
+ * HTTP call, and it also attaches the current plan there - so a signature change that keeps
+ * the plan and drops the epoch type-checks, runs, and replays the wrong fire in silence.
+ */
+describe('WorkflowRunManager - rerun epoch', () => {
+  let manager: WorkflowRunManager;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    manager = new WorkflowRunManager('run-1');
+  });
+
+  afterEach(() => {
+    manager.destroy();
+    vi.useRealTimers();
+  });
+
+  it('forwards the chosen epoch to the rerun request', async () => {
+    await initManager(manager);
+    mockRerunFromStep.mockResolvedValueOnce(createRerunResponse());
+
+    await manager.rerunStep('mcp:node2', 1);
+
+    // 4th argument: the plan slot stays where it was, the epoch rides after it.
+    expect(mockRerunFromStep).toHaveBeenCalledWith('run-1', 'mcp:node2', undefined, 1);
+  });
+
+  it('forwards epoch 0 - the run FIRST fire is a real epoch', async () => {
+    await initManager(manager);
+    mockRerunFromStep.mockResolvedValueOnce(createRerunResponse());
+
+    await manager.rerunStep('mcp:node2', 0);
+
+    expect(mockRerunFromStep).toHaveBeenCalledWith('run-1', 'mcp:node2', undefined, 0);
+  });
+
+  it('sends no epoch when the caller named none', async () => {
+    await initManager(manager);
+    mockRerunFromStep.mockResolvedValueOnce(createRerunResponse());
+
+    await manager.rerunStep('mcp:node2');
+
+    expect(mockRerunFromStep).toHaveBeenCalledWith('run-1', 'mcp:node2', undefined, undefined);
+  });
+});

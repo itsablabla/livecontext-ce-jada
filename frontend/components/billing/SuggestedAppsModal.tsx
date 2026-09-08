@@ -18,24 +18,21 @@ import { isCeMode } from '@/lib/format-cost';
 /**
  * Onboarding "suggested applications" modal.
  *
- * Shown once, right AFTER the WelcomeGiftModal, at the end of onboarding. It
- * proposes marketplace applications tailored to the user's onboarding choices
- * (the backend OnboardingCategoryMapper turns interests / useCases / profession
- * into category slugs; PublicationListQueryService returns matching public
- * applications, with a top-applications fallback). Each card is the exact same
- * {@link PublicationCard} used in /app/marketplace - clicking it opens the
- * publication's marketplace preview page.
+ * Shown once at the end of onboarding. It proposes marketplace applications
+ * tailored to the user's onboarding choices (the backend
+ * OnboardingCategoryMapper turns primaryGoal / interests / useCases /
+ * profession into category slugs; PublicationListQueryService returns matching
+ * public applications, with a top-applications fallback). Each card is the
+ * exact same {@link PublicationCard} used in /app/marketplace - clicking it
+ * opens the publication's marketplace preview page.
  *
- * Sequencing: onboarding sets {@code lc_show_app_suggestions}; this modal arms
- * on that flag, then waits for {@code lc:welcome-gift-done} (dispatched by
- * WelcomeGiftModal when it closes or decides not to show) so the two modals
- * never overlap. A sessionStorage latch ({@code lc_welcome_gift_done}) closes
- * the mount-order race when the gift finishes before this modal's listener
- * registers.
+ * Sequencing: onboarding sets {@code lc_show_app_suggestions} and this modal
+ * arms on that flag, full stop. It used to additionally wait for a
+ * {@code lc:welcome-gift-done} hand-off from a credit-gift modal that ran
+ * first; that modal is gone, and waiting on an event nobody dispatches would
+ * have left this one armed forever without ever opening.
  */
 const SHOW_FLAG = 'lc_show_app_suggestions';
-const GIFT_DONE_FLAG = 'lc_welcome_gift_done';
-const GIFT_DONE_EVENT = 'lc:welcome-gift-done';
 const SUGGESTION_LIMIT = 4;
 
 export default function SuggestedAppsModal() {
@@ -45,7 +42,6 @@ export default function SuggestedAppsModal() {
   const { user, isLoading } = useAuthGuard();
 
   const [armed, setArmed] = useState(false);
-  const [giftDone, setGiftDone] = useState(false);
   const [open, setOpen] = useState(false);
 
   // Arm once when onboarding set the flag. Consume it unconditionally (even in
@@ -58,25 +54,9 @@ export default function SuggestedAppsModal() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  // Wait for the welcome-gift modal to finish before showing.
-  useEffect(() => {
-    if (!armed) return;
-    if (sessionStorage.getItem(GIFT_DONE_FLAG) === '1') {
-      sessionStorage.removeItem(GIFT_DONE_FLAG);
-      const timer = window.setTimeout(() => setGiftDone(true), 0);
-      return () => window.clearTimeout(timer);
-    }
-    const handler = () => {
-      try { sessionStorage.removeItem(GIFT_DONE_FLAG); } catch { /* ignore */ }
-      setGiftDone(true);
-    };
-    window.addEventListener(GIFT_DONE_EVENT, handler);
-    return () => window.removeEventListener(GIFT_DONE_EVENT, handler);
-  }, [armed]);
-
   const { data } = useQuery({
     queryKey: ['onboarding-suggested-apps', user?.sub],
-    enabled: armed && giftDone && !!user && !isLoading,
+    enabled: armed && !!user && !isLoading,
     staleTime: Infinity,
     retry: false,
     queryFn: async () => {
@@ -92,6 +72,7 @@ export default function SuggestedAppsModal() {
         interests: status?.interests,
         useCases: status?.useCases,
         profession: status?.profession,
+        primaryGoal: status?.primaryGoal,
         limit: SUGGESTION_LIMIT,
       });
     },
@@ -99,13 +80,13 @@ export default function SuggestedAppsModal() {
 
   const apps: WorkflowPublication[] = data?.publications ?? [];
 
-  // Open once suggestions arrive (small delay for a smooth hand-off from the gift).
+  // Open once suggestions arrive (small delay so the chat behind has painted).
   useEffect(() => {
-    if (giftDone && apps.length > 0) {
+    if (armed && apps.length > 0) {
       const timer = setTimeout(() => setOpen(true), 250);
       return () => clearTimeout(timer);
     }
-  }, [giftDone, apps.length]);
+  }, [armed, apps.length]);
 
   if (!open || apps.length === 0) return null;
 
@@ -149,7 +130,7 @@ export default function SuggestedAppsModal() {
           <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
             {t('dismiss')}
           </Button>
-          <Button variant="contrast" size="sm" onClick={goToMarketplace}>
+          <Button variant="default" size="sm" onClick={goToMarketplace}>
             {t('cta')}
             <ArrowRight className="h-3.5 w-3.5" />
           </Button>

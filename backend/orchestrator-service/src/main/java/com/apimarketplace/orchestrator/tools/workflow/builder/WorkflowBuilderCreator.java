@@ -221,8 +221,8 @@ public class WorkflowBuilderCreator {
     }
 
     /**
-     * Processes audio/video files (probe, mux_audio, mix, extract_audio) on the
-     * optional renderer component.
+     * Processes audio/video files (probe, mux_audio, mix, extract_audio, concat,
+     * frame, overlay, subtitles) on the optional renderer component.
      * Delegates to ControlNodeCreator for the actual implementation.
      */
     public ToolExecutionResult executeAddMedia(WorkflowBuilderSession session, Map<String, Object> parameters) {

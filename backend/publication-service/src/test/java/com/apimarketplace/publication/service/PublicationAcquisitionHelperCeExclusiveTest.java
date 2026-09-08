@@ -49,53 +49,55 @@ class PublicationAcquisitionHelperCeExclusiveTest {
         publication.setStatus(PublicationStatus.ACTIVE);
         publication.setVisibility(PublicationVisibility.PUBLIC);
         publication.setCeExclusive(true);
-        publication.setCeExclusiveFeatures(List.of("VECTOR_SEARCH"));
+        // CLI_AGENT: the only feature that still makes an install impossible on managed cloud.
+        // VECTOR_SEARCH became a plan question on 2026-09-03 and is covered by its own case.
+        publication.setCeExclusiveFeatures(List.of("CLI_AGENT"));
         return publication;
     }
 
     @Test
     @DisplayName("managed cloud refuses a CE-exclusive publication on a first acquisition")
     void cloudRefusesFirstAcquire() {
-        helper.setCeExclusiveGuard(new CeExclusiveAcquisitionGuard(edition("cloud")));
+        helper.setCeExclusiveGuard(new CeExclusiveAcquisitionGuard(edition("cloud"), null));
 
-        assertThatThrownBy(() -> helper.validateAcquirable(ceExclusivePublication(), false))
+        assertThatThrownBy(() -> helper.validateAcquirable(ceExclusivePublication(), false, "42"))
                 .isInstanceOf(CeExclusivePublicationException.class);
     }
 
     @Test
     @DisplayName("managed cloud refuses it for a RECEIPT HOLDER too - a reinstall cannot run either")
     void cloudRefusesReinstall() {
-        helper.setCeExclusiveGuard(new CeExclusiveAcquisitionGuard(edition("cloud")));
+        helper.setCeExclusiveGuard(new CeExclusiveAcquisitionGuard(edition("cloud"), null));
 
-        assertThatThrownBy(() -> helper.validateAcquirable(ceExclusivePublication(), true))
+        assertThatThrownBy(() -> helper.validateAcquirable(ceExclusivePublication(), true, "42"))
                 .isInstanceOf(CeExclusivePublicationException.class);
     }
 
     @Test
     @DisplayName("self-hosted lets it through and keeps the normal visibility/status rules")
     void selfHostedAllows() {
-        helper.setCeExclusiveGuard(new CeExclusiveAcquisitionGuard(edition("ce")));
+        helper.setCeExclusiveGuard(new CeExclusiveAcquisitionGuard(edition("ce"), null));
 
-        assertThatCode(() -> helper.validateAcquirable(ceExclusivePublication(), false))
+        assertThatCode(() -> helper.validateAcquirable(ceExclusivePublication(), false, "42"))
                 .doesNotThrowAnyException();
     }
 
     @Test
     @DisplayName("without the guard wired the helper behaves exactly as before")
     void noGuardIsNoOp() {
-        assertThatCode(() -> helper.validateAcquirable(ceExclusivePublication(), false))
+        assertThatCode(() -> helper.validateAcquirable(ceExclusivePublication(), false, "42"))
                 .doesNotThrowAnyException();
     }
 
     @Test
     @DisplayName("the edition gate runs BEFORE the private/inactive checks, so cloud gets the real reason")
     void editionGateRunsFirst() {
-        helper.setCeExclusiveGuard(new CeExclusiveAcquisitionGuard(edition("cloud")));
+        helper.setCeExclusiveGuard(new CeExclusiveAcquisitionGuard(edition("cloud"), null));
         WorkflowPublicationEntity publication = ceExclusivePublication();
         publication.setVisibility(PublicationVisibility.PRIVATE);
 
         // PRIVATE would normally raise IllegalArgumentException("Publication is private").
-        assertThatThrownBy(() -> helper.validateAcquirable(publication, false))
+        assertThatThrownBy(() -> helper.validateAcquirable(publication, false, "42"))
                 .isInstanceOf(CeExclusivePublicationException.class);
     }
 }

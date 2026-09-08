@@ -1,12 +1,15 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import type { DataSourceItemRow } from '../types';
+import type { ColumnDefinition, DataSourceItemRow } from '../types';
 import { authenticatedFetch } from '../utils/authenticatedFetch';
+import { toWritableRowData } from '../utils/dataTableUtils';
 
 export interface UseDataSourceCreationParams {
   dataSourceId?: number;
   displayRows: DataSourceItemRow[];
+  /** Column definitions, so the new table does not inherit the read path's vector text. */
+  columns?: ColumnDefinition[];
   selectedRows: Set<string>;
   selectedColumns: Set<string>;
   getRowUniqueKey: (row: DataSourceItemRow) => string;
@@ -36,6 +39,7 @@ export interface UseDataSourceCreationReturn {
  */
 export function useDataSourceCreation({
   displayRows,
+  columns,
   selectedRows,
   selectedColumns,
   getRowUniqueKey,
@@ -67,19 +71,26 @@ export function useDataSourceCreation({
         ? normalRows.filter(row => selectedRows.has(getRowUniqueKey(row)))
         : normalRows;
 
-      // Extract data from rows
-      let filteredData = selectedData.map(row => row.data);
+      // Extract data from rows, minus everything the READ path added. Sending `row.data` verbatim
+      // persisted `_callId`/`id` into the NEW table, where they became real columns and real values
+      // - so every row of that table reported the id of the row it was derived from, and anything
+      // reading identity back out of it (selection, inline edit, delete, duplicating a row) acted
+      // on the wrong row. It also carried each vector column's whole embedding across as text.
+      const writableData = selectedData.map(row => toWritableRowData(row, columns));
 
-      // If columns are selected, filter to only include those columns
+      // If columns are selected, narrow to those columns - FROM the writable data, never from
+      // `row.data`: rebuilding the row out of the raw one here would put the identity and the
+      // vector text straight back, which is the same defect the line above exists to fix.
+      let filteredData = writableData;
       if (selectedColumns.size > 0) {
-        filteredData = selectedData.map(row => {
+        filteredData = writableData.map(writable => {
           const filteredRowData: Record<string, any> = {};
           selectedColumns.forEach(columnField => {
             const cleanField = columnField.startsWith('data.')
               ? columnField.replace('data.', '')
               : columnField;
-            if (row.data[cleanField] !== undefined) {
-              filteredRowData[cleanField] = row.data[cleanField];
+            if (writable[cleanField] !== undefined) {
+              filteredRowData[cleanField] = writable[cleanField];
             }
           });
           return filteredRowData;
@@ -141,6 +152,7 @@ export function useDataSourceCreation({
     }
   }, [
     displayRows,
+    columns,
     selectedRows,
     selectedColumns,
     getRowUniqueKey,

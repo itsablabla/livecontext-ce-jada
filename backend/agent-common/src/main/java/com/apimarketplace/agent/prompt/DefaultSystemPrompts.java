@@ -145,6 +145,32 @@ public final class DefaultSystemPrompts {
         Set.of("skill")
     );
 
+    /**
+     * The memory module line: what it says, and why its wording is conditional.
+     *
+     * <p>Memory is the DECLARATIVE counterpart to the procedural {@link #SKILL}
+     * module: a skill is authored once and says how to do something, a memory
+     * accumulates and says what is true here. The line has to carry that
+     * distinction itself, because the failure mode in practice is not the agent
+     * ignoring the tool. It is the agent storing "always answer concisely" as a
+     * memory, which is then re-read as a standing directive in every later
+     * conversation and quietly overrides what the user is asking for then.
+     *
+     * <p>"WHEN this workspace has any" is load-bearing, not hedging. The block is
+     * omitted entirely for an empty workspace, for an installation with the
+     * feature switched off, and for an external CLI session that never receives a
+     * system prompt. An unconditional "your index is already in context" therefore
+     * sends the model looking for a heading that is not there, in exactly the
+     * cases where there is nothing to find. The list action is named here rather
+     * than left to the help page because it is the one route that works on every
+     * path.
+     */
+    public static final PromptModule MEMORY = new PromptModule(
+        "memory",
+        "\n        - memory - Long-term facts about the user and the work, kept across conversations in this workspace. WHEN this workspace has any, an index of one-line summaries appears in your context under 'Long-term memory'; open one with memory(action='get', slug='...'). If you do not see that heading, memory(action='list', as_index=true) gives you the same index. Save what will still matter in a conversation that has not happened yet, especially a correction the user gave you. Declarative facts ('the user prefers X'), never instructions ('always do X').\n",
+        Set.of("memory")
+    );
+
     public static final PromptModule WORKFLOW = new PromptModule(
         "workflow",
         "\n        - workflow - Multi-step automation builder (stateful: init/load before add_node). Also inspect, execute and stop runs: when an execution goes wrong, workflow(action='stop_run', run_id=…, reason='…') ends it instead of letting it run on (same action on application). run_node with run_inputs=[{...}] runs one node config over several inputs in a single call.\n",
@@ -196,6 +222,12 @@ public final class DefaultSystemPrompts {
         Set.of("wait")
     );
 
+    public static final PromptModule ASK_USER = new PromptModule(
+        "ask_user",
+        "\n        - ask_user - Put a multiple-choice question to the person you are talking to and wait for their pick: ask_user(action='ask', questions=[{header, question, options:[{label, description}], multiSelect}]). Use it when a choice changes what you do next and guessing would waste work; never for something you can infer. The person can always type their own answer, so do not add an 'Other' option. If the result says pending_user, tell them in one sentence that you are waiting, then stop: their answer arrives as their next message. In an unattended run it answers unavailable: decide with what you have and state your assumption.\n",
+        Set.of("ask_user")
+    );
+
     /**
      * Appended to the system prompt when {@code web_search} was dropped at INSTALL level
      * (optional browser-agent component not enabled AND no cloud link relay) - never when a
@@ -214,8 +246,8 @@ public final class DefaultSystemPrompts {
      * To add a new resource: create a PromptModule constant + add it here.
      */
     public static final List<PromptModule> ALL_RESOURCE_MODULES = List.of(
-        CATALOG, TABLE, INTERFACE, AGENT, SKILL, WORKFLOW, APPLICATION, WEB_SEARCH,
-        GENERATION, FILES, WAIT
+        CATALOG, TABLE, INTERFACE, AGENT, SKILL, MEMORY, WORKFLOW, APPLICATION, WEB_SEARCH,
+        GENERATION, FILES, WAIT, ASK_USER
     );
 
 

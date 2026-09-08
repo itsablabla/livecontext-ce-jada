@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.Mockito.when;
 
 /**
@@ -38,6 +39,52 @@ class NodeParamsValidatorTest {
     @BeforeEach
     void setUp() {
         validator = new NodeParamsValidator(nodeLibraryService, new ModelCatalogEnricher(agentClient));
+    }
+
+    /**
+     * A generate node may carry a parameter only the MODEL knows about.
+     *
+     * <p>The inspector offers every key in the chosen model's `accepts`,
+     * including ones no build has heard of (a guidance scale, a step count).
+     * The generation catalog declares them per model and judges them before the
+     * provider is called. Refusing them here made the node configurable by hand
+     * and not by an agent - the exact asymmetry moving it was meant to close.
+     */
+    @Nested
+    @DisplayName("generate: parameters the CATALOG judges")
+    class GenerateCatalogJudgedParams {
+
+        @BeforeEach
+        void setUpGenerateSchema() {
+            NodeTypeDocumentationEntity doc = new NodeTypeDocumentationEntity();
+            doc.setType("generate");
+            doc.setParameters(Map.of(
+                "model", Map.of("type", "string", "required", true),
+                "prompt", Map.of("type", "string", "required", false)));
+            when(nodeLibraryService.findByType("generate")).thenReturn(Optional.of(doc));
+        }
+
+        @Test
+        @DisplayName("a model-specific parameter is accepted, because the catalog is what judges it")
+        void aModelSpecificParameterIsAccepted() {
+            ValidationResult result = validator.validate("generate",
+                Map.of("model", "flux-1.1-pro", "guidance_scale", 7));
+
+            assertThat(result.valid())
+                .as("the inspector renders this field; refusing it here means an agent "
+                    + "cannot build the node a human can")
+                .isTrue();
+        }
+
+        @Test
+        @DisplayName("the node's own required parameter is still enforced")
+        void theRequiredParameterIsStillEnforced() {
+            // The pass-through must widen what is ACCEPTED, never weaken what is
+            // demanded: a generate node with no model cannot run at all.
+            ValidationResult result = validator.validate("generate", Map.of("prompt", "a boat"));
+
+            assertThat(result.valid()).isFalse();
+        }
     }
 
     @Nested
@@ -439,6 +486,124 @@ class NodeParamsValidatorTest {
             assertThat(result.valid())
                 .as("widening the aliases must not turn the validator into a no-op")
                 .isFalse();
+        }
+    }
+
+    /**
+     * The approval node's documented schema stores ONE spelling of each parameter, but
+     * {@code DecisionNodeCreator.executeAddApproval} reads both conventions and the builder help
+     * advertises the camelCase ones. Every spelling the creator honours must therefore validate,
+     * or add_node answers "Unknown parameter" for a value that would have worked.
+     *
+     * <p>Found live on 2026-09-05 while scripting an invoice workflow:
+     * {@code add_node(type='approval', params={timeoutMs: 86400000})} was rejected while
+     * {@code timeout_ms} passed.
+     */
+    @Nested
+    @DisplayName("approval: both spellings of every documented param")
+    class ApprovalParamSpellings {
+
+        private void stubApprovalSchema() {
+            NodeTypeDocumentationEntity doc = new NodeTypeDocumentationEntity();
+            doc.setType("approval");
+            // Mirrors the live DB doc state (V11 + V391 + V394 + V402): one spelling each,
+            // mixing snake_case and camelCase.
+            doc.setParameters(Map.of(
+                "timeout_ms", Map.of("type", "integer", "required", false),
+                "approver_roles", Map.of("type", "array", "required", false),
+                "required_approvals", Map.of("type", "integer", "required", false),
+                "contextTemplate", Map.of("type", "string", "required", false),
+                "continuationMode", Map.of("type", "string", "required", false),
+                "delegation", Map.of("type", "object", "required", false)
+            ));
+            when(nodeLibraryService.findByType("approval")).thenReturn(Optional.of(doc));
+        }
+
+        @ParameterizedTest(name = "timeout spelling ''{0}'' is accepted")
+        @ValueSource(strings = {"timeout_ms", "timeoutMs", "timeout"})
+        @DisplayName("regression: every timeout spelling the creator reads passes validation")
+        void everyTimeoutSpellingIsAccepted(String spelling) {
+            stubApprovalSchema();
+
+            assertThat(validator.validate("approval", Map.of(spelling, 86400000)).valid())
+                .as("executeAddApproval honours this spelling, so add_node must not reject it")
+                .isTrue();
+        }
+
+        @ParameterizedTest(name = "roles spelling ''{0}'' is accepted")
+        @ValueSource(strings = {"approver_roles", "approverRoles", "roles"})
+        @DisplayName("every approver-roles spelling the creator reads passes validation")
+        void everyRolesSpellingIsAccepted(String spelling) {
+            stubApprovalSchema();
+
+            assertThat(validator.validate("approval", Map.of(spelling, java.util.List.of("manager"))).valid())
+                .isTrue();
+        }
+
+        @ParameterizedTest(name = "spelling ''{0}'' is accepted")
+        @ValueSource(strings = {"required_approvals", "requiredApprovals"})
+        @DisplayName("both required-approvals spellings pass validation")
+        void bothRequiredApprovalsSpellingsAccepted(String spelling) {
+            stubApprovalSchema();
+
+            assertThat(validator.validate("approval", Map.of(spelling, 2)).valid()).isTrue();
+        }
+
+        @ParameterizedTest(name = "spelling ''{0}'' is accepted")
+        @ValueSource(strings = {"contextTemplate", "context_template"})
+        @DisplayName("both context-template spellings pass validation")
+        void bothContextTemplateSpellingsAccepted(String spelling) {
+            stubApprovalSchema();
+
+            assertThat(validator.validate("approval", Map.of(spelling, "Send it?")).valid()).isTrue();
+        }
+
+        @ParameterizedTest(name = "spelling ''{0}'' is accepted")
+        @ValueSource(strings = {"continuationMode", "continuation_mode"})
+        @DisplayName("both continuation-mode spellings pass validation")
+        void bothContinuationModeSpellingsAccepted(String spelling) {
+            stubApprovalSchema();
+
+            assertThat(validator.validate("approval", Map.of(spelling, "per_item")).valid()).isTrue();
+        }
+
+        /**
+         * Pins the KNOWN GAP documented at the alias short-circuit in NodeParamsValidator: an
+         * alias skips the type check, so the two spellings of the same field are not equally
+         * strict. This is not the desired end state; it is asserted so that closing it is a
+         * deliberate change with a failing test to update, rather than a silent drift.
+         */
+        @Test
+        @DisplayName("known gap: the canonical spelling is type-checked, its alias is not")
+        void aliasSkipsTypeValidation() {
+            stubApprovalSchema();
+
+            assertThat(validator.validate("approval", Map.of("timeout_ms", "not-a-number")).valid())
+                .as("the schema entry exists for the canonical name, so the type is checked")
+                .isFalse();
+            assertThat(validator.validate("approval", Map.of("timeoutMs", "not-a-number")).valid())
+                .as("an alias has no schema entry, so the value is accepted here and the creator "
+                    + "falls back to the documented default")
+                .isTrue();
+        }
+
+        @Test
+        @DisplayName("A genuinely unknown approval param is still rejected, as UNKNOWN_PARAM and by name")
+        void unknownApprovalParamStillRejected() {
+            stubApprovalSchema();
+
+            ValidationResult result = validator.validate("approval", Map.of("expiresIn", 60));
+
+            assertThat(result.valid())
+                .as("widening the aliases must not turn the validator into a no-op")
+                .isFalse();
+            // Assert the REASON, not just the boolean: with an all-optional schema a missing
+            // required param would also make this false, so the boolean alone could pass for
+            // the wrong reason if the stub ever gains a required field.
+            assertThat(result.errors())
+                .extracting(com.apimarketplace.orchestrator.service.validation.ValidationError::code,
+                            com.apimarketplace.orchestrator.service.validation.ValidationError::parameter)
+                .containsExactly(tuple("UNKNOWN_PARAM", "expiresIn"));
         }
     }
 }

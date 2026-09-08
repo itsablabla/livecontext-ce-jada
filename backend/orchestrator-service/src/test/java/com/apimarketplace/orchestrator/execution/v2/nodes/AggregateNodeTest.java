@@ -467,4 +467,61 @@ class AggregateNodeTest {
             }
         }
     }
+
+    @Nested
+    @DisplayName("resolved_params reporting")
+    class ResolvedParamsTests {
+
+        @Test
+        @DisplayName("Reports the declared fields AND one key per author label, carrying the configured expression")
+        @SuppressWarnings("unchecked")
+        void reportsDeclaredFieldsAndPerLabelExpressions() {
+            AggregateNode node = new AggregateNode("core:agg", List.of(
+                new AggregateNode.AggregateField("names", "{{core:x.output.name}}"),
+                new AggregateNode.AggregateField("totals", "{{core:x.output.total}}")
+            ), null);
+
+            Map<String, Object> params =
+                (Map<String, Object>) node.execute(context).output().get("resolved_params");
+
+            // `fields` is the plan's own key. Without it an aggregate whose
+            // expressions all resolve to nothing looks like one that was never
+            // configured, and the alignment check reads it as "not reported".
+            List<Map<String, Object>> declared = (List<Map<String, Object>>) params.get("fields");
+            assertEquals(2, declared.size());
+            assertEquals("names", declared.get(0).get("label"));
+            assertEquals("{{core:x.output.name}}", declared.get(0).get("expression"));
+
+            // The per-label keys stay alongside it: StepOutputService publishes
+            // every reported key as `input.<key>`, so removing them would silently
+            // break {{core:agg.input.names}} in workflows that already address it.
+            // The value is the configured EXPRESSION - resolving here used a
+            // different context from the one the values were collected against,
+            // so it reported something the node never aggregated.
+            assertEquals("{{core:x.output.name}}", params.get("names"));
+            assertEquals("{{core:x.output.total}}", params.get("totals"));
+        }
+
+        @Test
+        @DisplayName("A field labelled 'fields' does not overwrite the declaration")
+        @SuppressWarnings("unchecked")
+        void fieldLabelledFieldsDoesNotOverwriteDeclaration() {
+            AggregateNode node = new AggregateNode("core:agg", List.of(
+                new AggregateNode.AggregateField("fields", "{{core:x.output.anything}}"),
+                new AggregateNode.AggregateField("names", "{{core:x.output.name}}")
+            ), null);
+
+            Map<String, Object> params =
+                (Map<String, Object>) node.execute(context).output().get("resolved_params");
+
+            // The declaration wins: losing it would leave the reader with a value
+            // and no way to tell which expression produced it.
+            assertInstanceOf(List.class, params.get("fields"));
+            assertEquals(2, ((List<Object>) params.get("fields")).size(),
+                "the colliding field is still DECLARED, only its expression is lost");
+            // ...and every other field is untouched.
+            assertEquals("{{core:x.output.name}}", params.get("names"));
+        }
+    }
+
 }

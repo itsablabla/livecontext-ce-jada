@@ -58,6 +58,9 @@ class GuardrailServiceTest {
     @Mock
     private com.apimarketplace.agent.service.ModelCatalogService modelCatalogService;
 
+    @Mock
+    private ExecutionLinkRouter executionLinkRouter;
+
     private GuardrailService service;
 
     private static final List<GuardrailRequestDto.RuleDto> RULES = List.of(
@@ -68,13 +71,16 @@ class GuardrailServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new GuardrailService(agentLoopService, guardChainFactory, new ObjectMapper(), bridgeDispatcher, modelCatalogService);
+        service = new GuardrailService(agentLoopService, guardChainFactory, new ObjectMapper(), bridgeDispatcher, modelCatalogService, executionLinkRouter);
         when(guardChainFactory.forAgent(any(), any(), any(), any())).thenReturn(PreIterationGuard.ALWAYS_PROCEED);
         when(bridgeDispatcher.shouldDispatch(any())).thenReturn(false);
         // Default: provider resolution is a no-op pass-through (returns the
         // caller's provider) so existing assertions stay unchanged. Bridge-routing
         // tests override this to assert the normalised slug.
         when(modelCatalogService.resolveProvider(any(), any())).thenAnswer(inv -> inv.getArgument(0));
+        // Default: the billed pair is not linked, so every pre-existing expectation
+        // (loop runs on the requested provider/model) holds unchanged.
+        when(executionLinkRouter.runnableRoute(any(), any(), any())).thenReturn(null);
     }
 
     // ──────────────────────────────────────────────────────────────────────────

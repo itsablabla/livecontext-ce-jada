@@ -62,7 +62,7 @@ class DataSourceServicePagedSampleRowsTest {
         env.setProperty("app.edition", "ce");
         service = new DataSourceService(dataSourceRepository, dataSourceItemRepository,
                 breakdownService, new ObjectMapper(), orgAccessGuard, entitlementGuard,
-                new VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env)),
+                new VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env), null),
                 org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class),
                 org.mockito.Mockito.mock(com.apimarketplace.publication.client.PublicationClient.class));
         // Pass-through access filter: the page keeps every datasource the repo returns.

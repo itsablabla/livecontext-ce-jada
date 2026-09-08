@@ -38,6 +38,7 @@ import { resourceFolderService, type ResourceFolder } from '@/lib/api/orchestrat
 import { buildFolderTiles, buildFolderTrail } from '@/lib/folders/buildFolderTiles';
 
 import { ApplicationCard, PublicationCardSkeleton, type AppSource } from '@/components/applications/ApplicationCard';
+import { track } from '@/lib/analytics/analytics';
 
 // ============== Page Content ==============
 
@@ -61,7 +62,9 @@ function ApplicationsPageContent() {
   // paginate server-side without a unified backend endpoint, so we load both
   // streams with a large size and paginate the merged set client-side.
   const FETCH_LIMIT = 100; // backend max
-  const [allItems, setAllItems] = useState<{ pub: WorkflowPublication; source: AppSource; workflowId?: string; acquiredAt?: string; applicationRunId?: string; pinnedVersion?: number | null; lastExecutedAt?: string }[]>([]);
+  const [allItems, setAllItems] = useState<{ pub: WorkflowPublication; source: AppSource; workflowId?: string; acquiredAt?: string; applicationRunId?: string; pinnedVersion?: number | null; lastExecutedAt?: string;
+    budgetCredits?: number | null; budgetPeriodMode?: string | null; budgetPeriodSpent?: number | null;
+    budgetPeriodResetsAt?: string | null }[]>([]);
   // Sub-workflow neighbourhood per application workflow, resolved for the whole grid in one
   // request (see fetchApplications). Absent id = no relation, and the card shows no indicator.
   const [relationsByWorkflow, setRelationsByWorkflow] = useState<Record<string, WorkflowRelations>>({});
@@ -204,7 +207,14 @@ function ApplicationsPageContent() {
         const applicationRunId = meta?.applicationRunId ?? undefined;
         const lastExecutedAt = meta?.lastExecutedAt ?? undefined;
         const pinnedVersion = meta ? (meta.pinnedVersion ?? null) : undefined;
-        return { ...item, pub, applicationRunId, pinnedVersion, lastExecutedAt };
+        return {
+          ...item, pub, applicationRunId, pinnedVersion, lastExecutedAt,
+          // Rides the same batch: no extra request for what an app is costing.
+          budgetCredits: meta?.budgetCredits ?? null,
+          budgetPeriodMode: meta?.budgetPeriodMode ?? null,
+          budgetPeriodSpent: meta?.budgetPeriodSpent ?? null,
+          budgetPeriodResetsAt: meta?.budgetPeriodResetsAt ?? null,
+        };
       });
 
       setAllItems(itemsWithMeta);
@@ -455,6 +465,13 @@ function ApplicationsPageContent() {
   const handleApplicationClick = useCallback((item: { pub: WorkflowPublication; source: AppSource; workflowId?: string }) => {
     // Navigate by publicationId - the application layout handles run creation from the snapshot
     router.push(`/app/applications/${item.pub.id}`);
+    track('application_opened', {
+      publication_id: item.pub.id,
+      source: item.source,
+      publication_type: item.pub.publicationType ?? null,
+      display_mode: item.pub.displayMode ?? null,
+      has_workflow: Boolean(item.workflowId),
+    });
   }, [router]);
 
   // Star / unstar an app. Optimistic: flip the local set immediately and revert on
@@ -596,7 +613,13 @@ function ApplicationsPageContent() {
               </div>
 
               <div className="flex items-center justify-between gap-3 flex-wrap">
-                {/* Provenance filter - All / Installed (acquired) / Published (own) */}
+                {/* Provenance filter - All / Installed (acquired) / Published (own).
+                    Drawn as the app's own Button, chosen = solid accent / not chosen =
+                    outline, the same pairing the generation history filter row uses. A
+                    hand-rolled pill (`rounded-md`, its own padding, `--bg-primary` as the
+                    text colour on the accent instead of `--accent-foreground`) was a
+                    second button shape on a row that already carries two selects at the
+                    standard control height. */}
                 <div className="flex items-center flex-wrap gap-2">
                   {(['all', 'installed', 'published'] as const).map((value) => {
                     const isActive = sourceFilter === value;
@@ -611,19 +634,17 @@ function ApplicationsPageContent() {
                         ? <Package className="h-3.5 w-3.5" />
                         : <AppWindow className="h-3.5 w-3.5" />;
                     return (
-                      <button
+                      <Button
                         key={value}
                         type="button"
+                        variant={isActive ? 'default' : 'outline'}
+                        size="sm"
+                        aria-pressed={isActive}
                         onClick={() => setSourceFilter(value)}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                          isActive
-                            ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]'
-                            : 'bg-[var(--bg-tertiary)] text-theme-secondary hover:text-theme-primary'
-                        }`}
                       >
                         {icon}
                         {label}
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>
@@ -741,7 +762,7 @@ function ApplicationsPageContent() {
               size="md"
               actions={debouncedSearch.trim().length === 0 ? (
                 <Button
-                  variant="contrast"
+                  variant="default"
                   onClick={() => router.push('/app/marketplace')}
                 >
                   <Store className="h-3.5 w-3.5" />
@@ -766,7 +787,9 @@ function ApplicationsPageContent() {
 
               {filtered.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {filtered.map(({ pub, source, workflowId, acquiredAt, applicationRunId, pinnedVersion }) => {
+              {filtered.map(({ pub, source, workflowId, acquiredAt, applicationRunId, pinnedVersion,
+                              budgetCredits, budgetPeriodMode, budgetPeriodSpent,
+                              budgetPeriodResetsAt }) => {
                 const cardId = source === 'acquired' ? `acquired-${pub.id}` : `published-${pub.id}`;
                 return (
                   <DraggableResourceCard key={cardId} id={cardId} disabled={!folders.canOrganize}>
@@ -780,6 +803,10 @@ function ApplicationsPageContent() {
                     applicationRunId={applicationRunId}
                     acquiredAt={acquiredAt}
                     pinnedVersion={pinnedVersion}
+                    budgetCredits={budgetCredits}
+                    budgetPeriodMode={budgetPeriodMode}
+                    budgetPeriodSpent={budgetPeriodSpent}
+                    budgetPeriodResetsAt={budgetPeriodResetsAt}
                     isFavorite={favoritePubIds.has(pub.id)}
                     onToggleFavorite={() => handleToggleFavorite({ pub, source, workflowId })}
                     /* Same resolution the run/version batch used: the acquired clone when there is

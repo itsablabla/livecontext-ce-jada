@@ -791,6 +791,12 @@ class MonolithSecurityFilterTest {
                 "/api/agents/" + id + "/webhook",
                 "/api/credentials/all",
                 "/api/publications/shared-links",
+                // Named siblings of the by-id interface route. /snapshots hands out the html,
+                // css and js of EVERY page of any run id in the owner's org, and /paged lists
+                // the owner's pages: both used to slip through the by-id branch, which is why
+                // that branch constrains the id to a UUID.
+                "/api/interfaces/snapshots",
+                "/api/interfaces/paged",
                 "/api/workflows",
                 "/api/v2/workflows/dag/" + id,
                 "/api/storage/files/" + id + "/download",

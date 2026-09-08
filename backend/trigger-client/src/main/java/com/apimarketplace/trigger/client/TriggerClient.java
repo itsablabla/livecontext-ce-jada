@@ -863,6 +863,72 @@ public class TriggerClient {
     }
 
     /**
+     * Agenda "move THIS occurrence": set the schedule's pending fire time, leaving the
+     * cron expression alone so later occurrences return to their normal slot.
+     *
+     * <p><b>Errors are NOT swallowed here</b>, unlike the fire-and-forget schedule calls
+     * above. This one is a direct user action with a dialog waiting on it: trigger-service
+     * refuses an archived row (409), a foreign workspace (404) and an unparseable instant
+     * (400), and each refusal is something the user must be told. Returning null would
+     * collapse all three into "it didn't work" with nothing to act on, so the underlying
+     * {@code HttpStatusCodeException} propagates for the caller to map.
+     */
+    public ScheduledExecutionDto setScheduleNextFire(UUID scheduleId, java.time.Instant nextFireAt,
+                                                     String organizationId, String tenantId) {
+        return setScheduleNextFire(scheduleId, nextFireAt, null, organizationId, tenantId);
+    }
+
+    /**
+     * The same move, guarded by the fire time the caller believed it was replacing.
+     *
+     * @param expectedCurrentFireAt the pending fire the caller checked against, or null to
+     *        write unconditionally. Trigger-service refuses with 409 when the row no longer
+     *        carries it, which closes the window between an "is this the next occurrence"
+     *        check made in another service and this write: without it, a chip dragged in the
+     *        second before its own fire time stamps the new time over the slot the daemon
+     *        had just advanced to, giving the user an extra run today and skipping tomorrow.
+     */
+    public ScheduledExecutionDto setScheduleNextFire(UUID scheduleId, java.time.Instant nextFireAt,
+                                                     java.time.Instant expectedCurrentFireAt,
+                                                     String organizationId, String tenantId) {
+        String url = baseUrl + "/api/internal/trigger/schedules/" + scheduleId + "/next-fire";
+        Map<String, Object> body = new HashMap<>();
+        body.put("nextFireAt", nextFireAt.toString());
+        if (expectedCurrentFireAt != null) {
+            body.put("expectedNextFireAt", expectedCurrentFireAt.toString());
+        }
+        HttpHeaders headers = buildHeaders(tenantId);
+        OrgContextHeaderForwarder.setIfPresent(headers, organizationId);
+        ResponseEntity<ScheduledExecutionDto> response = restTemplate.exchange(
+                url, HttpMethod.PUT, new HttpEntity<>(body, headers), ScheduledExecutionDto.class);
+        return response.getBody();
+    }
+
+    /**
+     * Agenda "move ALL occurrences": replace the schedule's cron expression. The pending
+     * fire is re-derived server-side from the new expression, so the schedule does not
+     * fire once more at the time the user just moved away from.
+     *
+     * <p>Errors propagate, for the reason given on {@link #setScheduleNextFire}.
+     *
+     * @param timezone optional; null keeps the schedule's own timezone
+     */
+    public ScheduledExecutionDto updateScheduleCron(UUID scheduleId, String cron, String timezone,
+                                                    String organizationId, String tenantId) {
+        String url = baseUrl + "/api/internal/trigger/schedules/" + scheduleId + "/cron";
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("cron", cron);
+        if (timezone != null && !timezone.isBlank()) {
+            body.put("timezone", timezone);
+        }
+        HttpHeaders headers = buildHeaders(tenantId);
+        OrgContextHeaderForwarder.setIfPresent(headers, organizationId);
+        ResponseEntity<ScheduledExecutionDto> response = restTemplate.exchange(
+                url, HttpMethod.PUT, new HttpEntity<>(body, headers), ScheduledExecutionDto.class);
+        return response.getBody();
+    }
+
+    /**
      * Archive a single schedule by id (state=ARCHIVED). Routes server-side
      * through {@code TriggerLifecycleManager.archiveSchedule}; the row +
      * execution_count survive indefinitely with a full audit-log entry. Archived

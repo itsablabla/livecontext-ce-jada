@@ -115,13 +115,17 @@ public class AccountPurgeService {
         // Remove memberships from team orgs where user is NOT the owner
         nativeExec("DELETE FROM auth.organization_member WHERE user_id = ?1", userId);
 
-        // --- User-scoped data across schemas ---
+        // --- User-scoped data in OTHER schemas: logged for the followers, not deleted here ---
+        // (publication.workflow_publications owner_type=USER, agent.user_skill_overrides).
+        // See WorkspaceDataPurger for why auth no longer reaches into other schemas.
         purgeUserDirectData(userId);
 
         // --- Auth schema cleanup (FK ordering: children before parents) ---
         String uid = userId.toString();
-        nativeExec("DELETE FROM agent.user_skill_overrides WHERE user_id = ?1", uid);
         nativeExec("DELETE FROM auth.user_onboarding WHERE user_id = ?1", uid);
+        // Bound by a bigint user_id (no FK, like the other side tables), so it is passed the
+        // numeric id rather than the string form used by the varchar-keyed tables above.
+        nativeExec("DELETE FROM auth.user_changelog_seen WHERE user_id = ?1", userId);
         nativeExec("DELETE FROM auth.user_roles WHERE user_id = ?1", uid);
         nativeExec("DELETE FROM auth.refresh_tokens WHERE user_id = ?1", uid);
         nativeExec("DELETE FROM auth.email_verification_codes WHERE user_id = ?1", userId);
@@ -210,14 +214,15 @@ public class AccountPurgeService {
     }
 
     private void purgeOrganizationData(String orgId) {
-        // Single source of truth (also used by the workspace-delete flow). Purges all
-        // operational org-scoped data across every schema; never the financial ledger.
-        workspaceDataPurger.purgeOperationalData(orgId);
+        // Single source of truth (also used by the workspace-delete flow): deletes the auth-schema
+        // rows and writes the outbox row that every other service's follower acts on.
+        workspaceDataPurger.purgeOperationalData(orgId, WorkspaceDataPurger.SOURCE_ACCOUNT);
     }
 
     private void purgeUserDirectData(Long userId) {
         String uid = userId.toString();
-        nativeExec("DELETE FROM publication.workflow_publications WHERE owner_type = 'USER' AND owner_id = ?1", uid);
+        // User-owned rows in other schemas are the followers' business (outbox subject USER).
+        workspaceDataPurger.recordUserPurge(uid);
         // credentials scoped by tenant_id (= userId string)
         nativeExec("DELETE FROM auth.credentials WHERE tenant_id = ?1", uid);
     }

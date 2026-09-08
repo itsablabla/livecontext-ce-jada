@@ -564,7 +564,7 @@ public class HelpToolsProvider implements ToolsProvider {
                 - triggers: Entry points (webhook, chat, schedule, datasource, manual)
                 - mcps: MCP catalog tool calls
                 - tables: CRUD operations on datasources
-                - agents: AI agents (agent, guardrail, classify)
+                - agents: AI nodes (agent, browser_agent, guardrail, classify, generate)
                 - cores: Control flow (decision, switch, loop, split, merge, fork, transform, wait)
                 - notes: Documentation
                 - interfaces: Visual interfaces (display data or interactive apps with action_mapping + triggers)

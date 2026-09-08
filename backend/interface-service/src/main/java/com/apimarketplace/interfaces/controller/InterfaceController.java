@@ -298,7 +298,14 @@ public class InterfaceController {
         // #150 - filter the run's snapshots to those whose parent interface
         // is visible to the caller in the current scope. Personal-snapshot
         // callers don't see org-attached snapshots and vice versa.
-        var snapshots = snapshotService.getSnapshotsForRun(workflowRunId);
+        //
+        // The org id goes IN so an org caller reads its own scope in SQL instead of the whole
+        // run's rows. The filter below still runs - same predicate, kept as the authorization
+        // rather than as an optimisation - but it now filters a list that is already correct,
+        // and the unscoped overload's warning stops firing on a path that has become hot: the
+        // workflow builder reads this on every run canvas it opens, to lay each page node out
+        // at the format its run froze.
+        var snapshots = snapshotService.getSnapshotsForRun(workflowRunId, orgId);
         var filtered = snapshots.stream()
                 .filter(s -> interfaceService.findInScope(s.getInterfaceId(), tenantId, orgId).isPresent())
                 .toList();

@@ -207,7 +207,7 @@ export default function DowngradeConfirmModal({
                     {success ? (
                         <Button
                             onClick={handleClose}
-                            variant="contrast"
+                            variant="default"
                             className="flex-1"
                         >
                             {t('gotIt')}

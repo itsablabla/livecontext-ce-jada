@@ -29,6 +29,13 @@ public class AuthEventRecorder {
     @Autowired(required = false)
     private AuditLogger auditLogger;
 
+    /**
+     * Product-analytics emitter (PostHog). Optional so hand-built test instances and
+     * analytics-less deployments are untouched; a null field emits nothing.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics;
+
     /** Bounded enum-like provider tag. Never returns null or free-form strings. */
     public String providerTag(AuthProvider p) {
         if (p == null) return "keycloak";
@@ -60,6 +67,7 @@ public class AuthEventRecorder {
     public void recordLoginSuccess(Long userId, String providerTag) {
         try {
             if (authMetrics != null) authMetrics.loginSuccess(providerTag);
+            if (analytics != null) analytics.loginSucceeded(userId, providerTag);
             if (auditLogger != null) {
                 builder(AuditEventTypes.LOGIN_SUCCESS)
                         .user(userId)
@@ -76,6 +84,10 @@ public class AuthEventRecorder {
             if (authMetrics != null) {
                 authMetrics.signup(providerTag, firstUser);
                 authMetrics.loginSuccess(providerTag);
+            }
+            if (analytics != null) {
+                analytics.registered(userId, providerTag, firstUser);
+                analytics.loginSucceeded(userId, providerTag);
             }
             if (auditLogger != null) {
                 builder(AuditEventTypes.SIGNUP_SUCCESS)

@@ -550,11 +550,13 @@ export default function StoragePage() {
                                 <p className="text-sm text-theme-secondary">{t('upgrade.description')}</p>
                             </div>
                         </div>
-                        <Button asChild variant="default" size="sm" className="h-8 px-3">
-                            <Link href="/app/settings/pricing">
-                                {t('upgrade.button')}
-                            </Link>
-                        </Button>
+                        <div>
+                            <Button asChild variant="default" size="sm" className="h-8 px-3">
+                                <Link href="/app/settings/pricing">
+                                    {t('upgrade.button')}
+                                </Link>
+                            </Button>
+                        </div>
                     </div>
                 </div>
             )}

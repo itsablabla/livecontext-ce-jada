@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   buildMediaPlanParams,
   clampMediaDimension,
+  clampMediaFontSizePercent,
   clampMediaNonNegative,
   clampMediaNormalizeLufs,
   clampMediaOpacity,
+  clampMediaPositionPercent,
   clampMediaSpeed,
   clampMediaTargetFps,
   clampMediaTransitionSeconds,
@@ -68,6 +70,7 @@ describe('media clamps (inspector numeric fields)', () => {
     expect(isMediaOperation('concat')).toBe(true);
     expect(isMediaOperation('frame')).toBe(true);
     expect(isMediaOperation('overlay')).toBe(true);
+    expect(isMediaOperation('subtitles')).toBe(true);
     expect(isMediaOperation('transcode')).toBe(false);
     expect(isMediaOperation(undefined)).toBe(false);
   });
@@ -491,6 +494,148 @@ describe('extractMediaDataFromPlanParams (plan params map -> builder data)', () 
       { source: clipA, speed: 1.5 },
       { source: '{{c}}', trim_end_seconds: 9 },
     ]);
+  });
+
+  it('subtitles always emits video and cues, omitting the look defaults (style/colours)', () => {
+    expect(buildMediaPlanParams('subtitles', {
+      video: '{{v}}',
+      cues: [{ start_seconds: 0, end_seconds: 2.4, text: 'It starts here' }],
+    })).toEqual({
+      operation: 'subtitles',
+      video: '{{v}}',
+      cues: [{ start_seconds: 0, end_seconds: 2.4, text: 'It starts here' }],
+    });
+    // Defaults are the STYLE PRESET's job: emitting them here would pin the look to
+    // whatever this layer believes it is, and drift the day the preset changes.
+    expect(buildMediaPlanParams('subtitles', {
+      video: '{{v}}',
+      cues: [{ start_seconds: 0, end_seconds: 2.4, text: 'Hi' }],
+      style: 'tiktok',
+      text_color: '#FFFFFF',
+      outline_color: '#000000',
+    })).toEqual({
+      operation: 'subtitles',
+      video: '{{v}}',
+      cues: [{ start_seconds: 0, end_seconds: 2.4, text: 'Hi' }],
+    });
+  });
+
+  it('subtitles emits every look option that DIFFERS from the default', () => {
+    expect(buildMediaPlanParams('subtitles', {
+      video: '{{v}}',
+      cues: [{ start_seconds: 0, end_seconds: 2.4, text: 'Hi' }],
+      style: 'classic',
+      font_family: 'DejaVu Sans',
+      font_size_percent: 3.4,
+      position_percent: 89,
+      text_color: '#FFEE00',
+      outline_color: '#101010',
+    })).toEqual({
+      operation: 'subtitles',
+      video: '{{v}}',
+      cues: [{ start_seconds: 0, end_seconds: 2.4, text: 'Hi' }],
+      style: 'classic',
+      font_family: 'DejaVu Sans',
+      font_size_percent: 3.4,
+      position_percent: 89,
+      text_color: '#FFEE00',
+      outline_color: '#101010',
+    });
+  });
+
+  it('subtitles emits an EMPTY cues array rather than omitting it, so validation has something to flag', () => {
+    expect(buildMediaPlanParams('subtitles', { video: '{{v}}' })).toEqual({
+      operation: 'subtitles',
+      video: '{{v}}',
+      cues: [],
+    });
+  });
+
+  it('a half-written cue keeps its empty slots instead of disappearing from the export', () => {
+    const params = buildMediaPlanParams('subtitles', {
+      video: '{{v}}',
+      cues: [{ text: 'Typed the line, not the timings yet' }],
+    });
+    expect(params.cues).toEqual([
+      { start_seconds: '', end_seconds: '', text: 'Typed the line, not the timings yet' },
+    ]);
+  });
+
+  it('subtitles cue ORDER survives the export verbatim - reordering them is a semantic change, not a display one', () => {
+    const params = buildMediaPlanParams('subtitles', {
+      video: '{{v}}',
+      cues: [
+        { start_seconds: 0, end_seconds: 2, text: 'First' },
+        { start_seconds: 2, end_seconds: 4, text: 'Second' },
+        { start_seconds: 4, end_seconds: 6, text: 'Third' },
+      ],
+    });
+    expect(params.cues.map((c: any) => c.text)).toEqual(['First', 'Second', 'Third']);
+  });
+
+  it('params from other operations never leak into a subtitles export', () => {
+    const subtitles = buildMediaPlanParams('subtitles', {
+      video: '{{v}}',
+      cues: [{ start_seconds: 0, end_seconds: 2, text: 'Hi' }],
+      image: '{{i}}',
+      opacity: 0.5,
+      at_seconds: 3,
+    });
+    expect(subtitles).not.toHaveProperty('image');
+    expect(subtitles).not.toHaveProperty('opacity');
+    expect(subtitles).not.toHaveProperty('at_seconds');
+  });
+
+  it('subtitles survives a plan roundtrip, cues and a literal FileRef video included', () => {
+    const vid = { _type: 'file', path: '1/f/clip.mp4', name: 'clip.mp4', mimeType: 'video/mp4', size: 9 };
+    const params = buildMediaPlanParams('subtitles', {
+      video: vid,
+      style: 'classic',
+      cues: [
+        { start_seconds: 0, end_seconds: 2.4, text: 'First' },
+        { start_seconds: 2.4, end_seconds: 5, text: 'Second' },
+      ],
+    });
+    expect(params.video).toEqual(vid);
+    const roundtrip = extractMediaDataFromPlanParams(params);
+    expect(roundtrip.mediaOperation).toBe('subtitles');
+    expect(roundtrip.mediaParams.cues).toEqual(params.cues);
+    expect(buildMediaPlanParams(roundtrip.mediaOperation!, roundtrip.mediaParams)).toEqual(params);
+  });
+
+  it('import drops unknown keys inside a cue while keeping the three contract fields verbatim', () => {
+    const { mediaParams } = extractMediaDataFromPlanParams({
+      operation: 'subtitles',
+      video: '{{v}}',
+      cues: [{ start_seconds: 1, end_seconds: 2, text: 'Hi', speaker: 'narrator' }],
+    });
+    expect(mediaParams.cues).toEqual([{ start_seconds: 1, end_seconds: 2, text: 'Hi' }]);
+  });
+
+  it('a COMPUTED caption track survives export and re-import instead of being wiped', () => {
+    // Regression: the builder used to coerce a non-array cues value to [], so opening
+    // and saving an agent-built workflow silently destroyed a computed caption track.
+    const expr = '{{core:build_cues.output.result.cues}}';
+    const params = buildMediaPlanParams('subtitles', { video: '{{v}}', cues: expr });
+    expect(params.cues).toBe(expr);
+
+    const roundtrip = extractMediaDataFromPlanParams(params);
+    expect(roundtrip.mediaParams.cues).toBe(expr);
+    expect(buildMediaPlanParams(roundtrip.mediaOperation!, roundtrip.mediaParams)).toEqual(params);
+  });
+
+  it('clamps subtitle font_size_percent to 1-20 and position_percent to 0-100, omitting them when blank', () => {
+    expect(clampMediaFontSizePercent(30)).toBe(20);
+    expect(clampMediaFontSizePercent(0.2)).toBe(1);
+    expect(clampMediaFontSizePercent(4.4)).toBe(4.4);
+    // Blank/junk omits the param so the STYLE PRESET decides, rather than inventing a size.
+    expect(clampMediaFontSizePercent('')).toBeUndefined();
+    expect(clampMediaFontSizePercent('big')).toBeUndefined();
+
+    expect(clampMediaPositionPercent(140)).toBe(100);
+    expect(clampMediaPositionPercent(-5)).toBe(0);
+    expect(clampMediaPositionPercent(72)).toBe(72);
+    expect(clampMediaPositionPercent('')).toBeUndefined();
   });
 
   it('drops a stale keep_original_audio from an audio-only mix export - the toggle only exists WITH a video and the backend rejects it otherwise', () => {

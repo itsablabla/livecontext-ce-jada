@@ -21,10 +21,11 @@ import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 import {
   Globe, Coins, Layout, EyeOff, Check, AlertCircle, AlertTriangle,
   Play, ArrowLeft, ArrowRight, FileText, Lock,
-  Monitor, Workflow, Table2, StepForward,
+  Monitor, Workflow, Table2, StepForward, Clapperboard,
 } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import { orchestratorApi, WorkflowPublication, WorkflowRun } from '@/lib/api';
+import { track } from '@/lib/analytics/analytics';
 import type { WorkflowPlanVersion, WorkflowVersionsResponse } from '@/lib/api/orchestrator/types';
 import { useInterfaceRender } from '@/app/workflows/builder/hooks/useInterfaces';
 import { ShowcasePreview } from '@/components/marketplace/ShowcasePreview';
@@ -174,6 +175,9 @@ export function PublishWorkflowModal({
     aiReplacementCostPerImage?: number;
   } | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('none');
+  // The studio axis, beside the category rather than inside it: a publication carries exactly one
+  // category, so a video studio would have had to stop being a Content app to become a studio one.
+  const [isStudio, setIsStudio] = useState(false);
   const [price, setPrice] = useState<number>(0);
   const [visibility, setVisibility] = useState<'PRIVATE' | 'PUBLIC'>('PUBLIC');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -529,6 +533,8 @@ export function PublishWorkflowModal({
         setSelectedRunId(runId);
         setSelectedInterfaceId(interfaceId !== 'none' ? interfaceId : 'none');
         setSelectedCategoryId(response.category?.id || 'none');
+        // Read back, so saving an unrelated change cannot take the application off the shelf.
+        setIsStudio(!!response.studio);
         // Rehydrate the publisher's pinned epoch. A legacy publication with no
         // pin (null) falls through to the default-latest effect once the run
         // renders, so the showcase ends up pinned to one epoch either way.
@@ -547,6 +553,7 @@ export function PublishWorkflowModal({
         setSelectedEpoch(null);
         setPrice(0);
         setVisibility('PUBLIC');
+        setIsStudio(false);
       }
     } catch (err: any) {
       if (activeModalWorkflowIdRef.current !== requestWorkflowId) {
@@ -604,6 +611,8 @@ export function PublishWorkflowModal({
         return;
       }
       activeModalWorkflowIdRef.current = workflowId;
+      // Once per open (the ref resets on close, so a reopen counts again).
+      track('publication_modal_opened', { workflow_id: workflowId, is_published: isPublished });
       titleDirtyRef.current = false;
       descriptionDirtyRef.current = false;
       setTitle(workflowName);
@@ -619,7 +628,7 @@ export function PublishWorkflowModal({
       setPublishPhase(null);
       setPublishError(null);
     }
-  }, [isOpen, workflowId, workflowName, workflowDescription, fetchPublicationStatus, fetchRuns, fetchCategories, fetchVersions]);
+  }, [isOpen, workflowId, workflowName, workflowDescription, isPublished, fetchPublicationStatus, fetchRuns, fetchCategories, fetchVersions]);
 
   // Convert UUID runId to public format once runs are loaded
   useEffect(() => {
@@ -694,6 +703,7 @@ export function PublishWorkflowModal({
           showcaseInterfaceId: previewId,
           showcaseRunId: showcaseId,
           categoryId,
+          studio: isStudio,
           creditsPerUse: effectivePrice,
           visibility,
           displayMode,
@@ -708,6 +718,12 @@ export function PublishWorkflowModal({
         // review; PRIVATE stays live so the plain "updated" message holds.
         setSuccessMessage(isPrivate ? t('updateSuccess') : t('updateResubmittedForReview'));
         setPublishPhase(null); // stay in wizard for updates
+        track('publication_result', {
+          outcome: 'success',
+          is_update: true,
+          publication_id: existingPublication.id,
+          visibility,
+        });
       } else {
         const created = await orchestratorApi.publishWorkflow({
           workflowId,
@@ -716,6 +732,7 @@ export function PublishWorkflowModal({
           showcaseInterfaceId: previewId,
           showcaseRunId: showcaseId,
           categoryId,
+          studio: isStudio,
           creditsPerUse: effectivePrice,
           publisherName: userDisplayName,
           publisherEmail: userEmail,
@@ -734,6 +751,12 @@ export function PublishWorkflowModal({
         // PRIVATE goes live instantly.
         setSuccessMessage(isPrivate ? t('publishSuccessPrivateDescription') : t('publishSuccessDescription'));
         setPublishPhase(null);
+        track('publication_result', {
+          outcome: 'success',
+          is_update: false,
+          publication_id: created?.id ?? null,
+          visibility,
+        });
       }
 
       // Wave 2a part 3 - fire-and-forget the audit log AFTER publish
@@ -757,6 +780,11 @@ export function PublishWorkflowModal({
       setPublishError(err.message || t('publishError'));
       setPublishPhase('error');
       setError(err.message || t('publishError'));
+      track('publication_result', {
+        outcome: 'error',
+        is_update: isPublished,
+        reason: typeof err?.status === 'number' ? `http_${err.status}` : 'unknown',
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -772,6 +800,16 @@ export function PublishWorkflowModal({
   const handlePublish = async () => {
     const previewId = selectedInterfaceId === 'none' ? undefined : selectedInterfaceId;
     const showcaseId = selectedRunId === 'none' ? undefined : selectedRunId;
+    track('publication_submitted', {
+      workflow_id: workflowId,
+      is_update: isPublished,
+      display_mode: previewId ? 'APPLICATION' : 'WORKFLOW',
+      visibility,
+      credits_per_use: PAID_TEMPLATES_ENABLED ? price : 0,
+      has_category: Boolean(selectedCategoryId && selectedCategoryId !== 'none'),
+      has_interface: Boolean(previewId),
+      has_showcase_run: Boolean(showcaseId),
+    });
     if (previewId) {
       try {
         const scan = await screeningService.prePublishScan({
@@ -1224,6 +1262,38 @@ export function PublishWorkflowModal({
               categories={categories}
               allowNone={false}
             />
+          </div>
+
+          {/* Studio shelf */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <label className="block text-sm font-medium text-theme-primary">
+                {t('studioLabel')}
+              </label>
+              <FieldInfoTooltip description={t('studioHint')} />
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsStudio(v => !v)}
+              aria-pressed={isStudio}
+              className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${
+                isStudio
+                  ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]/10'
+                  : 'border-theme-color hover:border-theme-secondary'
+              }`}
+            >
+              <Clapperboard
+                className={`h-5 w-5 shrink-0 ${isStudio ? 'text-[var(--accent-primary)]' : 'text-theme-secondary'}`}
+              />
+              <span className="min-w-0">
+                <span className={`text-sm font-medium block ${isStudio ? 'text-[var(--accent-primary)]' : 'text-theme-primary'}`}>
+                  {t('studioToggle')}
+                </span>
+                <span className="text-xs text-theme-secondary block">
+                  {t('studioToggleHint')}
+                </span>
+              </span>
+            </button>
           </div>
 
           {/* Price */}

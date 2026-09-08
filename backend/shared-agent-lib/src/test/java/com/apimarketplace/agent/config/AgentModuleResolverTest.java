@@ -21,8 +21,8 @@ class AgentModuleResolverTest {
             Set<String> modules = AgentModuleResolver.resolveEnabledModules(null);
 
             assertThat(modules).containsExactlyInAnyOrder(
-                "catalog", "table", "interface", "agent", "skill",
-                "workflow", "application", "web_search", "files", "wait"
+                "catalog", "table", "interface", "agent", "skill", "memory",
+                "workflow", "application", "web_search", "files", "wait", "ask_user"
             );
             assertThat(modules).doesNotContain("image_generation");
         }
@@ -37,7 +37,7 @@ class AgentModuleResolverTest {
 
             assertThat(modules).doesNotContain("catalog");
             assertThat(modules).containsExactlyInAnyOrder(
-                "table", "interface", "agent", "skill", "workflow", "application", "web_search", "files", "wait"
+                "table", "interface", "agent", "skill", "memory", "workflow", "application", "web_search", "files", "wait", "ask_user"
             );
         }
 
@@ -69,7 +69,7 @@ class AgentModuleResolverTest {
             // No grants → the 5 internal families are DENIED (authoritative, no list fallback).
             // catalog/skill/files/wait are always on; web_search defaults on (absent webSearch).
             assertThat(modules).containsExactlyInAnyOrder(
-                "catalog", "skill", "files", "wait", "web_search"
+                "catalog", "skill", "memory", "files", "wait", "ask_user", "web_search"
             );
         }
 
@@ -87,7 +87,7 @@ class AgentModuleResolverTest {
 
             Set<String> modules = AgentModuleResolver.resolveEnabledModules(config);
 
-            assertThat(modules).containsExactlyInAnyOrder("catalog", "skill", "files", "wait");
+            assertThat(modules).containsExactlyInAnyOrder("catalog", "skill", "memory", "files", "wait", "ask_user");
         }
 
         @Test
@@ -110,7 +110,7 @@ class AgentModuleResolverTest {
             Set<String> modules = AgentModuleResolver.resolveEnabledModules(config);
 
             assertThat(modules).containsExactlyInAnyOrder(
-                "catalog", "table", "interface", "skill", "workflow", "web_search", "files", "wait"
+                "catalog", "table", "interface", "skill", "memory", "workflow", "web_search", "files", "wait", "ask_user"
             );
             assertThat(modules).doesNotContain("agent", "application");
         }
@@ -125,7 +125,7 @@ class AgentModuleResolverTest {
 
             assertThat(modules).doesNotContain("web_search");
             // No grants → the 5 internal families are denied; only the always-on modules remain.
-            assertThat(modules).containsExactlyInAnyOrder("catalog", "skill", "files", "wait");
+            assertThat(modules).containsExactlyInAnyOrder("catalog", "skill", "memory", "files", "wait", "ask_user");
         }
 
         @Test
@@ -192,6 +192,27 @@ class AgentModuleResolverTest {
             Map<String, Object> modeOff = new HashMap<>();
             modeOff.put("mode", "off");
             assertThat(AgentModuleResolver.resolveEnabledModules(modeOff)).doesNotContain("wait");
+        }
+
+        @Test
+        @DisplayName("ask_user is always enabled regardless of config (the tool itself answers 'unavailable' off-chat) - except mode=off")
+        void askUserAlwaysEnabled() {
+            assertThat(AgentModuleResolver.resolveEnabledModules(null)).contains("ask_user");
+
+            Map<String, Object> modeNone = new HashMap<>();
+            modeNone.put("mode", "none");
+            assertThat(AgentModuleResolver.resolveEnabledModules(modeNone)).contains("ask_user");
+
+            Map<String, Object> restricted = new HashMap<>();
+            restricted.put("mode", "custom");
+            restricted.put("tables", List.of());
+            restricted.put("workflows", List.of());
+            restricted.put("webSearch", false);
+            assertThat(AgentModuleResolver.resolveEnabledModules(restricted)).contains("ask_user");
+
+            Map<String, Object> modeOff = new HashMap<>();
+            modeOff.put("mode", "off");
+            assertThat(AgentModuleResolver.resolveEnabledModules(modeOff)).doesNotContain("ask_user");
         }
 
         @Test

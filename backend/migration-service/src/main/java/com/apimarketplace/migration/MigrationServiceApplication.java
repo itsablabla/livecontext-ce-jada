@@ -8,6 +8,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.flywaydb.core.Flyway;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.flyway.FlywayMigrationStrategy;
 import org.springframework.context.annotation.Bean;
 
@@ -20,12 +22,31 @@ public class MigrationServiceApplication {
         SpringApplication.run(MigrationServiceApplication.class, args);
     }
 
+    /**
+     * Repair then migrate, on the primary database and then on every extra target
+     * ({@code migration.extra-target-urls}, env {@code DB_TARGET_URLS}). Extra targets get a
+     * Flyway configured exactly like the primary (locations, schemas, baseline, history
+     * table) pointed at their URL with the same credentials. Empty targets = one database,
+     * today's behaviour. See {@link MultiTargetMigrator} for why one history runs on every
+     * database rather than being split by schema.
+     */
     @Bean
-    FlywayMigrationStrategy repairThenMigrate(DataSource dataSource) {
+    FlywayMigrationStrategy repairThenMigrate(DataSource dataSource,
+                                              @Value("${migration.extra-target-urls:}") String extraTargetUrls,
+                                              @Value("${spring.datasource.username}") String username,
+                                              @Value("${spring.datasource.password}") String password) {
         return flyway -> {
-            ensureMigrationSourceTimezoneGuc(dataSource);
-            flyway.repair();
-            flyway.migrate();
+            MultiTargetMigrator migrator = new MultiTargetMigrator(
+                    url -> Flyway.configure()
+                            .configuration(flyway.getConfiguration())
+                            .dataSource(url, username, password)
+                            .load(),
+                    MigrationServiceApplication::ensureMigrationSourceTimezoneGuc,
+                    f -> {
+                        f.repair();
+                        f.migrate();
+                    });
+            migrator.run(flyway, dataSource, MultiTargetMigrator.parseTargets(extraTargetUrls));
         };
     }
 

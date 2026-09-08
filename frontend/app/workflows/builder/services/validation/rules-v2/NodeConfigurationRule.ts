@@ -13,7 +13,7 @@
 
 import type { Node } from 'reactflow';
 import type { BuilderNodeData } from '../../../types';
-import type { ValidationContext, ValidationIssue } from '../core/types';
+import type { ElementType, ValidationContext, ValidationIssue } from '../core/types';
 import { BaseValidationRule } from './BaseValidationRule';
 import { normalizeLabel } from '../../../utils/labelNormalizer';
 import { getNodeType, isInterfaceNode, isCrudNode, isNoteNode } from '../core/nodeUtils';
@@ -23,12 +23,20 @@ import {
   MEDIA_CONCAT_INPUTS_MAX,
   MEDIA_DIMENSION_MAX,
   MEDIA_DIMENSION_MIN,
+  MEDIA_FONT_SIZE_PERCENT_MAX,
+  MEDIA_FONT_SIZE_PERCENT_MIN,
   MEDIA_NORMALIZE_LUFS_MAX,
   MEDIA_NORMALIZE_LUFS_MIN,
   MEDIA_OPACITY_MAX,
   MEDIA_OPACITY_MIN,
+  MEDIA_POSITION_PERCENT_MAX,
+  MEDIA_POSITION_PERCENT_MIN,
   MEDIA_SPEED_MAX,
   MEDIA_SPEED_MIN,
+  MEDIA_SUBTITLE_CUES_MAX,
+  MEDIA_SUBTITLE_STYLES,
+  MEDIA_SUBTITLE_TEXT_MAX,
+  MEDIA_SUBTITLE_TOTAL_MAX,
   MEDIA_TARGET_FPS_MAX,
   MEDIA_TARGET_FPS_MIN,
   MEDIA_TRACKS_MAX,
@@ -259,10 +267,10 @@ export class NodeConfigurationRule extends BaseValidationRule {
     // the provider is called, so they are deliberately not re-checked here: a
     // stale copy of a model's limits would block a request the platform accepts.
     if (kind === 'generate') {
-      this.requireField(d, 'generateModel', 'Model is required', 'generate_missing_model', node.id, elementKey, issues);
+      this.requireField(d, 'generateModel', 'Model is required', 'generate_missing_model', node.id, elementKey, issues, 'agent');
       const source = d?.generateCredentialSource;
       if (source !== undefined && source !== null && source !== '' && source !== 'user' && source !== 'platform') {
-        issues.push(this.createError(elementKey, 'core', "Credential source must be 'platform' or 'user'", { rule: 'generate_invalid_credential_source', nodeId: node.id }));
+        issues.push(this.createError(elementKey, 'agent', "Credential source must be 'platform' or 'user'", { rule: 'generate_invalid_credential_source', nodeId: node.id }));
       }
     }
     // SendEmail: to and subject required
@@ -390,11 +398,12 @@ export class NodeConfigurationRule extends BaseValidationRule {
   /**
    * Media node: mirrors the backend contract's validation rules.
    * - operation required, one of probe | mux_audio | mix | extract_audio |
-   *   concat | frame | overlay
+   *   concat | frame | overlay | subtitles
    * - probe/extract_audio/frame need `input`; mux_audio needs `video` + `audio`;
    *   mix needs a non-empty `tracks` array (max 8) with a `source` per track;
    *   concat needs a non-empty `inputs` array (max 8) with a `source` per clip;
-   *   overlay needs `video` + `image`
+   *   overlay needs `video` + `image`; subtitles needs `video` + a non-empty
+   *   `cues` array (max 600), ascending and non-overlapping
    * - duck_under must reference ANOTHER existing track id
    * - concat: crossfade needs >= 2 clips; trim_end > trim_start per clip;
    *   target_width/target_height set together (both or neither)
@@ -423,6 +432,20 @@ export class NodeConfigurationRule extends BaseValidationRule {
         error(message, rule);
       }
     };
+    /**
+     * A LITERAL number: a number, or a string that parses as one. An agent-authored
+     * plan carries "2.5", and narrowing on `typeof === 'number'` silently skipped
+     * every ordering and bounds check for exactly those plans. A {{...}} template is
+     * NOT literal - it resolves at run time and must never trip a build-time bound.
+     */
+    const literalNumber = (value: unknown): number | undefined => {
+      if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+      if (typeof value === 'string' && value.trim() !== '' && !value.includes('{{')) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+      }
+      return undefined;
+    };
     const checkNonNegative = (value: unknown, label: string) => {
       if (typeof value === 'number' && value < 0) {
         error(`${label} must be 0 or greater`, 'media_negative_number');
@@ -445,11 +468,11 @@ export class NodeConfigurationRule extends BaseValidationRule {
     };
 
     if (!operation || (typeof operation === 'string' && operation.trim() === '')) {
-      error('Operation is required - choose probe, mux_audio, mix, extract_audio, concat, frame, or overlay', 'media_missing_operation');
+      error('Operation is required - choose probe, mux_audio, mix, extract_audio, concat, frame, overlay, or subtitles', 'media_missing_operation');
       return;
     }
     if (!isMediaOperation(operation)) {
-      error(`Unknown operation "${operation}" - must be probe, mux_audio, mix, extract_audio, concat, frame, or overlay`, 'media_invalid_operation');
+      error(`Unknown operation "${operation}" - must be probe, mux_audio, mix, extract_audio, concat, frame, overlay, or subtitles`, 'media_invalid_operation');
       return;
     }
 
@@ -586,15 +609,91 @@ export class NodeConfigurationRule extends BaseValidationRule {
         error('End must be greater than start for the overlay window', 'media_end_before_start');
       }
     }
+
+    if (operation === 'subtitles') {
+      requireParam('video', 'Video file is required', 'media_missing_video');
+      const cues = p.cues;
+      // A caption track is often computed upstream, so an expression is a legitimate
+      // value: only a literal array can have its contents judged at build time.
+      const cuesAreExpression = typeof cues === 'string' && cues.trim() !== '';
+      if (cuesAreExpression) {
+        // nothing to judge until it resolves
+      } else if (!Array.isArray(cues) || cues.length === 0) {
+        error('At least one caption is required', 'media_missing_cues');
+      } else {
+        if (cues.length > MEDIA_SUBTITLE_CUES_MAX) {
+          error(`Captions are limited to ${MEDIA_SUBTITLE_CUES_MAX} entries`, 'media_too_many_cues');
+        }
+        let previousEnd: number | undefined;
+        let totalChars = 0;
+        cues.forEach((cue: any, i: number) => {
+          const text = cue?.text;
+          if (typeof text !== 'string' || text.trim() === '') {
+            error(`Caption ${i + 1} is missing its text`, 'media_cue_missing_text');
+          } else if (text.trim().length > MEDIA_SUBTITLE_TEXT_MAX) {
+            error(`Caption ${i + 1} is longer than ${MEDIA_SUBTITLE_TEXT_MAX} characters - split it in two`, 'media_cue_text_too_long');
+          }
+          if (typeof text === 'string') totalChars += text.trim().length;
+          const start = literalNumber(cue?.start_seconds);
+          const end = literalNumber(cue?.end_seconds);
+          if (start !== undefined && start < 0) {
+            error(`Caption ${i + 1} start must be 0 or greater`, 'media_negative_number');
+          }
+          if (end !== undefined && end < 0) {
+            error(`Caption ${i + 1} end must be 0 or greater`, 'media_negative_number');
+          }
+          // A caption with no timings is not a caption yet. Tested on the RAW value,
+          // not the parsed one: a {{...}} template parses to nothing but IS filled in,
+          // and reporting it as missing would flag every computed timing as an error.
+          const timingMissing = (v: unknown) =>
+            v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+          if (timingMissing(cue?.start_seconds) || timingMissing(cue?.end_seconds)) {
+            error(`Caption ${i + 1} needs both a start and an end time`, 'media_cue_missing_timing');
+          }
+          if (start !== undefined && end !== undefined && end <= start) {
+            error(`Caption ${i + 1} must end after it starts`, 'media_cue_end_before_start');
+          }
+          // Two captions over the same instant are drawn on top of each other, so an
+          // overlap is a timing bug the backend REFUSES rather than reorders.
+          else if (start !== undefined && previousEnd !== undefined && start < previousEnd) {
+            error(`Caption ${i + 1} starts before caption ${i} ends - captions must not overlap`, 'media_cues_overlap');
+          }
+          // Only a SANE end advances the cursor: ordering the next caption against a
+          // boundary already known to be wrong reports a second error caused by the first.
+          if (end !== undefined && (start === undefined || end > start)) previousEnd = end;
+        });
+        if (totalChars > MEDIA_SUBTITLE_TOTAL_MAX) {
+          error(`The captions total ${totalChars} characters, over the ${MEDIA_SUBTITLE_TOTAL_MAX} character limit - caption a shorter section`, 'media_cues_total_too_long');
+        }
+      }
+      checkRange(literalNumber(p.font_size_percent), MEDIA_FONT_SIZE_PERCENT_MIN, MEDIA_FONT_SIZE_PERCENT_MAX, `Font size must be between ${MEDIA_FONT_SIZE_PERCENT_MIN} and ${MEDIA_FONT_SIZE_PERCENT_MAX} percent of the video height`, 'media_font_size_out_of_range');
+      checkRange(literalNumber(p.position_percent), MEDIA_POSITION_PERCENT_MIN, MEDIA_POSITION_PERCENT_MAX, `Caption position must be between ${MEDIA_POSITION_PERCENT_MIN} and ${MEDIA_POSITION_PERCENT_MAX} percent`, 'media_position_percent_out_of_range');
+      // The non-numeric look options fail a run just as hard as an out-of-range number.
+      if (typeof p.style === 'string' && p.style.trim() !== '' && !p.style.includes('{{')
+        && !(MEDIA_SUBTITLE_STYLES as readonly string[]).includes(p.style.trim())) {
+        error(`Unknown caption style "${p.style}" - use ${MEDIA_SUBTITLE_STYLES.join(' or ')}`, 'media_invalid_subtitle_style');
+      }
+      for (const key of ['text_color', 'outline_color'] as const) {
+        const colour = p[key];
+        if (typeof colour === 'string' && colour.trim() !== '' && !colour.includes('{{')
+          && !/^#?[0-9A-Fa-f]{6}$/.test(colour.trim())) {
+          error(`${key === 'text_color' ? 'Text' : 'Outline'} colour must be a hex value like #FFFFFF`, 'media_invalid_colour');
+        }
+      }
+    }
   }
 
   private requireField(
     data: any, fieldKey: string, message: string, rule: string,
-    nodeId: string, elementKey: string, issues: ValidationIssue[]
+    nodeId: string, elementKey: string, issues: ValidationIssue[],
+    // The family the issue belongs to. Defaulted to 'core' because every
+    // caller was one until generate moved to the AI family; a wrong tag files
+    // the issue under a family the node is not in.
+    elementType: ElementType = 'core',
   ): void {
     const value = data?.[fieldKey];
     if (!value || (typeof value === 'string' && value.trim() === '')) {
-      issues.push(this.createError(elementKey, 'core', message, { rule, nodeId }));
+      issues.push(this.createError(elementKey, elementType, message, { rule, nodeId }));
     }
   }
 

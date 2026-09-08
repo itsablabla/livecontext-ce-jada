@@ -19,6 +19,7 @@ import com.apimarketplace.orchestrator.services.completion.CompletionKind;
 import com.apimarketplace.orchestrator.services.completion.StepCompletionOrchestrator;
 import com.apimarketplace.orchestrator.services.completion.StepCompletionResult;
 import com.apimarketplace.orchestrator.services.context.ReadinessContextCache;
+import com.apimarketplace.orchestrator.services.usage.NodeUsageRecorder;
 import com.apimarketplace.orchestrator.services.streaming.state.RunningNodeTracker;
 import com.apimarketplace.orchestrator.utils.LabelNormalizer;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -71,6 +72,12 @@ public class NodeCompletionService {
     // tests that construct NodeCompletionService with the 5-arg constructor.
     @Autowired(required = false)
     private ReadinessContextCache readinessCache;
+
+    // Platform-wide node-usage ledger (V461). Optional for the same reason as the
+    // cache above: the 5-arg constructor is what the existing tests build, and a
+    // popularity counter must never be the reason a run cannot start.
+    @Autowired(required = false)
+    private NodeUsageRecorder nodeUsageRecorder;
 
     public NodeCompletionService(
             StepCompletionOrchestrator stepCompletionOrchestrator,
@@ -144,6 +151,15 @@ public class NodeCompletionService {
         // deferred-reset gate at ReusableTriggerService:1614 reads exactly
         // this key shape via getRunningCountsOrThrow(runId, epoch).
         runningNodeTracker.markRunning(runId, epoch, nodeId);
+
+        // Count the launch (V461). Here rather than at completion because the question the
+        // ranking answers is "what do people run", which a node that failed or is still
+        // waiting on a signal answers just as well as one that succeeded - and this is the
+        // one point every dispatch passes through, in both AUTOMATIC and STEP_BY_STEP mode.
+        // The recorder is an in-memory increment and never throws.
+        if (nodeUsageRecorder != null) {
+            nodeUsageRecorder.record(node.usageKey());
+        }
     }
 
     /**

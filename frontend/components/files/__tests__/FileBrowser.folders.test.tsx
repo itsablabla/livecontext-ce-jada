@@ -17,6 +17,14 @@ import { render, cleanup, fireEvent, waitFor, act } from '@testing-library/react
 import type { StorageExplorerEntry } from '@/lib/api/storage-api';
 
 // ---- i18n: echo the key (so we assert on stable strings) ----
+// next-intl's navigation module cannot resolve 'next/navigation' under vitest, and this page
+// renders controls that reach for it. Stood in for here because this suite is not about where any
+// of them go (the Generate control is pinned in the generate-entry-point suite).
+vi.mock('@/i18n/navigation', () => ({
+  useRouter: () => ({ push: () => undefined, replace: () => undefined, prefetch: () => undefined }),
+  usePathname: () => '/app',
+  Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+}));
 vi.mock('next-intl', () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars && 'count' in vars ? `${key}:${vars.count}` : key,

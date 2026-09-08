@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Bot, MessageSquare, Search, Workflow as WorkflowIcon, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SearchField } from '@/components/ui/search-field';
-import { conversationApi } from '@/lib/api/conversationApi';
+import { conversationApi, conversationRoute } from '@/lib/api/conversationApi';
 import type { Conversation } from '@/lib/api/conversationApi';
 import { workflowService } from '@/lib/api/orchestrator/workflow.service';
 import { agentService } from '@/lib/api/orchestrator/agent.service';
@@ -16,6 +16,7 @@ import { useSafeNavigate } from '@/contexts/NavigationGuardContext';
 import { useAuth } from '@/lib/providers/smart-providers';
 import { IS_CE } from '@/lib/edition';
 import { cn } from '@/lib/utils';
+import { useIsMacPlatform } from '@/lib/utils/platform';
 import { conversationDisplayTitle } from '@/lib/utils/conversationTitle';
 
 type ResultGroup = 'conversations' | 'workflows' | 'agents' | 'settings';
@@ -101,7 +102,9 @@ function useGlobalSearch() {
             group: 'conversations',
             label: conversationDisplayTitle(conv, t('untitled')),
             icon: MessageSquare,
-            href: `/app/c/${conv.id}`,
+            // Routed by what the conversation IS: a studio thread opened at a chat URL loads, then
+            // bounces. The bounce is correct but visible, and here the kind is already in hand.
+            href: conversationRoute(conv),
           });
         }
       }
@@ -312,10 +315,12 @@ export function GlobalSearchBar({ variant = 'inline' }: { variant?: 'inline' | '
     }
   }, [variant, open]);
 
-  const shortcutHint = useMemo(() => {
-    if (typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)) return '⌘K';
-    return 'Ctrl K';
-  }, []);
+  // Resolved through the hook, not read during render: `navigator` does not
+  // exist on the server, so an inline read hydrates a Mac with the wrong
+  // spelling and never corrects it. Translated for the same reason the sidebar's
+  // shortcut is: a German keyboard's key says `Strg`, not `Ctrl`.
+  const isMac = useIsMacPlatform();
+  const shortcutHint = t(isMac ? 'shortcutKeysMac' : 'shortcutKeys');
 
   if (variant === 'compact') {
     const listOpen = open && trimmed.length > 0;

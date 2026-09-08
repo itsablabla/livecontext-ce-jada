@@ -8,16 +8,22 @@ import { WorkflowRunProvider } from '@/contexts/WorkflowRunContext';
 import { SidePanelProvider } from '@/contexts/SidePanelContext';
 import { SidePanelLayoutProvider } from '@/contexts/SidePanelLayoutContext';
 import { WorkflowLayoutDirectionProvider } from '@/contexts/WorkflowLayoutDirectionContext';
+import { InspectorDockProvider } from '@/contexts/InspectorDockContext';
+import { InspectorOpenModeProvider } from '@/contexts/InspectorOpenModeContext';
 import { AppShell } from './AppShell';
 import InsufficientCreditsModal from '@/components/billing/InsufficientCreditsModal';
 import InsufficientStorageModal from '@/components/billing/InsufficientStorageModal';
+import AppPlanComparisonDialog from '@/components/pricing/AppPlanComparisonDialog';
 import MissingApiKeyModal from '@/components/billing/MissingApiKeyModal';
 import CeCloudCreditModal from '@/components/billing/CeCloudCreditModal';
 import ModelNotManagedModal from '@/components/billing/ModelNotManagedModal';
 import AgentErrorModal from '@/components/billing/AgentErrorModal';
-import WelcomeGiftModal from '@/components/billing/WelcomeGiftModal';
 import SuggestedAppsModal from '@/components/billing/SuggestedAppsModal';
 import AccountRestoreModal from '@/components/auth/AccountRestoreModal';
+import ChangelogModal from '@/components/changelog/ChangelogModal';
+import AppViewTracker from '@/components/analytics/AppViewTracker';
+import IncidentStrip from '@/components/app/IncidentStrip';
+import { IS_CE } from '@/lib/edition';
 
 /**
  * Layout for all /app routes
@@ -44,22 +50,41 @@ export default function AppLayout({
               <SidePanelProvider>
                 <SidePanelLayoutProvider>
                 <WorkflowLayoutDirectionProvider>
+                <InspectorDockProvider>
+                <InspectorOpenModeProvider>
                 <NavigationGuardProvider>
                   <div className="h-[100dvh] bg-theme-primary transition-colors duration-300 fixed inset-0 z-50">
                     {/* Sidebar + content + side panel, arranged per the dock-position
                         preference (right / bottom / bottom-full). */}
+                    {/* CE (self-hosted) ships no product analytics/tracking. */}
+                    {!IS_CE && <AppViewTracker />}
                     <AppShell>{children}</AppShell>
-                    <WelcomeGiftModal />
+                    {/* Ongoing-incident strip. Mounted here rather than inside
+                        AppShell: AppShell renders two different arrangements and
+                        moving a child between those branches remounts the subtree
+                        (a running canvas, an SSE stream). Cloud-only, like the
+                        rest of the status feature. */}
+                    {!IS_CE && <IncidentStrip />}
                     <SuggestedAppsModal />
                     <InsufficientCreditsModal />
                     <InsufficientStorageModal />
+                    {/* The comparison's only in-app opener is the pricing page's
+                        "Compare plans" button, which lives in this tree. It stays
+                        mounted here rather than inside that page because the
+                        dialog listens on a window event. */}
+                    <AppPlanComparisonDialog />
                     <MissingApiKeyModal />
                     <CeCloudCreditModal />
                     <ModelNotManagedModal />
                     <AgentErrorModal />
                     <AccountRestoreModal />
+                    {/* One entry, the newest, once per user. Both editions: the announcement is
+                        about the build the user is actually running. */}
+                    <ChangelogModal />
                   </div>
                 </NavigationGuardProvider>
+                </InspectorOpenModeProvider>
+                </InspectorDockProvider>
                 </WorkflowLayoutDirectionProvider>
                 </SidePanelLayoutProvider>
               </SidePanelProvider>

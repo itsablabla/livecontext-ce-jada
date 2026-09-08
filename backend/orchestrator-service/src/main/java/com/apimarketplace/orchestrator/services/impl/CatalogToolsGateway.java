@@ -286,6 +286,18 @@ public class CatalogToolsGateway implements ToolsGateway {
                     headers.set("X-Lc-Billing-Scope-Kind", "STREAM");
                     headers.set("X-Lc-Billing-Scope-Id", String.valueOf(streamId));
                 }
+                // Product-analytics attribution only (api_call_completed on the
+                // catalog side). Separate from the billing step header on purpose:
+                // X-Lc-Billing-Step-Id shapes the ledger source-id, these two
+                // change nothing about what is charged.
+                Object workflowId = billingIdentifiers.get("__workflowId__");
+                Object analyticsNodeId = billingIdentifiers.get("__analyticsNodeId__");
+                if (workflowId != null) {
+                    headers.set("X-Lc-Workflow-Id", String.valueOf(workflowId));
+                }
+                if (analyticsNodeId != null) {
+                    headers.set("X-Lc-Node-Id", String.valueOf(analyticsNodeId));
+                }
             }
 
             HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(payload, headers);
@@ -329,6 +341,22 @@ public class CatalogToolsGateway implements ToolsGateway {
             // the X-Lc-Billing-Scope-* headers set above.
 
             return new ExecutionResult(success, output, errors, List.of());
+        } catch (org.springframework.web.client.HttpClientErrorException.Forbidden e) {
+            // The catalog refuses an integration the account's plan does not include, with
+            // a sentence naming the plan that does. Same reasoning as the 422 below: left
+            // to the generic handler the step would read "403 FORBIDDEN: {json blob}" and
+            // the one actionable sentence would be buried in it. Only a body carrying the
+            // refusal CODE is labelled as one - a provider's own 403 (bad token, missing
+            // scope) must keep reading as an auth failure, not as a billing prompt.
+            String body = e.getResponseBodyAsString();
+            boolean isPlanRefusal = body != null && body.contains("PLAN_UPGRADE_REQUIRED");
+            String message = isPlanRefusal ? extractJsonMessage(body, e.getMessage()) : e.getMessage();
+            logger.error("Catalog returned 403 for tool {}: {}", toolId, message);
+            return new ExecutionResult(false, Map.of(),
+                    List.of(Map.of(
+                        "type", isPlanRefusal ? "plan_upgrade_required" : "execution_error",
+                        "message", message)),
+                    List.of());
         } catch (org.springframework.web.client.HttpClientErrorException.UnprocessableEntity e) {
             // The catalog refuses a run-time credential choice with a sentence written
             // for the person who has to fix it. Left to the generic handler below, the
@@ -467,6 +495,28 @@ public class CatalogToolsGateway implements ToolsGateway {
      * must still surface something, because the alternative is a step that failed for
      * a reason nobody can read.
      */
+    /**
+     * The {@code message} field of a catalog JSON error body, or {@code fallback}
+     * when the body is absent, unparseable, or carries no message. Used for the
+     * refusals whose whole value is the sentence they carry.
+     */
+    private static String extractJsonMessage(String responseBody, String fallback) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return fallback;
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode node =
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(responseBody);
+            com.fasterxml.jackson.databind.JsonNode message = node.get("message");
+            if (message != null && message.isTextual() && !message.asText().isBlank()) {
+                return message.asText();
+            }
+        } catch (Exception ignored) {
+            // Fall through to the caller's fallback.
+        }
+        return fallback;
+    }
+
     private String credentialSelectionMessage(String responseBody) {
         if (responseBody == null || responseBody.isBlank()) {
             return "The catalog refused the credential this step selected for this run.";

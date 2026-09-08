@@ -74,6 +74,12 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
+        // Same viewport cap as PopoverContent, in Select's own re-namespaced
+        // variable: a list whose longest option is wider than the space beside
+        // the trigger stays on screen instead of running off the edge. Radix
+        // Select already sets a collision padding of its own, so only the cap
+        // is added here.
+        "max-w-[var(--radix-select-content-available-width,calc(100vw-1rem))]",
         "relative z-[10001] max-h-96 min-w-[8rem] overflow-hidden rounded-xl border border-theme bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_8px_24px_rgba(0,0,0,0.12)] transition-none",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",

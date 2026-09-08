@@ -10,6 +10,7 @@ import { NodeCreationService, type NodeCreationResult } from './NodeCreationServ
 import { EdgeCreationService, type EdgeCreationResult } from './EdgeCreationService';
 import { InputValidationService, type ValidationResult } from './InputValidationService';
 import { applyDagreLayout, layoutConfigForDirection, needsLayout } from '../LayoutService';
+import type { InterfaceFormatContext } from './InterfaceFormatService';
 import {
   DEFAULT_WORKFLOW_LAYOUT_DIRECTION,
   type WorkflowLayoutDirection,
@@ -33,11 +34,16 @@ export class WorkflowPlanImporter {
    *   service, so callers (all of them hooks or components) must pass it down rather
    *   than have the service reach for it. Defaults to horizontal, matching the
    *   context's own default, so an un-updated caller keeps the previous behaviour.
+   * @param context what the surface is: its React Query client, and whether it is showing
+   *   a run. Passed down for the same reason as the direction above - a plain service must
+   *   not reach into a React context, and a module-level singleton would hand the wrong
+   *   client to a page that mounts its own. See {@link InterfaceFormatService}.
    */
   static async importPlan(
     jsonString: string,
     existingNodes: Node<BuilderNodeData>[] = [],
-    layoutDirection: WorkflowLayoutDirection = DEFAULT_WORKFLOW_LAYOUT_DIRECTION
+    layoutDirection: WorkflowLayoutDirection = DEFAULT_WORKFLOW_LAYOUT_DIRECTION,
+    context: InterfaceFormatContext = {}
   ): Promise<ImportResult> {
     try {
       // Step 1: Parse and validate plan structure
@@ -46,7 +52,8 @@ export class WorkflowPlanImporter {
       // Step 2: Create nodes
       const nodeResult: NodeCreationResult = await NodeCreationService.createNodes(
         parsedPlan.plan,
-        existingNodes
+        existingNodes,
+        context
       );
       
       // Step 3: Create edges and update nodes with paramExpressions

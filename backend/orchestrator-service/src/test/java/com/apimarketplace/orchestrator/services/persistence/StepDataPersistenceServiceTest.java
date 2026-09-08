@@ -700,8 +700,8 @@ class StepDataPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("Should filter out INVALID_TEMPLATE values from input data")
-        void shouldFilterOutInvalidTemplateValues() {
+        @DisplayName("Keeps unresolved and brace-carrying parameters instead of dropping them (a dropped parameter is indistinguishable from one never configured)")
+        void shouldKeepUnresolvedParametersInInputData() {
             UUID workflowRunId = UUID.randomUUID();
             when(execution.getRunId()).thenReturn("run-123");
             when(execution.getPlan()).thenReturn(plan);
@@ -712,8 +712,11 @@ class StepDataPersistenceServiceTest {
 
             Map<String, Object> resolvedParams = new HashMap<>();
             resolvedParams.put("valid", "value");
-            resolvedParams.put("invalid1", "INVALID_TEMPLATE: missing reference");
-            resolvedParams.put("invalid2", "some ${unresolved} template");
+            resolvedParams.put("brokenTemplate", "INVALID_TEMPLATE: missing reference");
+            // Not a failure at all: a code node's JS template literal legitimately
+            // contains "${", and the old filter silently deleted the whole parameter.
+            resolvedParams.put("code", "const url = `${base}/items`;");
+            resolvedParams.put("stringifiedObject", "[object Object]");
 
             StepExecutionResult result = new StepExecutionResult(
                     "test-step", NodeStatus.COMPLETED, "Success",
@@ -726,9 +729,38 @@ class StepDataPersistenceServiceTest {
             );
 
             assertNotNull(entity.getInputData());
-            assertTrue(entity.getInputData().containsKey("valid"));
-            assertFalse(entity.getInputData().containsKey("invalid1"));
-            assertFalse(entity.getInputData().containsKey("invalid2"));
+            assertEquals(resolvedParams.keySet(), entity.getInputData().keySet());
+            assertEquals("INVALID_TEMPLATE: missing reference", entity.getInputData().get("brokenTemplate"));
+            assertEquals("const url = `${base}/items`;", entity.getInputData().get("code"));
+            assertEquals("[object Object]", entity.getInputData().get("stringifiedObject"));
+        }
+
+        @Test
+        @DisplayName("Copies the reported parameters rather than aliasing them, so a later mutation of the node's map cannot rewrite a persisted row")
+        void shouldCopyResolvedParamsRatherThanAliasThem() {
+            UUID workflowRunId = UUID.randomUUID();
+            when(execution.getRunId()).thenReturn("run-123");
+            when(execution.getPlan()).thenReturn(plan);
+            when(plan.findStep(anyString())).thenReturn(Optional.empty());
+            when(plan.getTenantId()).thenReturn("tenant-1");
+            when(metadataBuilder.buildMetadata(any(), any(), any(), any(), any())).thenReturn(new HashMap<>());
+            when(stepPayloadService.persistStepPayloadOutcome(any(), any(), any(), any(), any(), anyInt(), anyInt())).thenReturn(StepPayloadResult.stored(UUID.randomUUID()));
+
+            Map<String, Object> resolvedParams = new HashMap<>();
+            resolvedParams.put("param", "before");
+
+            StepExecutionResult result = new StepExecutionResult(
+                    "test-step", NodeStatus.COMPLETED, "Success",
+                    Map.of("item_index", 0, "resolved_params", resolvedParams),
+                    100L, null
+            );
+
+            WorkflowStepDataEntity entity = service.buildStepEntity(
+                    execution, workflowRunId, "mcp:step", "alias", "graph-1", result, 0, 0
+            );
+            resolvedParams.put("param", "after");
+
+            assertEquals("before", entity.getInputData().get("param"));
         }
     }
 

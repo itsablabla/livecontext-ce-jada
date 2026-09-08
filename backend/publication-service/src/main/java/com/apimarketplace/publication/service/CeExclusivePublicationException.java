@@ -4,8 +4,9 @@ import java.util.List;
 
 /**
  * Raised when a managed-cloud workspace tries to install a publication whose
- * snapshot uses a self-hosted-only feature (local-CLI agents, vector/embedding
- * columns).
+ * snapshot uses something managed cloud cannot run at any plan (today: local-CLI
+ * agents). Vector search is NOT one of these since 2026-09-03 - it is plan-gated at acquire
+ * through PublicationPlanUpgradeRequiredException instead.
  *
  * <p>Distinct from {@link IllegalArgumentException} (which the controllers map
  * to 400 "bad request") because nothing about the request is malformed: the

@@ -55,17 +55,23 @@ public final class PlanSecretRedactor {
                 // Credential references (numeric ids, low value but not the viewer's to see).
                 removeChildKeys(coreMap, "emailInbox", "credentialId");
                 removeChildKeys(coreMap, "approvalDelegation", "credentialId");
-                // A generate node keeps its config in the GENERIC params map
-                // rather than in a named child, so the removals above cannot
-                // reach it. `credential_id` there names one of the AUTHOR's own
-                // provider keys: handed to a share-link visitor or baked into a
-                // marketplace snapshot, it tells an acquirer which key to pin,
-                // and an acquirer in the author's organization can resolve it.
+                // A generate node keeps its config in the GENERIC params map rather than
+                // in a named child, so the removals above cannot reach it.
+                // `credential_id` there names one of the AUTHOR's own provider keys:
+                // handed to a share-link visitor or baked into a marketplace snapshot, it
+                // tells an acquirer which key to pin, and an acquirer in the author's
+                // organization can resolve it.
                 //
-                // Scoped to the node type that has one. `params` is the generic
-                // map EVERY core keeps its config in, so removing a key from it
-                // unconditionally would silently delete a field of the same name
-                // from some future node that means something else by it.
+                // Read here AS WELL AS in the agents loop below. The node is filed with the
+                // AI family from now on, but every plan saved before that - and every
+                // snapshot already published - still carries it among the cores, and those
+                // are stripped as raw JSON with no parsing, so they stay cloneable.
+                // Scrubbing only the new home would leak every existing one.
+                //
+                // Scoped to the node type that has one: `params` is the generic map EVERY
+                // core keeps its config in, so an unconditional removal would silently
+                // delete a field of the same name from another node that means something
+                // else by it.
                 if ("generate".equals(coreMap.get("type"))) {
                     removeChildKeys(coreMap, "params", "credential_id");
                 }
@@ -97,6 +103,20 @@ public final class PlanSecretRedactor {
                 // one would show a share-link visitor the author's expression.
                 mutableStep.remove("credentialSelector");
                 mutableStep.remove("credential_selector");
+                // A generate node keeps its config in the GENERIC params map
+                // rather than in a named field, so the removals above cannot
+                // reach it. `credential_id` there names one of the AUTHOR's own
+                // provider keys: handed to a share-link visitor or baked into a
+                // marketplace snapshot, it tells an acquirer which key to pin,
+                // and an acquirer in the author's organization can resolve it.
+                //
+                // Scoped to the node type that has one. `params` is a generic
+                // map, so removing a key from it unconditionally would silently
+                // delete a field of the same name from some other node that
+                // means something else by it.
+                if ("generate".equals(mutableStep.get("type"))) {
+                    removeChildKeys(mutableStep, "params", "credential_id");
+                }
             }
         }
     }

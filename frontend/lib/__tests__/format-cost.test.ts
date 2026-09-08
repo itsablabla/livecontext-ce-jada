@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { creditsToUsd } from '../format-cost';
+import { creditsToUsd, formatCreditsCompact } from '../format-cost';
 import { CREDIT_LIST_USD } from '../billing/pricing-constants';
 
 // Pin the app locale to 'en' so the locale-GROUPED Cloud output is deterministic - otherwise
 // toLocaleString's thousands separator is the test runner's system locale (en ',' vs fr ' ').
-vi.mock('../utils/locale', () => ({ getClientLocale: () => 'en' }));
+//
+// A settable box rather than a constant, so a test can point the fallback
+// elsewhere: asserting an English result against a fallback hardcoded to English
+// cannot tell "the fallback is consulted" from "the literal 'en' is inlined".
+const localeMock = vi.hoisted(() => ({ current: 'en' }));
+vi.mock('../utils/locale', () => ({ getClientLocale: () => localeMock.current }));
 
 /**
  * Regression for the CE usage-history "$" bug: ledger amounts are stored in CREDITS
@@ -178,5 +183,73 @@ describe('formatCost / formatCostOrDash - edition branching', () => {
     expect(ce.formatCostCompact(null)).toBe('-');
     const cloud = await load(false);
     expect(cloud.formatCostCompact(undefined)).toBe('-');
+  });
+});
+
+describe('formatCreditsCompact', () => {
+  // This function had no direct test at all, in a file that was itself absent
+  // from the CI vitest list - so mutating away its "M" branch, or the '-'
+  // placeholder, changed nothing anywhere. Its three call sites are all billing
+  // surfaces and two of them mock it out, which is what left it unguarded.
+
+  it('abbreviates millions, which the top three credit tiers actually reach', () => {
+    // CREDIT_TIERS goes to 1M / 5M / 10M, so this branch is live, not defensive.
+    expect(formatCreditsCompact(1_000_000)).toBe('1.0M');
+    expect(formatCreditsCompact(10_000_000)).toBe('10.0M');
+    expect(formatCreditsCompact(2_500_000)).toBe('2.5M');
+  });
+
+  it('abbreviates thousands', () => {
+    expect(formatCreditsCompact(1_000)).toBe('1.0K');
+    expect(formatCreditsCompact(9_779)).toBe('9.8K');
+  });
+
+  it('switches unit exactly at each threshold, not near it', () => {
+    // Pins the boundaries themselves: 999_999 must still be K, 1_000_000 must
+    // be M. A shifted comparison renders a seven-figure balance as "1000.0K".
+    expect(formatCreditsCompact(999_999)).toBe('1000.0K');
+    expect(formatCreditsCompact(1_000_000)).toBe('1.0M');
+    expect(formatCreditsCompact(999)).toBe('999.0');
+    expect(formatCreditsCompact(1_000)).toBe('1.0K');
+  });
+
+  it('renders a dash for an unknown value, not a zero', () => {
+    // '-' is the placeholder the wallet card draws while a bucket is unknown.
+    // Returning '0' there would state that the bucket is empty, which is a
+    // different and false claim.
+    expect(formatCreditsCompact(null)).toBe('-');
+    expect(formatCreditsCompact(undefined)).toBe('-');
+    expect(formatCreditsCompact(0)).toBe('0.0');
+  });
+
+  it('spells the mantissa for the locale it is given', () => {
+    // "9.8K" reads as nine thousand eight hundred in German. The suffix is a
+    // unit and stays; the number in front of it is a decimal and must not.
+    expect(formatCreditsCompact(9_779, 'de')).toBe('9,8K');
+    expect(formatCreditsCompact(2_500_000, 'fr')).toBe('2,5M');
+    expect(formatCreditsCompact(9_779, 'en')).toBe('9.8K');
+  });
+
+  it('CONSULTS the app-locale fallback when none is passed', () => {
+    // Pointed at German for this one case: only a call that really reaches the
+    // fallback can produce a comma. The previous form asserted '9.8K' against an
+    // English-pinned fallback, and passed identically with `getClientLocale()`
+    // replaced by the literal 'en'.
+    localeMock.current = 'de';
+    try {
+      expect(formatCreditsCompact(9_779)).toBe('9,8K');
+    } finally {
+      localeMock.current = 'en';
+    }
+  });
+
+  it('prefers an explicit locale over that fallback', () => {
+    // The mirror: were the argument ignored, this would come back German.
+    localeMock.current = 'de';
+    try {
+      expect(formatCreditsCompact(9_779, 'en')).toBe('9.8K');
+    } finally {
+      localeMock.current = 'en';
+    }
   });
 });

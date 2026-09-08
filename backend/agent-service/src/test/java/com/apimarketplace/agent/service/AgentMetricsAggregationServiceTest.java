@@ -84,6 +84,23 @@ class AgentMetricsAggregationServiceTest {
         }
 
         @Test
+        @DisplayName("memory reports the slug in preference to the id, so the metric names the fact and not a UUID")
+        void memoryPrefersSlug() {
+            // Both keys are present on a real call that addressed the entry by id AND
+            // got a slug back. Reversing the preference is invisible in every other
+            // assertion here, and turns the resource column into unreadable UUIDs.
+            assertThat(AgentMetricsAggregationService.extractResourceId("memory",
+                Map.of("slug", "release-cadence", "memory_id", "3f2b1c00-0000-0000-0000-000000000000")))
+                .isEqualTo("release-cadence");
+            // A delete by id carries no slug, and must still be attributed.
+            assertThat(AgentMetricsAggregationService.extractResourceId("memory",
+                Map.of("memory_id", "3f2b1c00-0000-0000-0000-000000000000")))
+                .isEqualTo("3f2b1c00-0000-0000-0000-000000000000");
+            // A list or search addresses no single entry: nothing to attribute.
+            assertThat(AgentMetricsAggregationService.extractResourceId("memory", Map.of("query", "cadence"))).isNull();
+        }
+
+        @Test
         @DisplayName("non-family tool and null args yield null; numeric ids stringify like SQL ->>")
         void nonFamilyAndNumeric() {
             assertThat(AgentMetricsAggregationService.extractResourceId("web_search", Map.of("id", "x"))).isNull();

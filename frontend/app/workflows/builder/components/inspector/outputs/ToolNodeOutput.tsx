@@ -71,6 +71,7 @@ export function ToolNodeOutput({
           runId={runId}
           stepAlias={stepAlias}
           dataType="output"
+          node={currentNode}
           isDraggable={false}
           onLoadedOutputChange={onLoadedOutputChange}
         />

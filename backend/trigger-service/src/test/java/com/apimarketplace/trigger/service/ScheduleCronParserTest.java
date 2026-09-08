@@ -25,57 +25,75 @@ class ScheduleCronParserTest {
     private final ScheduleCronParser parser = new ScheduleCronParser();
 
     @Nested
-    @DisplayName("isValid - strict step validation")
+    @DisplayName("isAcceptableInput - strict step validation at the door")
     class IsValidStrictStep {
+
+        /*
+         * These moved off isValid when the two questions were separated. The rule they
+         * pin is unchanged and still enforced: a step that silently collapses is refused
+         * from any caller submitting a cron. What it may no longer do is answer for an
+         * expression that is ALREADY stored - isValid is what the schedule reapers ask,
+         * and a false there archives the row permanently, so folding this rule into it
+         * meant a validator getting stricter destroyed working schedules.
+         */
 
         @Test
         @DisplayName("rejects */120 in the minute field (the bug class from production)")
         void rejectsStep120InMinuteField() {
-            assertThat(parser.isValid("*/120 * * * *"))
+            assertThat(parser.isAcceptableInput("*/120 * * * *"))
                     .as("Spring accepts this and collapses to minute 0 - must be rejected")
                     .isFalse();
         }
 
         @Test
+        @DisplayName("the same expression stays VALID to fire - only the door refuses it")
+        void theDoorIsStricterThanTheFiringPredicate() {
+            // The line the split draws, asserted where someone would come to erase it.
+            assertThat(parser.isAcceptableInput("*/120 * * * *")).isFalse();
+            assertThat(parser.isValid("*/120 * * * *")).isTrue();
+            assertThat(parser.getNextExecution("*/120 * * * *", "UTC")).isNotNull();
+        }
+
+        @Test
         @DisplayName("rejects */90 in the minute field (any value > 59)")
         void rejectsStep90InMinuteField() {
-            assertThat(parser.isValid("*/90 * * * *")).isFalse();
+            assertThat(parser.isAcceptableInput("*/90 * * * *")).isFalse();
         }
 
         @Test
         @DisplayName("rejects */48 in the hour field (any value > 23)")
         void rejectsStep48InHourField() {
-            assertThat(parser.isValid("* */48 * * *")).isFalse();
+            assertThat(parser.isAcceptableInput("* */48 * * *")).isFalse();
         }
 
         @Test
         @DisplayName("rejects 0,*/120 in the minute field - embedded oversize step")
         void rejectsOversizedStepInsideList() {
-            assertThat(parser.isValid("0,*/120 * * * *")).isFalse();
+            assertThat(parser.isAcceptableInput("0,*/120 * * * *")).isFalse();
         }
 
         @Test
         @DisplayName("rejects */0 (step zero is meaningless)")
         void rejectsZeroStep() {
-            assertThat(parser.isValid("*/0 * * * *")).isFalse();
+            assertThat(parser.isAcceptableInput("*/0 * * * *")).isFalse();
         }
 
         @Test
         @DisplayName("rejects */abc (non-numeric step)")
         void rejectsNonNumericStep() {
-            assertThat(parser.isValid("*/abc * * * *")).isFalse();
+            assertThat(parser.isAcceptableInput("*/abc * * * *")).isFalse();
         }
 
         @Test
         @DisplayName("accepts */2 in the hour field (the correct way to say every 2 hours)")
         void acceptsStep2InHourField() {
-            assertThat(parser.isValid("0 */2 * * *")).isTrue();
+            assertThat(parser.isAcceptableInput("0 */2 * * *")).isTrue();
         }
 
         @Test
         @DisplayName("accepts */15 in the minute field")
         void acceptsStep15InMinuteField() {
-            assertThat(parser.isValid("*/15 * * * *")).isTrue();
+            assertThat(parser.isAcceptableInput("*/15 * * * *")).isTrue();
         }
 
         @Test
@@ -83,7 +101,7 @@ class ScheduleCronParserTest {
         void acceptsMaxStep() {
             // */60 means "every 60 minutes starting at 0" → only minute 0 → valid as a hourly fire
             // Spec-wise this is equivalent to `0` and is widely accepted, so we allow it.
-            assertThat(parser.isValid("*/60 * * * *")).isTrue();
+            assertThat(parser.isAcceptableInput("*/60 * * * *")).isTrue();
         }
 
         // ----- 6-field shape (Spring native cron: seconds minute hour day month weekday) -----
@@ -93,25 +111,25 @@ class ScheduleCronParserTest {
         void rejectsStep120InMinuteFieldOf6FieldCron() {
             // The bug class lives on the 6-field surface too - any future internal caller
             // passing a 6-field cron must not slip past the strict gate.
-            assertThat(parser.isValid("0 */120 * * * *")).isFalse();
+            assertThat(parser.isAcceptableInput("0 */120 * * * *")).isFalse();
         }
 
         @Test
         @DisplayName("rejects */48 in the hour field of a 6-field cron (oversize step at position 2)")
         void rejectsStep48InHourFieldOf6FieldCron() {
-            assertThat(parser.isValid("0 0 */48 * * *")).isFalse();
+            assertThat(parser.isAcceptableInput("0 0 */48 * * *")).isFalse();
         }
 
         @Test
         @DisplayName("rejects */0 in any 6-field position (zero step is meaningless)")
         void rejectsZeroStepIn6FieldCron() {
-            assertThat(parser.isValid("0 */0 * * * *")).isFalse();
+            assertThat(parser.isAcceptableInput("0 */0 * * * *")).isFalse();
         }
 
         @Test
         @DisplayName("accepts a sane 6-field cron with */2 in the hour field")
         void accepts6FieldEvery2Hours() {
-            assertThat(parser.isValid("0 0 */2 * * *")).isTrue();
+            assertThat(parser.isAcceptableInput("0 0 */2 * * *")).isTrue();
         }
     }
 
@@ -239,7 +257,12 @@ class ScheduleCronParserTest {
         @Test
         @DisplayName("returns empty list for invalid cron")
         void returnsEmptyForInvalidCron() {
-            assertThat(parser.getNextExecutions("*/120 * * * *", "UTC", 3)).isEmpty();
+            // "*/120" used to be here. It is not an invalid cron: Spring parses it and it
+            // fires hourly. The emptiness came from the strict rule gating the walk, and
+            // asserting it pinned exactly the behaviour that made those stored schedules
+            // stop firing. What the daemon arms and what the calendar draws must agree,
+            // and both now expand it.
+            assertThat(parser.getNextExecutions("*/120 * * * *", "UTC", 3)).hasSize(3);
             assertThat(parser.getNextExecutions("nonsense", "UTC", 3)).isEmpty();
             assertThat(parser.getNextExecutions(null, "UTC", 3)).isEmpty();
         }

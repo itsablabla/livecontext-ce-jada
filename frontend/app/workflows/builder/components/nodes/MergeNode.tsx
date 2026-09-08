@@ -18,6 +18,7 @@ import { showsNodeRunActions } from './shared';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { getSourceHandleGeometry, getBranchHandleGeometry, getBranchHandleGeometryAt, getBranchRowFlow } from './handleGeometry';
+import { NodeActivityShimmer } from './NodeActivityShimmer';
 export interface MergeInputRow {
   id: string;
   label: string;
@@ -71,7 +72,7 @@ export function MergeNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
   }, [inputs, edges, nodes, id]);
 
   // Step-by-step execution status
-  const executionStatus = useNodeExecutionStatus(id, { label: data.label, kind: data.kind });
+  const executionStatus = useNodeExecutionStatus(id, { label: data.label, kind: data.kind, status: data.status });
 
   // Use centralized validation context for error state
   const { hasNodeErrors: checkNodeErrors } = useValidation();
@@ -121,17 +122,7 @@ export function MergeNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
       }}
       tabIndex={0}
     >
-      {/* Shimmer scan effect for running state - show in all modes */}
-      {effectiveStatus === 'running' && (
-        <div
-          className="absolute inset-0 pointer-events-none rounded-[26px]"
-          style={{
-            background: 'linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.15) 50%, transparent 100%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer-scan 2.5s ease-in-out infinite',
-          }}
-        />
-      )}
+      <NodeActivityShimmer status={effectiveStatus} className="rounded-[26px]" />
       <NodeHeader
         visuals={visuals}
         label={data.label}

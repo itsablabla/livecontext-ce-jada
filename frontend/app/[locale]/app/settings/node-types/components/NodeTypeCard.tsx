@@ -7,11 +7,17 @@ import { Switch } from "@/components/ui/switch";
 import type { NodeTypeSetting } from "@/lib/api/orchestrator/node-type-settings.service";
 import { NodeIcon } from "@/app/workflows/builder/components/nodes/shared";
 import { nodeTypeCategory, NODE_CATEGORY_LABEL_KEY } from "../categories";
+import { PlanRequirementSelect } from "./PlanRequirementSelect";
 
 interface NodeTypeCardProps {
   nodeType: NodeTypeSetting;
   onToggle: (type: string, enabled: boolean) => void;
   toggling?: boolean;
+  /** Minimum plan required to use this node type, or null when it is on every plan. */
+  minPlan?: string | null;
+  onChangePlan?: (type: string, minPlan: string) => void;
+  planSaving?: boolean;
+  planOptions?: readonly string[];
 }
 
 // Keyed by clean category bucket (see ../categories), not the raw backend value.
@@ -60,7 +66,15 @@ function resolveIconIdentity(type: string, category: string): { nodeId: string; 
   return { nodeId: type, isMcp: false };
 }
 
-export function NodeTypeCard({ nodeType, onToggle, toggling }: NodeTypeCardProps) {
+export function NodeTypeCard({
+  nodeType,
+  onToggle,
+  toggling,
+  minPlan,
+  onChangePlan,
+  planSaving,
+  planOptions,
+}: NodeTypeCardProps) {
   const t = useTranslations("nodeTypeSettings");
   const [expanded, setExpanded] = useState(false);
 
@@ -108,6 +122,17 @@ export function NodeTypeCard({ nodeType, onToggle, toggling }: NodeTypeCardProps
         </div>
 
         <div className="flex items-center gap-3 flex-shrink-0">
+          {/* Which plan includes it, then whether it exists at all. The two answer
+              different questions and are deliberately independent: disabling
+              removes the node for everyone, the plan only decides who may use it. */}
+          {onChangePlan && (
+            <PlanRequirementSelect
+              value={minPlan ?? null}
+              onChange={(plan) => onChangePlan(nodeType.type, plan)}
+              disabled={planSaving || !nodeType.enabled}
+              options={planOptions}
+            />
+          )}
           <span className={`text-xs font-medium ${nodeType.enabled ? "text-green-600 dark:text-green-400" : "text-theme-tertiary"}`}>
             {nodeType.enabled ? t("enabled") : t("disabled")}
           </span>

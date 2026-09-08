@@ -16,6 +16,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // generation catalogue), and taking whichever call came last would let an
 // unrelated query silently stand in for the one under test.
 let capturedQuery: { queryKey?: unknown; queryFn?: () => unknown; enabled?: boolean } | null = null;
+// The Generate control leads to the studio through the LOCALE-AWARE router, and next-intl's
+// navigation module cannot resolve 'next/navigation' under vitest. Stood in for here because this
+// suite is not about where that control goes (that is pinned in the generate-entry-point suites).
+vi.mock('@/i18n/navigation', () => ({
+  useRouter: () => ({ push: () => undefined, replace: () => undefined, prefetch: () => undefined }),
+  usePathname: () => '/app',
+  Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+}));
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (cfg: { queryKey?: unknown; queryFn?: () => unknown; enabled?: boolean }) => {
     if (Array.isArray(cfg.queryKey) && cfg.queryKey[0] === 'linked-agent') {

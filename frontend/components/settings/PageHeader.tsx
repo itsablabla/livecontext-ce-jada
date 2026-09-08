@@ -13,6 +13,13 @@ interface PageHeaderProps {
   title: React.ReactNode;
   subtitle?: string;
   iconClassName?: string;
+  /**
+   * Heading level. Defaults to the h1 a settings PAGE owns. Pass 'h2' where the
+   * header titles a section inside a page that already has its own heading - a tab
+   * panel, for instance - so the level does not appear and disappear with the tab.
+   * Purely semantic: both levels render with the same styling.
+   */
+  headingLevel?: 'h1' | 'h2';
 }
 
 /**
@@ -23,7 +30,8 @@ export function PageHeader({
   icon: Icon,
   title,
   subtitle,
-  iconClassName = "w-5 h-5 text-theme-primary"
+  iconClassName = "w-5 h-5 text-theme-primary",
+  headingLevel: Heading = 'h1'
 }: PageHeaderProps) {
   return (
     <div className="flex items-center gap-3">
@@ -31,7 +39,7 @@ export function PageHeader({
         <Icon className={iconClassName} />
       </div>
       <div>
-        <h1 className="text-lg font-semibold text-theme-primary">{title}</h1>
+        <Heading className="text-lg font-semibold text-theme-primary">{title}</Heading>
         {subtitle && (
           <p className="text-sm text-theme-secondary">{subtitle}</p>
         )}

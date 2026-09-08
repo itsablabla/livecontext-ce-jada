@@ -72,10 +72,33 @@ export function useInspectorViewMode({
   // the selected node has run data (statusCounts), otherwise fall back to the
   // Configuration view. Re-runs when a different node is selected or when a node
   // first produces run data during a live run.
+  //
+  // Latched per node, and deliberately one-way. `nodeHasRunData` also folds in
+  // "the node is executing / parked on a signal", which can go back to false
+  // without the node leaving any statusCounts behind (a branch pruned mid-flight,
+  // a skip cascade). Following that down would yank the panel back to the
+  // configuration form under a reader who is looking at the run.
+  //
+  // State adjusted during render rather than a ref written during render: this is
+  // derived state, and the ref form is not safe under a re-entrant render.
+  //
+  // Keyed on the RUN as well as the node: the same node in another run may never
+  // have executed there, and a latch that ignored the run would hold an empty
+  // run view open on it.
+  const latchKey = `${runId ?? ''}:${nodeId ?? ''}`;
+  const [latchedKey, setLatchedKey] = useState(latchKey);
+  const [nodeEverHadRunData, setNodeEverHadRunData] = useState(nodeHasRunData);
+  if (latchedKey !== latchKey) {
+    setLatchedKey(latchKey);
+    setNodeEverHadRunData(nodeHasRunData);
+  } else if (nodeHasRunData && !nodeEverHadRunData) {
+    setNodeEverHadRunData(true);
+  }
+
   useEffect(() => {
     if (!isRunMode) return;
-    setShowExecutionData(nodeHasRunData);
-  }, [isRunMode, nodeId, nodeHasRunData]);
+    setShowExecutionData(nodeEverHadRunData);
+  }, [isRunMode, nodeId, nodeEverHadRunData]);
 
   // Listen for view mode changes from header (in run mode)
   useEffect(() => {

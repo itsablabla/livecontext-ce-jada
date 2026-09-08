@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   MIN_INDEXABLE_DESCRIPTION_LENGTH,
+  MIN_INDEXABLE_DESCRIPTION_LENGTH_WITH_SHOWCASE,
   isIndexable,
   marketplacePath,
   metaDescription,
@@ -14,6 +15,7 @@ function publication(overrides: Partial<PublicPublicationSummary> = {}): PublicP
     title: 'Invoice Bot',
     description: 'x'.repeat(MIN_INDEXABLE_DESCRIPTION_LENGTH),
     publisherName: 'John Doe',
+    publisherId: '42',
     publisherHandle: 'john-doe',
     publisherAvatarUrl: null,
     categorySlug: 'automation',
@@ -24,6 +26,17 @@ function publication(overrides: Partial<PublicPublicationSummary> = {}): PublicP
     publishedAt: '2026-07-01T10:00:00Z',
     updatedAt: '2026-07-02T10:00:00Z',
     publicationType: 'WORKFLOW',
+    categoryColor: null,
+    displayMode: null,
+    creditsPerUse: 0,
+    hasShowcase: false,
+    nodeIcons: [],
+    agentCount: 0,
+    interfaceCount: 0,
+    workflowCount: 0,
+    skillCount: 0,
+    datasourceCount: 0,
+    planSnapshot: null,
     ...overrides,
   };
 }
@@ -65,6 +78,44 @@ describe('isIndexable', () => {
 
   it('does not require a category: a good listing without one is still indexable', () => {
     expect(isIndexable(publication({ categorySlug: null, categoryName: null }))).toBe(true);
+  });
+
+  describe('a listing whose page renders the published application', () => {
+    // The listing page shows the frozen showcase running, plus the workflow
+    // behind it, so it is not a title and a sentence any more: the description
+    // floor that assumed it was kept substantive pages out of the index.
+    const shortButReal = 'Turns a screenshot of any interface into a Telegram photo.';
+
+    it('is indexable below the plain floor when it has a showcase', () => {
+      expect(shortButReal.length).toBeLessThan(MIN_INDEXABLE_DESCRIPTION_LENGTH);
+      expect(isIndexable(publication({ description: shortButReal, hasShowcase: true }))).toBe(true);
+    });
+
+    it('is still rejected without a showcase, where the page IS just the text', () => {
+      expect(isIndexable(publication({ description: shortButReal, hasShowcase: false }))).toBe(false);
+    });
+
+    it('rejects a placeholder description however much the page renders', () => {
+      // The gate's whole purpose: "test" says nothing about the listing, and a
+      // rendered application does not make the words on the page meaningful.
+      for (const placeholder of ['test', 'asdf', 'my workflow']) {
+        expect(isIndexable(publication({ description: placeholder, hasShowcase: true }))).toBe(false);
+      }
+    });
+
+    it('accepts exactly at the showcase floor and rejects one character below', () => {
+      const atFloor = 'a'.repeat(MIN_INDEXABLE_DESCRIPTION_LENGTH_WITH_SHOWCASE);
+      const belowFloor = 'a'.repeat(MIN_INDEXABLE_DESCRIPTION_LENGTH_WITH_SHOWCASE - 1);
+
+      expect(isIndexable(publication({ description: atFloor, hasShowcase: true }))).toBe(true);
+      expect(isIndexable(publication({ description: belowFloor, hasShowcase: true }))).toBe(false);
+    });
+
+    it('still needs a slug: a showcase does not create a URL to index', () => {
+      expect(
+        isIndexable(publication({ description: shortButReal, hasShowcase: true, publicSlug: null })),
+      ).toBe(false);
+    });
   });
 });
 

@@ -58,6 +58,28 @@ export class GeminiAdapter {
   }
 
   /**
+   * Per-request timeout written into the generated settings.json, in MILLISECONDS (the
+   * unit of gemini-cli's `mcpServers.<name>.timeout`).
+   *
+   * `mcpServers.<name>.timeout` is the documented per-server key (gemini-cli docs,
+   * tools/mcp-server.md: "Request timeout in milliseconds (default: 600,000ms)"); no gemini
+   * binary is installed on the dev machines, so unlike codex this is documented, not read
+   * back. Gemini's own default is 10 minutes, but it is written out rather than assumed:
+   * earlier releases hard-coded 60 s on this path, and the binary is installed unpinned.
+   * Set above the largest tool the platform runs synchronously (web_search agent_browse,
+   * 640 s; the gateway allows 660 s) because it applies to every call on this server, not
+   * only parked ones: the written value must never be what cuts a real tool (whether the
+   * tool completes on a bridge run is the inactivity watchdog's question, not this one).
+   * On expiry the CLI sends the server a cancellation and the model reads a
+   * timeout error. server.mjs derives the backend's hold on a parked call from this.
+   */
+  static TOOL_TIMEOUT_MS = 700_000;
+
+  getToolCallTimeoutSeconds() {
+    return GeminiAdapter.TOOL_TIMEOUT_MS / 1000;
+  }
+
+  /**
    * Resolve spawn command for the Gemini CLI.
    */
   getCommand() {
@@ -143,6 +165,7 @@ export class GeminiAdapter {
           command: mcpServerConfig.command,
           args: (mcpServerConfig.args || []).map(a => a.replace(/\\/g, '/')),
           env: mcpServerConfig.env || {},
+          timeout: GeminiAdapter.TOOL_TIMEOUT_MS,
         },
       },
     };

@@ -410,23 +410,26 @@ public class StorageReconciliationService {
             long workflowBytes = toBigInteger(result[0]).longValue();
             int workflowCount = toBigInteger(result[1]).intValue();
 
-            // Remote: skills from agent-service (included in AGENTS response as "SKILLS" key)
+            // Remote: skills AND long-term memories from agent-service (both ride on
+            // the AGENTS response, under the "SKILLS" and "MEMORIES" keys). Both are
+            // authored text the account accumulates on purpose, so both belong to
+            // CONFIGURATION - giving memory its own quota line would make a user
+            // reason about two numbers for one behaviour. One call serves both; an
+            // older agent-service that predates the key simply reports zero.
             long skillsBytes = 0;
+            long memoryBytes = 0;
             try {
                 Map<String, Object> agentUsage = agentClient.getAgentStorageUsage(tenantId);
-                Object skillsData = agentUsage.get("SKILLS");
-                if (skillsData instanceof Map<?, ?> skillsMap) {
-                    Object bytes = skillsMap.get("usedBytes");
-                    if (bytes instanceof Number n) skillsBytes = n.longValue();
-                }
+                skillsBytes = readUsedBytes(agentUsage.get("SKILLS"));
+                memoryBytes = readUsedBytes(agentUsage.get("MEMORIES"));
             } catch (Exception e) {
-                log.warn("[Reconciliation] Failed to get skills storage for tenant={}: {}", tenantId, e.getMessage());
+                log.warn("[Reconciliation] Failed to get skills/memory storage for tenant={}: {}", tenantId, e.getMessage());
             }
 
-            long totalBytes = Math.max(0, workflowBytes) + Math.max(0, skillsBytes);
+            long totalBytes = Math.max(0, workflowBytes) + Math.max(0, skillsBytes) + Math.max(0, memoryBytes);
             breakdownService.setUsage(tenantId, "CONFIGURATION", totalBytes, Math.max(0, workflowCount));
-            log.debug("[Reconciliation] tenant={}, CONFIGURATION: {} bytes (workflows={}, skills={}), {} items",
-                    tenantId, totalBytes, workflowBytes, skillsBytes, workflowCount);
+            log.debug("[Reconciliation] tenant={}, CONFIGURATION: {} bytes (workflows={}, skills={}, memories={}), {} items",
+                    tenantId, totalBytes, workflowBytes, skillsBytes, memoryBytes, workflowCount);
         } catch (Exception e) {
             log.warn("[Reconciliation] Failed for tenant={}, category=CONFIGURATION: {}",
                     tenantId, e.getMessage());
@@ -434,6 +437,14 @@ public class StorageReconciliationService {
     }
 
     // ========== Remote categories via HTTP ==========
+
+    /** Pull {@code usedBytes} out of one category entry of the agent-service usage map; 0 when absent or malformed. */
+    private static long readUsedBytes(Object categoryEntry) {
+        if (categoryEntry instanceof Map<?, ?> map && map.get("usedBytes") instanceof Number n) {
+            return n.longValue();
+        }
+        return 0L;
+    }
 
     private void reconcileAgents(String tenantId) {
         try {

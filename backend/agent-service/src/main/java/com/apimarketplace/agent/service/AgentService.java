@@ -1324,6 +1324,13 @@ public class AgentService {
                     "agent", sourceId.toString());
         }
 
+        // Long-term memory is deliberately NOT cloned. A clone copies CONFIGURATION -
+        // prompt, model, tool grants - and memory is not configuration, it is
+        // experience: facts the source agent accumulated while doing its own work,
+        // some of them true only about that work. Copying them would hand the new
+        // agent conclusions it never reached, and every future correction to a fact
+        // would then have to be made twice. The workspace's shared memory (agent_id
+        // NULL) reaches the clone anyway, because it reaches every agent here.
         AgentEntity clone = new AgentEntity(
             tenantId, source.getName() + " (Copy)", source.getDescription(),
             source.getSystemPrompt(), source.getModelProvider(), source.getModelName(),

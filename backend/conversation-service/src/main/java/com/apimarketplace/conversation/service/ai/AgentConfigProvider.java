@@ -71,7 +71,13 @@ public class AgentConfigProvider {
                               // Dropping it (as this record used to) made the persisted switch inert
                               // in chat: an agent that opted in never received the tool, and the
                               // unfiltered general-chat fallback handed it to agents that never asked.
-                              Object generation) {
+                              Object generation,
+                              // Long-term memory read/write axis (no grant - memory is workspace-wide).
+                              // null implies "write" (default). 'read' lets the agent recall and search but
+                              // blocks save/delete, which is what keeps a narrowly-scoped agent from writing
+                              // into every other agent's system prompt. Appended last so positional
+                              // constructors stay append-only.
+                              String memoryAccessMode) {
         /** Back-compat constructor (pre-files); files defaults to null = unrestricted, grants to null ⇒ "none" (deny). */
         public ToolsConfig(String mode, List<String> tools, List<String> workflows, List<String> applications,
                            List<String> tables, List<String> interfaces, List<String> agents, Boolean webSearch,
@@ -106,7 +112,25 @@ public class AgentConfigProvider {
             this(mode, tools, workflows, applications, tables, interfaces, agents, webSearch,
                  tableAccessMode, workflowAccessMode, interfaceAccessMode, agentAccessMode,
                  applicationAccessMode, skillAccessMode, files, workflowsGrant, tablesGrant,
-                 interfacesGrant, agentsGrant, applicationsGrant, fileAccessMode, null);
+                 interfacesGrant, agentsGrant, applicationsGrant, fileAccessMode, null, null);
+        }
+
+        /**
+         * Back-compat constructor (pre-memory); the memory read/write axis defaults to
+         * null, which resolves to "write" - the same default every other family gets when
+         * its mode is unset, so an agent stored before this field existed is unchanged.
+         */
+        public ToolsConfig(String mode, List<String> tools, List<String> workflows, List<String> applications,
+                           List<String> tables, List<String> interfaces, List<String> agents, Boolean webSearch,
+                           String tableAccessMode, String workflowAccessMode, String interfaceAccessMode,
+                           String agentAccessMode, String applicationAccessMode, String skillAccessMode,
+                           List<String> files, String workflowsGrant, String tablesGrant, String interfacesGrant,
+                           String agentsGrant, String applicationsGrant, String fileAccessMode,
+                           Object generation) {
+            this(mode, tools, workflows, applications, tables, interfaces, agents, webSearch,
+                 tableAccessMode, workflowAccessMode, interfaceAccessMode, agentAccessMode,
+                 applicationAccessMode, skillAccessMode, files, workflowsGrant, tablesGrant,
+                 interfacesGrant, agentsGrant, applicationsGrant, fileAccessMode, generation, null);
         }
 
         /** Files are opt-in: only a non-empty allow-list scopes the agent. */
@@ -626,6 +650,8 @@ public class AgentConfigProvider {
             String skillAccessMode = getTextOrNull(node, "skillAccessMode");
             // Files read/write axis (no grant). null ⇒ "write" (default).
             String fileAccessMode = getTextOrNull(node, "fileAccessMode");
+            // Long-term memory read/write axis (no grant). null implies "write" (default).
+            String memoryAccessMode = getTextOrNull(node, "memoryAccessMode");
 
             // Per-family GRANT sentinel: "none" | "all" | "custom" | null (absent).
             // AUTHORITATIVE - the grant alone decides access; the id list is only the
@@ -645,7 +671,7 @@ public class AgentConfigProvider {
             return new ToolsConfig(mode, tools, workflows, applications, tables, interfaces, agents, webSearch,
                     tableAccessMode, workflowAccessMode, interfaceAccessMode, agentAccessMode, applicationAccessMode, skillAccessMode,
                     files, workflowsGrant, tablesGrant, interfacesGrant, agentsGrant, applicationsGrant, fileAccessMode,
-                    generation);
+                    generation, memoryAccessMode);
         } catch (Exception e) {
             log.warn("Failed to parse toolsConfig: {}", e.getMessage());
             return null;

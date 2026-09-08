@@ -587,7 +587,7 @@ function buildToRef(
  * | trigger:   | Entry     | All triggers (webhook, chat, schedule, etc.)            |
  * | mcp:       | MCP       | Tools (MCP tool calls)                                  |
  * | table:     | Table     | CRUD operations (database tables)                       |
- * | agent:     | AI        | Agent, Guardrail, Classify                              |
+ * | agent:     | AI        | Agent, Browser Agent, Guardrail, Classify, Generate                              |
  * | core:      | Core      | Loop, Split, Decision, Switch, Merge, Transform, Wait, Fork, Download File, HTTP Request, Data Input, User Approval |
  * | note:      | Note      | Notes                                                   |
  * | interface: | Interface | Interfaces                                              |
@@ -625,9 +625,13 @@ function getNodeTypeWithContext(
     return 'mcp';
   }
 
-  // Priority 5: Check for agents (flowNode with reasoning/guardrail/classify kind or agent- prefix)
+  // Priority 5: Check for agents (flowNode with an AI kind or an agent- prefix).
+  // `generate` is one of them: reached here it used to fall through to the mcp
+  // default below and write an edge no node answers to. Priority 4 wins first in
+  // practice, which is precisely why this list could rot unnoticed.
   if (nodeRegistry.isFlowNode(node)) {
-    if (node.data.kind === 'reasoning' || node.data.kind === 'guardrail' || node.data.kind === 'classify' || node.id?.startsWith('agent-')) {
+    if (node.data.kind === 'reasoning' || node.data.kind === 'guardrail' || node.data.kind === 'classify'
+        || node.data.kind === 'browser_agent' || node.data.kind === 'generate' || node.id?.startsWith('agent-')) {
       return 'agent';
     }
   }

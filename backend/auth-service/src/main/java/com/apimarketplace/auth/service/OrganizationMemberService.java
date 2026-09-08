@@ -30,6 +30,13 @@ import java.util.UUID;
 @Transactional
 public class OrganizationMemberService {
 
+    /**
+     * Product-analytics emitter (PostHog). Optional so hand-built test instances and
+     * analytics-less deployments are untouched; a null field emits nothing.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics;
+
     private static final Logger log = LoggerFactory.getLogger(OrganizationMemberService.class);
 
     private final OrganizationMemberRepository memberRepository;
@@ -998,6 +1005,7 @@ public class OrganizationMemberService {
         invitationRepository.save(invitation);
 
         log.info("User {} joined org {} as {}", user.getId(), org.getId(), invitation.getRole());
+        if (analytics != null) analytics.invitationAccepted(user.getId(), org, invitation.getRole());
 
         // Milestone-1 audit fix A: bust gateway cache so the next request
         // from this user sees the new membership in their memberships list

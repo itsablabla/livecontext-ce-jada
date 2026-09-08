@@ -43,7 +43,8 @@ class AgentListEnvelopeAdoptionTest {
 
     private static final List<Path> SCAN_ROOTS = List.of(
         Paths.get("src/main/java/com/apimarketplace/agent/tools/agent"),
-        Paths.get("src/main/java/com/apimarketplace/agent/tools/skill")
+        Paths.get("src/main/java/com/apimarketplace/agent/tools/skill"),
+        Paths.get("src/main/java/com/apimarketplace/agent/tools/memory")
     );
 
     @Test

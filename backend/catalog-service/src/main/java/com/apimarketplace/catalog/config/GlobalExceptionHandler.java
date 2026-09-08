@@ -11,6 +11,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
+
+import jakarta.servlet.http.HttpServletResponse;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -106,6 +109,29 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
             .body(buildErrorResponse(ex.getErrorCode(), ex.getMessage(), null));
+    }
+
+    /**
+     * Async request timed out.
+     *
+     * <p>The public bundle download is the service's first
+     * {@code StreamingResponseBody} endpoint, so it is the first that can reach
+     * this. By the time the timeout fires the response is normally committed
+     * with part of the body already sent, and answering with a 500 JSON error
+     * would try to set headers on a committed response, which surfaces as an
+     * unrelated Tomcat error rather than as this timeout. Log it and hand the
+     * request back so the container simply completes the truncated response.
+     */
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public ResponseEntity<Map<String, Object>> handleAsyncTimeout(
+            AsyncRequestTimeoutException ex, HttpServletResponse response) {
+        log.warn("Async request timed out after the configured spring.mvc.async.request-timeout; " +
+                "committed={}", response.isCommitted());
+        if (response.isCommitted()) {
+            return null;
+        }
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+            .body(buildErrorResponse("ASYNC_TIMEOUT", "The request took too long to complete", null));
     }
 
     /**

@@ -151,7 +151,7 @@ const UpgradeExplainerModal = React.memo(function UpgradeExplainerModal({
           <Button
             onClick={onConfirm}
             disabled={loading}
-            variant="contrast"
+            variant="default"
             className="flex-1"
           >
             {loading ? (

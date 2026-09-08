@@ -2,11 +2,12 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Pencil, Check, X, Save, Pin, PinOff } from "lucide-react";
+import { ChevronDown, History, Pencil, Check, X, Save, Pin, PinOff } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { orchestratorApi } from "@/lib/api";
+import { track } from "@/lib/analytics/analytics";
 import { formatUtcDateTime } from "@/lib/utils/dateFormatters";
 import type { WorkflowPlanVersion } from "@/lib/api/orchestrator/types";
 import { useTranslations } from "next-intl";
@@ -214,6 +215,13 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
         window.dispatchEvent(new CustomEvent('workflowPinnedVersionChange', {
           detail: { pinnedVersion: result.pinnedVersion, workflowId }
         }));
+        track('workflow_version_pinned', {
+          workflow_id: workflowId,
+          version: result.pinnedVersion ?? null,
+          is_unpin: version === null,
+          has_production_run: Boolean(result.productionRunIdPublic),
+          flow: 'history',
+        });
 
         // Pinning a version (not unpinning) freezes that plan as production:
         // schedule/webhook/chat triggers start firing on it server-side and the
@@ -261,49 +269,62 @@ export const WorkflowSaveWithVersions: React.FC<WorkflowSaveWithVersionsProps> =
     }
   };
 
-  const isSaveDisabled = isRunMode || saveStatus === 'saving' || isAgentStreaming || (saveStatus === 'idle' && !isDirty);
+  const isSaveDisabled = saveStatus === 'saving' || isAgentStreaming || (saveStatus === 'idle' && !isDirty);
 
   return (
     <div className="relative flex items-center" ref={containerRef}>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onSave}
-        disabled={isSaveDisabled}
-        title={t('actions.save')}
-        className={`h-8 gap-2 ${desktop ? 'pl-2 pr-1.5 lg:pl-3' : 'pl-2 pr-1'} rounded-r-none ${
-          saveStatus === 'saved' ? 'text-green-600 dark:text-green-400' :
-          saveStatus === 'error' ? 'text-red-600 dark:text-red-400' : ''
-        }`}
-      >
-        {saveStatus === 'saving' ? (
-          <>
-            <LoadingSpinner size="xs" />
-            {desktop && <span className="hidden lg:inline">{t('common.saving')}</span>}
-          </>
-        ) : saveStatus === 'saved' ? (
-          <>
-            <Check className="w-4 h-4" />
-            {desktop && <span className="hidden lg:inline">{t('common.saved')}</span>}
-          </>
-        ) : saveStatus === 'error' ? (
-          <>
-            <Save className="w-4 h-4" />
-            {desktop && <span className="hidden lg:inline">{t('common.error')}</span>}
-          </>
-        ) : (
-          <>
-            <Save className="w-4 h-4" />
-            {desktop && <span className="hidden lg:inline">{t('actions.save')}</span>}
-          </>
-        )}
-      </Button>
-      {/* Chevron always clickable, outside disabled button */}
+      {/* Save is an EDIT action, so run mode drops it entirely rather than showing a
+          permanently greyed-out button: a run is being watched, not authored, and a
+          disabled control still occupies the header and invites a click that can never
+          do anything. The version list beside it is a READ and stays - it is how you
+          check which plan a run is executing, which is exactly a run-mode question. */}
+      {!isRunMode && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onSave}
+          disabled={isSaveDisabled}
+          title={t('actions.save')}
+          className={`h-8 gap-2 ${desktop ? 'pl-2 pr-1.5 lg:pl-3' : 'pl-2 pr-1'} rounded-r-none ${
+            saveStatus === 'saved' ? 'text-green-600 dark:text-green-400' :
+            saveStatus === 'error' ? 'text-red-600 dark:text-red-400' : ''
+          }`}
+        >
+          {saveStatus === 'saving' ? (
+            <>
+              <LoadingSpinner size="xs" />
+              {desktop && <span className="hidden lg:inline">{t('common.saving')}</span>}
+            </>
+          ) : saveStatus === 'saved' ? (
+            <>
+              <Check className="w-4 h-4" />
+              {desktop && <span className="hidden lg:inline">{t('common.saved')}</span>}
+            </>
+          ) : saveStatus === 'error' ? (
+            <>
+              <Save className="w-4 h-4" />
+              {desktop && <span className="hidden lg:inline">{t('common.error')}</span>}
+            </>
+          ) : (
+            <>
+              <Save className="w-4 h-4" />
+              {desktop && <span className="hidden lg:inline">{t('actions.save')}</span>}
+            </>
+          )}
+        </Button>
+      )}
+      {/* Chevron always clickable, outside disabled button. On its own (run mode) it
+          rounds on both sides and carries the history icon, so it reads as a control
+          of its own instead of the orphaned right half of a split button. */}
       <button
         onClick={() => setShowVersions(!showVersions)}
-        className="h-8 px-1 rounded-r-full hover:bg-accent hover:text-accent-foreground transition-colors"
+        data-testid="workflow-version-history-toggle"
+        className={`h-8 hover:bg-accent hover:text-accent-foreground transition-colors ${
+          isRunMode ? 'px-2 gap-1 rounded-full inline-flex items-center' : 'px-1 rounded-r-full'
+        }`}
         title={t('versionHistory.title')}
       >
+        {isRunMode && <History className="w-4 h-4" />}
         <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${showVersions ? 'rotate-180' : ''}`} />
       </button>
 

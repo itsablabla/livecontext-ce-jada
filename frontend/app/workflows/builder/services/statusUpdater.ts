@@ -15,7 +15,7 @@ import { normalizeStatusCounts, deriveStatusFromCounts } from '../utils/statusCo
 import { nodeMatchesStep } from './nodeMatcher';
 import { edgeMatchesBatchEdge } from './edgeMatcher';
 import { normalizeLabel } from '../utils/labelNormalizer';
-import { BatchEdgeData } from './edgeStatusService';
+import { BatchEdgeData, computeNodeBackendKey } from './edgeStatusService';
 import { nodeRegistry } from '../registry/nodeRegistry';
 import { streamDebug } from '@/contexts/workflow-run/streamingDebug';
 
@@ -346,6 +346,44 @@ export function updateNodesFromBatchSteps(
     const matchingStep = processedSteps.find(step => nodeMatchesStep(node, step));
     return matchingStep ? updateNodeFromStep(node, matchingStep) : node;
   });
+}
+
+/**
+ * A node PARKED ON A SIGNAL keeps reporting `running` in the step stream, because the
+ * last step row written for it is the RUNNING one - yielding does not rewrite it. The
+ * run snapshot says so separately, in {@code awaitingSignalStepIds} (fed into the run
+ * store as `awaitingSignalSteps`), and until this pass existed nothing on the LIVE
+ * canvas read it: the node stayed blue with a "running" overlay while its own badge
+ * showed an amber pause chip from the AWAITING_SIGNAL counts. The two halves of the
+ * same node disagreed, and the waiting colour was unreachable outside the per-epoch
+ * view (which applies its own override from the pending-signals list).
+ *
+ * <p>Terminal statuses win: a non-blocking interface signal stays PENDING in the DB
+ * even after its node completed, so a completed/failed/skipped node must not be
+ * dragged back to "waiting" by a signal row that outlived it. Same guard as
+ * useEpochStateViewing.
+ */
+export function applyAwaitingSignalToNodes(
+  nodes: Node<BuilderNodeData>[],
+  awaitingStepIds: Iterable<string> | undefined,
+): Node<BuilderNodeData>[] {
+  const awaiting = new Set(awaitingStepIds ?? []);
+  if (awaiting.size === 0) return nodes;
+
+  let changed = false;
+  const next = nodes.map((node) => {
+    const key = computeNodeBackendKey(node);
+    if (!key || !awaiting.has(key)) return node;
+    const current = node.data?.status;
+    if (current === 'awaiting_signal') return node;
+    if (current === 'completed' || current === 'failed' || current === 'skipped' || current === 'partial_success') {
+      return node;
+    }
+    changed = true;
+    return { ...node, data: { ...node.data, status: 'awaiting_signal' as DerivedNodeStatus } };
+  });
+
+  return changed ? next : nodes;
 }
 
 // ============================================================================

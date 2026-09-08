@@ -448,12 +448,17 @@ public class DataSourceClient {
     }
 
     /**
-     * Get items for a datasource (used for trigger data resolution).
+     * Get items for a datasource (used for trigger data resolution and the interface-render path).
+     *
+     * <p>Asks for media cells as file objects: these rows are about to be RUN on - mapped into node
+     * parameters, rendered into a page - so they must look like the same rows read anywhere else.
+     * {@link #getAllItems} deliberately does not ask, because it copies the table.
      */
     public List<DataSourceItemDto> getItems(Long dataSourceId, String tenantId, int offset, int limit) {
         String url = UriComponentsBuilder.fromHttpUrl(baseUrl + "/api/internal/datasource/" + dataSourceId + "/items")
                 .queryParam("offset", offset)
                 .queryParam("limit", limit)
+                .queryParam("hydrateMedia", true)
                 .toUriString();
         HttpEntity<Void> entity = new HttpEntity<>(buildHeaders(tenantId));
         try {
@@ -476,6 +481,11 @@ public class DataSourceClient {
 
     /**
      * Get ALL items for a datasource in an explicit organization scope.
+     *
+     * <p>Deliberately does NOT ask for hydrated media cells: this feeds the publication snapshot and
+     * the live side of the moderation diff, both of which are compared against stored copies. A
+     * different encoding on one side would make an unchanged table read as changed on every media
+     * cell.
      */
     public List<DataSourceItemDto> getAllItems(Long dataSourceId, String tenantId, String organizationId) {
         String url = UriComponentsBuilder.fromHttpUrl(baseUrl + "/api/internal/datasource/" + dataSourceId + "/items")

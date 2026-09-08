@@ -264,7 +264,18 @@ public class SessionVisualBuilder {
     private String getNodeTypeLabel(String nodeId, Map<String, Object> node) {
         if (LabelNormalizer.isTriggerKey(nodeId)) return "TRIGGER";
         if (LabelNormalizer.isMcpKey(nodeId)) return "STEP";
-        if (LabelNormalizer.isAgentKey(nodeId)) return "AGENT";
+        if (LabelNormalizer.isAgentKey(nodeId)) {
+            // The node's own type, like the core branch below. The AI family now
+            // holds classify, guardrail, browser_agent and generate beside the
+            // plain agent, and generate runs no LLM at all: reported as "AGENT"
+            // it is indistinguishable here from a node that does.
+            String agentType = (String) node.get("type");
+            return agentType != null && !agentType.isBlank()
+                // ROOT: the value is a wire token, not prose. A Turkish default
+                // locale turns "classify" into "CLASSIFY" with a dotless I.
+                ? agentType.toUpperCase(java.util.Locale.ROOT)
+                : "AGENT";
+        }
         if (LabelNormalizer.isCoreKey(nodeId)) {
             // Get specific core type for better display
             String coreType = (String) node.get("type");

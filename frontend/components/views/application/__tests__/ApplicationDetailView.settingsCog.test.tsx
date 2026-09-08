@@ -84,7 +84,9 @@ function pub(over: Partial<WorkflowPublication> = {}): WorkflowPublication {
 function renderView(props: Partial<React.ComponentProps<typeof ApplicationDetailView>> = {}) {
   cogProps.length = 0;
   return render(
-    <ApplicationDetailView workflowId="wf-1" runId="run-1" publication={pub()} {...props} />,
+    // `isInstalledClone` is what "installed" MEANS to this component now: the page
+    // is bound to the caller's own clone, which is what the copy endpoint resolves.
+    <ApplicationDetailView workflowId="wf-1" runId="run-1" publication={pub()} isInstalledClone {...props} />,
   );
 }
 
@@ -132,11 +134,29 @@ describe('ApplicationDetailView - the settings cog', () => {
     expect(screen.queryByTestId('application-settings-menu')).toBeNull();
   });
 
-  it('is withheld from the PUBLISHER of the application (they own the source, no clone to copy)', () => {
-    // Offering it would only ever produce "Application is not installed in this workspace".
-    renderView({ publication: pub({ publisherId: '42' }) });
+  it('is withheld from a visitor who installed nothing, whose copy call would be refused', () => {
+    // The page is then bound to the publisher's preview clone: an application by
+    // display mode, but not one of theirs to copy.
+    renderView({ isInstalledClone: false });
 
     expect(screen.queryByTestId('application-settings-menu')).toBeNull();
+  });
+
+  it('is withheld from the publisher of an app they have NOT installed - no clone to copy', () => {
+    // Offering it would only ever produce "Application is not installed in this workspace".
+    renderView({ publication: pub({ publisherId: '42' }), isInstalledClone: false });
+
+    expect(screen.queryByTestId('application-settings-menu')).toBeNull();
+  });
+
+  it('OFFERS it to a publisher who installed their own app, whose copy would succeed', () => {
+    // The endpoint resolves the caller's install and never asks who published it.
+    // Denying this user was the mirror of offering it to a non-installer.
+    renderView({ publication: pub({ publisherId: '42' }) });
+
+    // The copy entry is the cog's only reason to mount, so its presence IS the
+    // assertion that the copy is offered.
+    expect(screen.getByTestId('application-settings-menu')).toBeDefined();
   });
 
   it('is withheld for a non-APPLICATION publication (a plain workflow is already editable)', () => {

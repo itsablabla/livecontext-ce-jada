@@ -77,6 +77,101 @@ class NodeStructureValidatorTest {
                 .contains("set");
     }
 
+    /**
+     * The check has to walk the AI nodes too, not only the cores.
+     *
+     * <p>Generate is the one nested-config node held with the agents, so a sweep
+     * that stopped at {@code getCores()} left it as the single node type nobody
+     * checked. A stale top-level {@code model} beside {@code params.model} is
+     * exactly what a modify used to leave behind, and the run reads only the
+     * nested one.
+     */
+    @Test
+    @DisplayName("Flags NODE_DUAL_WRITE on a generate node, which lives with the agents rather than the cores")
+    void flagsDualWriteOnGenerateNodeAmongTheAgents() {
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("id", "agent:make_clip");
+        node.put("type", "generate");
+        node.put("label", "Make Clip");
+        node.put("isAgent", true);
+        node.put("isGenerate", true);
+        node.put("params", Map.of("model", "seedance-2.0-fast"));
+        node.put("model", "a-stale-orphan");
+        lenient().when(session.getMcps()).thenReturn(List.of(node));
+
+        ValidationResult result = ValidationResult.builder().build();
+        validator.validate(session, result);
+
+        assertThat(result.getWarnings()).hasSize(1);
+        assertThat(result.getWarnings().get(0).code()).isEqualTo("NODE_DUAL_WRITE");
+        assertThat(result.getWarnings().get(0).message())
+                .contains("model")
+                .contains("params");
+    }
+
+    /**
+     * The blast radius of widening the sweep to the AI nodes.
+     *
+     * <p>The check now walks every node in {@code getMcps()}, not only the
+     * cores. Most nodes in that list are ordinary MCP steps that keep their
+     * tool arguments FLAT in {@code params} by design: if the widening made one
+     * of those look like a dual write, every tool step in the product would
+     * carry a warning it cannot act on.
+     */
+    @Test
+    @DisplayName("an ordinary MCP step with flat params emits no NODE_DUAL_WRITE, so the widened sweep costs nothing")
+    void anOrdinaryMcpStepIsNotFlaggedByTheWidenedSweep() {
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("id", "mcp:read_email");
+        node.put("type", "gmail-read-message");
+        node.put("label", "Read Email");
+        node.put("params", Map.of("messageId", "{{trigger:start.output.id}}", "format", "full"));
+        lenient().when(session.getMcps()).thenReturn(List.of(node));
+
+        ValidationResult result = ValidationResult.builder().build();
+        validator.validate(session, result);
+
+        assertThat(result.getWarnings())
+                .as("a tool step keeps its arguments flat on purpose; flagging that would "
+                        + "put an unactionable warning on every step in the product")
+                .noneSatisfy(w -> assertThat(w.code()).isEqualTo("NODE_DUAL_WRITE"));
+    }
+
+    /**
+     * The neighbours the sweep must keep its hands off.
+     *
+     * <p>Note what this can and cannot prove. The dual-write check is invoked for
+     * the generate node ALONE among the mcps, so for the step below it is never
+     * called at all and the assertion holds however that check behaves. What it
+     * pins is the SCOPE: widen the condition back to every mcp entry and this
+     * starts failing the day one of them grows a params-shaped child.
+     *
+     * <p>An MCP step typed with a slug cannot collide - {@code NESTED_CONFIG_KEYS}
+     * has no entry for it, so the check is trivially skipped. The steps that DO
+     * have an entry are the ones typed {@code transform} and {@code wait} (from
+     * the {@code __transform__} / {@code __wait__} tool ids), which the modifier's
+     * own comment names as keeping their params FLAT. Those are the ones the
+     * widening had to leave alone, so those are the ones worth pinning.
+     */
+    @Test
+    @DisplayName("a flat-params transform step among the mcps emits no NODE_DUAL_WRITE")
+    void aFlatParamsTransformStepIsNotFlagged() {
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("id", "mcp:reshape");
+        node.put("type", "transform");
+        node.put("label", "Reshape");
+        node.put("params", Map.of("input", "{{trigger:start.output.items}}"));
+        lenient().when(session.getMcps()).thenReturn(List.of(node));
+
+        ValidationResult result = ValidationResult.builder().build();
+        validator.validate(session, result);
+
+        assertThat(result.getWarnings())
+                .as("this step keeps its arguments flat by design and has no nested "
+                        + "child to disagree with, so the widened sweep must say nothing")
+                .noneSatisfy(w -> assertThat(w.code()).isEqualTo("NODE_DUAL_WRITE"));
+    }
+
     @Test
     @DisplayName("Clean set node (only nested config) emits no NODE_DUAL_WRITE")
     void cleanSetNodePasses() {

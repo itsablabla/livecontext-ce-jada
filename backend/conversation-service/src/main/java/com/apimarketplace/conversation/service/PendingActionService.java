@@ -536,10 +536,29 @@ public class PendingActionService {
     }
 
     /**
+     * Build a question-card pending-action map ({@code waiting_for=user_question}).
+     *
+     * @param toolCallId the {@code ask_user} call that raised the card; keys the card
+     * @param questions  the channel-agnostic question list, as the card event carries it
+     */
+    public static Map<String, Object> buildUserQuestionAction(String toolCallId, List<Map<String, Object>> questions) {
+        Instant now = Instant.now();
+        Map<String, Object> pa = new HashMap<>();
+        pa.put("waiting_for", "user_question");
+        pa.put("tool_call_id", toolCallId);
+        pa.put("questions", questions != null ? questions : List.of());
+        pa.put("created_at", now.toString());
+        pa.put("expires_at", now.plus(DEFAULT_EXPIRY_HOURS, ChronoUnit.HOURS).toString());
+        return pa;
+    }
+
+    /**
      * Stable dedup/clear key for a pending action:
      * <ul>
      *   <li>{@code tool_authorization} → {@code "auth:" + rule}</li>
      *   <li>{@code service_approval}   → {@code "svc:" + sorted serviceTypes}</li>
+     *   <li>{@code user_question}      → {@code "ask:" + tool_call_id} (per call: two open
+     *       questions must never collapse into one card)</li>
      *   <li>anything else              → its {@code waiting_for} value.</li>
      * </ul>
      * Mirrors the dedup key the agent-service streaming callback uses so the live and
@@ -555,6 +574,9 @@ public class PendingActionService {
         }
         if ("service_approval".equals(waitingFor)) {
             return truthy(action.get("needs_attention")) ? "svc:attention" : "svc:connect";
+        }
+        if ("user_question".equals(waitingFor)) {
+            return "ask:" + action.get("tool_call_id");
         }
         return waitingFor;
     }

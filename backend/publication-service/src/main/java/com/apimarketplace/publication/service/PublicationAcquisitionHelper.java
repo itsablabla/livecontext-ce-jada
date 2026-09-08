@@ -80,12 +80,19 @@ public class PublicationAcquisitionHelper {
      * (receipt holders) can still retrieve an INACTIVE or PRIVATE publication
      * as long as its snapshot is preserved. REJECTED publications stay off.
      */
-    public void validateAcquirable(WorkflowPublicationEntity publication, boolean alreadyPaid) {
-        // Edition gate FIRST, and regardless of alreadyPaid: on managed cloud a
-        // CE-exclusive publication cannot run, so re-installing one acquired
-        // before it carried the label is just as pointless as a fresh install.
+    /**
+     * @param acquiringTenantId the workspace installing the app. Required, because one half of the
+     *                          gate is the workspace's PLAN rather than the deployment's edition.
+     *                          There is deliberately no overload that omits it: the convenient
+     *                          one would silently skip the plan half, which is the failure this
+     *                          gate exists to prevent.
+     */
+    public void validateAcquirable(WorkflowPublicationEntity publication, boolean alreadyPaid,
+                                   String acquiringTenantId) {
+        // Edition and plan gate FIRST, and regardless of alreadyPaid: on managed cloud an app
+        // this workspace cannot run is just as pointless to re-install as to install fresh.
         if (ceExclusiveGuard != null) {
-            ceExclusiveGuard.check(publication);
+            ceExclusiveGuard.check(publication, acquiringTenantId);
         }
         if (!alreadyPaid && publication.getVisibility() == PublicationVisibility.PRIVATE) {
             throw new IllegalArgumentException("Publication is private");
@@ -189,7 +196,7 @@ public class PublicationAcquisitionHelper {
                                                String organizationId) {
         validateNotOwnPublication(publication, tenantId, organizationId);
         boolean alreadyPaid = hasReceipt(tenantId, publication.getId(), organizationId);
-        validateAcquirable(publication, alreadyPaid);
+        validateAcquirable(publication, alreadyPaid, tenantId);
         enforceEntitlementIfFirstTime(tenantId, organizationId, alreadyPaid);
         return alreadyPaid;
     }

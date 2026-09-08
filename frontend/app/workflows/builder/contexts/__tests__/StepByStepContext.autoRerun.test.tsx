@@ -139,9 +139,11 @@ describe('canRerun outside step-by-step mode', () => {
     expect(statusFor({ isEnabled: true, completed: [], running: [STEP] }).canRerun).toBe(true);
   });
 
-  it('refuses a rerun while reading a HISTORICAL epoch', () => {
-    // Since canRerunStep stopped consulting the mode, isInteractive is the only thing left
-    // keeping the affordance off a past epoch, which is a record and not a live surface.
+  it('refuses a rerun on a HISTORICAL epoch when nothing says the node ran in it', () => {
+    // A past epoch DOES offer a rerun now (it replays that epoch by name), but only for a node
+    // the epoch itself finished - and this caller passes no per-epoch status, so there is no
+    // such fact. The run-wide sets say COMPLETED and must not be enough on their own: they
+    // accumulate across every epoch. Full rules in StepByStepContext.epochRerun.test.tsx.
     expect(statusFor({ viewingEpoch: 1 }).canRerun).toBe(false);
   });
 

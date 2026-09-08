@@ -81,7 +81,7 @@ export default function DocsOverviewPage() {
           rows={[
             [<code key="t">trigger:</code>, 'Entry point that starts a run', 'webhook, schedule, chat, form, manual, table row'],
             [<code key="m">mcp:</code>, 'Integration / tool operation', 'an API call, an HTTP request'],
-            [<code key="a">agent:</code>, 'AI node', 'Agent, Guardrail, Classify'],
+            [<code key="a">agent:</code>, 'AI node', 'Agent, Browser Agent, Guardrail, Classify, Generate'],
             [<code key="c">core:</code>, 'Control flow and utilities', 'Decision, Switch, Loop, Fork, Merge, Split, Transform, Wait'],
             [<code key="tb">table:</code>, 'Built-in spreadsheet operation', 'find, create, update, delete rows'],
             [<code key="i">interface:</code>, 'Web page', 'a page rendered in an iframe'],

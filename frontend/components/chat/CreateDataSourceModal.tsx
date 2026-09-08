@@ -14,10 +14,11 @@ import {
   Plus, X, Table as TableIcon, Columns3,
   ArrowRight, ArrowLeft, Check,
   Settings, Star,
+  Lock,
 } from 'lucide-react';
 import { orchestratorApi } from '@/lib/api';
 import { useTranslations } from 'next-intl';
-import { IS_CE } from '@/lib/edition';
+import { useVectorFeatureLock } from '@/hooks/useVectorFeatureLock';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { ModalStepIndicator } from '@/components/ui/ModalStepIndicator';
 
@@ -212,6 +213,9 @@ interface InlineColumnAdderProps {
 }
 
 const InlineColumnAdder: React.FC<InlineColumnAdderProps> = ({ onAdd, onCancel, t, ct }) => {
+  // Asked once for the whole picker: the plan answer is the same for every tile, and this is the
+  // component that renders them.
+  const vectorLock = useVectorFeatureLock();
   const [colName, setColName] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<ColumnStylePreset>(COLUMN_STYLE_PRESETS[0]);
 
@@ -255,17 +259,20 @@ const InlineColumnAdder: React.FC<InlineColumnAdderProps> = ({ onAdd, onCancel, 
                   if (!preset) return null;
                   const Icon = preset.icon;
                   const isSelected = selectedPreset.id === pid;
-                  // Vector/embedding columns are self-hosted-only: shown in cloud
-                  // (so users know the feature exists) but disabled with a "CE only"
-                  // badge. Mirrors AddColumnModal; the backend rejects the type
-                  // regardless of this UI gate.
-                  const isCeOnly = pid === 'vector' && !IS_CE;
+                  // Vector/embedding columns are a paid capability on managed cloud since
+                  // 2026-09-03: shown to everyone so the feature is discoverable, disabled with
+                  // the plan that unlocks them named on the tile. Mirrors AddColumnModal; the
+                  // backend refuses the type for a plan that does not include it regardless.
+                  const lockedPlan = pid === 'vector' && vectorLock.locked
+                    ? vectorLock.requiredPlan
+                    : null;
+                  const isCeOnly = Boolean(lockedPlan);
                   return (
                     <button
                       key={pid}
                       type="button"
                       disabled={isCeOnly}
-                      title={isCeOnly ? ct('ceOnlyTooltip') : undefined}
+                      title={lockedPlan ? ct('planOnlyTooltip', { plan: lockedPlan }) : undefined}
                       onClick={() => { if (!isCeOnly) setSelectedPreset(preset); }}
                       className={`group relative text-left rounded-xl border p-3 transition-all ${
                         isCeOnly
@@ -275,9 +282,10 @@ const InlineColumnAdder: React.FC<InlineColumnAdderProps> = ({ onAdd, onCancel, 
                           : 'border-slate-200 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-sm'
                       }`}
                     >
-                      {isCeOnly && (
-                        <span className="absolute top-1.5 right-1.5 rounded-md bg-theme-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-theme-muted">
-                          {ct('ceOnlyBadge')}
+                      {lockedPlan && (
+                        <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+                          <Lock className="h-2.5 w-2.5" aria-hidden />
+                          {lockedPlan}
                         </span>
                       )}
                       {isSelected && !isCeOnly && (

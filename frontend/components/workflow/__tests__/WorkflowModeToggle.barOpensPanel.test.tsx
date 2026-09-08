@@ -200,3 +200,42 @@ describe('WorkflowModeToggle - the run bar is the way into the panel', () => {
     expect(opened).toEqual(['history']);
   });
 });
+describe('WorkflowModeToggle - what the pill forwards to the run control', () => {
+  // The canvas pill is the most-used stop in the product, and the only thing
+  // making it show that anything is happening is this hand-off. Dropping either
+  // prop is invisible in every other suite.
+  it('forwards the action in flight, so the pill spins', () => {
+    render(
+      <WorkflowModeToggle
+        workflowId="wf-1"
+        mode="run"
+        currentRunInfo={RUN}
+        epochCount={1}
+        onStop={onStop}
+        actionPending="stop"
+      />,
+    );
+    expect(document.querySelector('[data-run-action="stop"]')?.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('forwards the failure, so the pill says the click did not work', () => {
+    render(
+      <WorkflowModeToggle
+        workflowId="wf-1"
+        mode="run"
+        currentRunInfo={RUN}
+        epochCount={1}
+        onStop={onStop}
+        actionFailed
+      />,
+    );
+    expect(document.querySelector('[data-run-action="stop"]')?.getAttribute('data-run-action-failed')).toBe('true');
+  });
+
+  it('marks neither on a resting control', () => {
+    renderToggle();
+    const button = document.querySelector('[data-run-action="stop"]');
+    expect(button?.getAttribute('aria-busy')).toBeNull();
+    expect(button?.getAttribute('data-run-action-failed')).toBeNull();
+  });
+});

@@ -65,7 +65,7 @@ class ApiCatalogBundleServiceTest {
             apis.add(new ApiRow(UUID.randomUUID(), "Api" + i, "api" + i, "d", "https://x", null,
                     "Cat", "cat", "Sub", "sub", "apikey", null, null, "public", true, true, false,
                     "free", "APPROVED", "1.0.0", "api" + i, "api" + i + "_cred", null, null, null,
-                    null, tools));
+                    null, null, tools));
         }
         return new ApiCatalogSnapshotReader.Snapshot(apis, List.of());
     }
@@ -73,7 +73,10 @@ class ApiCatalogBundleServiceTest {
     @Test
     @DisplayName("buildBundle persists a signed inactive row with the gzipped payload stored")
     void buildBundlePersistsSignedWithPayload() {
-        when(snapshotReader.snapshot()).thenReturn(snapshotWith(2, 3));
+        // Captured ONCE: the helper mints fresh UUIDs per call, so a second call is a different
+        // catalog and the byte-for-byte assertion below would compare two unrelated payloads.
+        ApiCatalogSnapshotReader.Snapshot snapshot = snapshotWith(2, 3);
+        when(snapshotReader.snapshot()).thenReturn(snapshot);
         when(bundleRepo.findTopByOrderByVersionDesc()).thenReturn(Optional.empty());
         when(bundleRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -93,9 +96,50 @@ class ApiCatalogBundleServiceTest {
         assertThat(saved.getPayloadGz()).isNotEmpty();
         assertThat(signer.checksum(saved.getPayloadGz())).isEqualTo(saved.getChecksum());
         assertThat(signer.verify(saved.getPayloadGz(), saved.getSignature())).isTrue();
-        // And gunzipping it yields the canonical JSON (uncompressed size matches).
+        // And gunzipping it yields the canonical JSON. Compared BYTE FOR BYTE, not by length: the
+        // build streams the payload straight into the gzip stream, and a composition that lost or
+        // duplicated a slice mid-stream can easily land on the same total while carrying different
+        // content - which would be signed, would verify, and would apply.
+        assertThat(ApiCatalogBundlePayload.gunzip(saved.getPayloadGz()))
+                .isEqualTo(ApiCatalogBundlePayload.canonicalBytes(
+                        saved.getVersion(), saved.getSchemaVersion(), saved.getIssuer(),
+                        saved.getImportedAt(), snapshot.apis(),
+                        snapshot.credentialTemplates(), List.of()));
         assertThat(ApiCatalogBundlePayload.gunzip(saved.getPayloadGz()))
                 .hasSize(saved.getRawBytesSize());
+    }
+
+    @Test
+    @DisplayName("a snapshot that cannot be read persists NOTHING - a half-built bundle row would "
+            + "be served to the fleet as though it were a catalog")
+    void aFailureBeforeTheBytesPersistsNoRow() {
+        // The row is what /latest serves. It is created only after the payload exists, is sized,
+        // checksummed and signed, and this pins that order: an exception on the way there must
+        // leave the table exactly as it was.
+        when(snapshotReader.snapshot()).thenThrow(new IllegalStateException("catalog unreadable"));
+
+        assertThatThrownBy(() -> service.buildBundle())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("catalog unreadable");
+
+        verify(bundleRepo, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a raw size beyond the column CLAMPS and keeps building - the fleet must not stop "
+            + "receiving catalogs because a diagnostic number does not fit")
+    void anOversizedRawCountIsClampedRatherThanFatal() {
+        // This started as a thrown IllegalStateException, which turned a display value into a veto
+        // on the whole distribution - re-creating, for a different reason, the outage the streaming
+        // change was made to end. raw_bytes_size is read by no verification path; the wire DTO
+        // already carries it as a long.
+        assertThat(ApiCatalogBundleService.narrowRawSize(1_234L)).isEqualTo(1_234);
+        assertThat(ApiCatalogBundleService.narrowRawSize(Integer.MAX_VALUE))
+                .isEqualTo(Integer.MAX_VALUE);
+        assertThat(ApiCatalogBundleService.narrowRawSize((long) Integer.MAX_VALUE + 1))
+                .isEqualTo(Integer.MAX_VALUE);
+        assertThat(ApiCatalogBundleService.narrowRawSize(9_000_000_000L))
+                .isEqualTo(Integer.MAX_VALUE);
     }
 
     @Test
@@ -207,7 +251,7 @@ class ApiCatalogBundleServiceTest {
     }
 
     @Test
-    @DisplayName("getActiveSignedBundle serves the STORED gzip bytes - verifiable end-to-end")
+    @DisplayName("The served bundle carries the STORED gzip bytes - signature, checksum and size all verify")
     void serveActiveBundle() {
         when(snapshotReader.snapshot()).thenReturn(snapshotWith(1, 2));
         when(bundleRepo.findTopByOrderByVersionDesc()).thenReturn(Optional.empty());
@@ -215,39 +259,87 @@ class ApiCatalogBundleServiceTest {
         ApiCatalogBundleEntity built = service.buildBundle();
 
         when(bundleRepo.findFirstByActiveTrue()).thenReturn(Optional.of(built));
-        Optional<ApiCatalogSignedBundle> served = service.getActiveSignedBundle();
+        Optional<ApiCatalogBundleService.RawBundle> served = service.getActiveRawBundle();
 
         assertThat(served).isPresent();
-        ApiCatalogSignedBundle sb = served.get();
-        assertThat(sb.version()).isEqualTo(built.getVersion());
-        assertThat(sb.checksum()).isEqualTo(built.getChecksum());
-        assertThat(sb.signature()).isEqualTo(built.getSignature());
-        assertThat(sb.apiCount()).isEqualTo(1);
-        assertThat(sb.toolCount()).isEqualTo(2);
+        ApiCatalogBundleService.RawBundle raw = served.get();
+        assertThat(raw.version()).isEqualTo(built.getVersion());
+        assertThat(raw.checksum()).isEqualTo(built.getChecksum());
+        assertThat(raw.signature()).isEqualTo(built.getSignature());
+        assertThat(raw.apiCount()).isEqualTo(1);
+        assertThat(raw.toolCount()).isEqualTo(2);
 
-        byte[] decoded = Base64.getDecoder().decode(sb.payloadBase64());
-        // Signature + checksum cover the gzip bytes (decoded), per contract.
-        assertThat(signer.verify(decoded, sb.signature())).isTrue();
-        assertThat(signer.checksum(decoded)).isEqualTo(sb.checksum());
-        assertThat(ApiCatalogBundlePayload.gunzip(decoded)).hasSize((int) sb.rawBytesSize());
+        // Signature + checksum cover the gzip bytes, per contract.
+        assertThat(signer.verify(raw.payloadGz(), raw.signature())).isTrue();
+        assertThat(signer.checksum(raw.payloadGz())).isEqualTo(raw.checksum());
+        assertThat(ApiCatalogBundlePayload.gunzip(raw.payloadGz())).hasSize((int) raw.rawBytesSize());
     }
 
     @Test
-    @DisplayName("getActiveSignedBundle: a row WITHOUT stored payload (CE-applied record) is not servable")
-    void serveSkipsPayloadlessRow() {
+    @DisplayName("Serving returns empty when no bundle is active")
+    void noActiveBundle() {
+        when(bundleRepo.findFirstByActiveTrue()).thenReturn(Optional.empty());
+        assertThat(service.getActiveRawBundle()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("A zero-length payload is not servable, so it can never be served as an empty envelope")
+    void zeroLengthPayloadIsNotServable() {
+        ApiCatalogBundleEntity row = new ApiCatalogBundleEntity();
+        row.setVersion(6L);
+        row.setPayloadGz(new byte[0]);
+        when(bundleRepo.findFirstByActiveTrue()).thenReturn(Optional.of(row));
+
+        assertThat(service.getActiveRawBundle()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("A row WITHOUT stored payload (a CE-applied record) is not servable")
+    void rawSkipsPayloadlessRow() {
         ApiCatalogBundleEntity ceRow = new ApiCatalogBundleEntity();
         ceRow.setVersion(5L);
         ceRow.setPayloadGz(null);
         when(bundleRepo.findFirstByActiveTrue()).thenReturn(Optional.of(ceRow));
 
-        assertThat(service.getActiveSignedBundle()).isEmpty();
+        assertThat(service.getActiveRawBundle()).isEmpty();
     }
 
     @Test
-    @DisplayName("getActiveSignedBundle returns empty when no active bundle")
-    void noActiveBundle() {
-        when(bundleRepo.findFirstByActiveTrue()).thenReturn(Optional.empty());
-        assertThat(service.getActiveSignedBundle()).isEmpty();
+    @DisplayName("getRawBundleByVersion returns the requested version, empty when unknown")
+    void rawByVersion() {
+        ApiCatalogBundleEntity row = new ApiCatalogBundleEntity();
+        row.setVersion(42L);
+        row.setChecksum("cs");
+        row.setPayloadGz(new byte[]{7, 7});
+        when(bundleRepo.findByVersion(42L)).thenReturn(Optional.of(row));
+        when(bundleRepo.findByVersion(43L)).thenReturn(Optional.empty());
+
+        assertThat(service.getRawBundleByVersion(42L)).isPresent();
+        assertThat(service.getRawBundleByVersion(43L)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("getActiveBundleMetadata reads the projection, never the payload-bearing entity")
+    void metadataUsesTheProjection() {
+        when(bundleRepo.findActiveMetadata()).thenReturn(List.of(new ApiCatalogBundleRepository.ActiveBundleMeta() {
+            @Override public String getChecksum() { return "cs9"; }
+            @Override public Integer getServable() { return 1; }
+            @Override public Integer getPricesStored() { return 1; }
+        }));
+
+        Optional<ApiCatalogBundleRepository.ActiveBundleMeta> meta = service.getActiveBundleMetadata();
+
+        assertThat(meta).isPresent();
+        assertThat(meta.get().getChecksum()).isEqualTo("cs9");
+        verify(bundleRepo, never()).findFirstByActiveTrue();
+    }
+
+    @Test
+    @DisplayName("getActiveBundleMetadata is empty when nothing is active")
+    void metadataEmptyWhenNoActiveRow() {
+        when(bundleRepo.findActiveMetadata()).thenReturn(List.of());
+
+        assertThat(service.getActiveBundleMetadata()).isEmpty();
     }
 
     @Test
@@ -263,10 +355,9 @@ class ApiCatalogBundleServiceTest {
         // the model bundle (re-derives at read time and throws on drift), the
         // API bundle serves the stored bytes - still verifiable.
         when(bundleRepo.findFirstByActiveTrue()).thenReturn(Optional.of(built));
-        Optional<ApiCatalogSignedBundle> served = service.getActiveSignedBundle();
+        Optional<ApiCatalogBundleService.RawBundle> served = service.getActiveRawBundle();
 
         assertThat(served).isPresent();
-        byte[] decoded = Base64.getDecoder().decode(served.get().payloadBase64());
-        assertThat(signer.verify(decoded, served.get().signature())).isTrue();
+        assertThat(signer.verify(served.get().payloadGz(), served.get().signature())).isTrue();
     }
 }

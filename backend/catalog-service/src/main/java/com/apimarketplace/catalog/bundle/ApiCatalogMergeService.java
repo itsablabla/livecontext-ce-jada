@@ -233,7 +233,8 @@ public class ApiCatalogMergeService {
                 .addValue("iconUrl", str(api, "iconUrl"))
                 .addValue("apiVersion", str(api, "apiVersion"))
                 .addValue("documentation", str(api, "documentation"))
-                .addValue("rateLimits", str(api, "rateLimits"));
+                .addValue("rateLimits", str(api, "rateLimits"))
+                .addValue("errorPolicy", str(api, "errorPolicy"));
 
         // ON CONFLICT … WHERE source guard = defense-in-depth: even if the
         // up-front source check raced, a custom row is never overwritten (the
@@ -245,14 +246,14 @@ public class ApiCatalogMergeService {
                     auth_header_name, auth_header_value, visibility, is_public, is_active,
                     is_local, pricing_model, status, version, icon_slug,
                     platform_credential_name, icon_url, api_version, documentation,
-                    rate_limits, source, deprecated_at, created_at, updated_at)
+                    rate_limits, error_policy, source, deprecated_at, created_at, updated_at)
                 VALUES (
                     :id, 'SYSTEM', :apiName, :apiSlug, :description, :baseUrl,
                     :healthcheckEndpoint, :categoryId, :subcategoryId, :authType,
                     :authHeaderName, :authHeaderValue, :visibility, :isPublic, :isActive,
                     :isLocal, :pricingModel, :status, :version, :iconSlug,
                     :platformCredentialName, :iconUrl, :apiVersion, :documentation,
-                    :rateLimits::jsonb, 'bundle', NULL,
+                    :rateLimits::jsonb, :errorPolicy::jsonb, 'bundle', NULL,
                     EXTRACT(EPOCH FROM NOW()) * 1000, EXTRACT(EPOCH FROM NOW()) * 1000)
                 ON CONFLICT (id) DO UPDATE SET
                     api_name = EXCLUDED.api_name,
@@ -278,6 +279,7 @@ public class ApiCatalogMergeService {
                     api_version = EXCLUDED.api_version,
                     documentation = EXCLUDED.documentation,
                     rate_limits = EXCLUDED.rate_limits,
+                    error_policy = EXCLUDED.error_policy,
                     source = 'bundle',
                     deprecated_at = NULL,
                     updated_at = EXTRACT(EPOCH FROM NOW()) * 1000

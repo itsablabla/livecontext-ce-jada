@@ -8,9 +8,6 @@ import { ChatCore } from '@/components/chat/ChatCore';
 import { useCurrentView } from '@/hooks/useCurrentView';
 import { DataSourceMessage, isDataSourceMessage } from '@/components/chat/DataSourceMessage';
 import { useRouter } from 'next/navigation';
-import { Link } from '@/i18n/navigation';
-import { useTranslations } from 'next-intl';
-import { ChevronDown, Columns3 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { DashboardContent } from '@/components/chat/DashboardContent';
 import { ConversationActivityCard } from '@/components/chat/ConversationActivityCard';
@@ -22,6 +19,10 @@ import { scrollToAndHighlightMessage } from '@/lib/chat/messageActivity';
 import { HighlightedApps } from '@/components/chat/HighlightedApps';
 import { HomeDynamicTitle } from '@/components/chat/HomeDynamicTitle';
 import { HomeSuggestionChips } from '@/components/chat/HomeSuggestionChips';
+import { HomeModeSwitch } from '@/components/chat/HomeModeSwitch';
+import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
+import { HomeQuickOpenButton } from '@/components/chat/HomeQuickOpenButton';
+import { useFirstBuildPromptProposal } from '@/lib/onboarding/useFirstBuildPromptProposal';
 
 type StreamError = {
   message: string;
@@ -75,7 +76,6 @@ export function ChatPageLayout({
   } = layoutState;
 
   const router = useRouter();
-  const tNav = useTranslations('sidebar');
 
   // Conversation Activity card - shared open state with the header toggle.
   // Closing is done from the focused AppHeader toggle (desktop) or the
@@ -112,6 +112,18 @@ export function ChatPageLayout({
 
   // Use native Next.js routing via useCurrentView hook
   const { view: currentView, dataSourceId } = useCurrentView();
+
+  // A generation writes a file into the workspace and spends credits, so a read-only VIEWER is not
+  // offered the studio at all - the same gate the Generate control applies. Offering the switch
+  // would lead them to a surface where every control is inert and nothing says why.
+  const canUseStudio = useCanMutateInCurrentOrg();
+
+  // Built once and handed to whichever composer is on screen. Two composers render on the home
+  // page - the desktop one anchored high, the mobile one pinned to the bottom - and only one is
+  // ever visible, so this is the same control in both rather than two of them.
+  const homeModeSwitch = canUseStudio
+    ? <HomeModeSwitch mode="chat" compact onInteract={handleComposerInteract} />
+    : undefined;
 
   // Derive view states from URL
   const expandedDataSourceId = enableDataSource ? (dataSourceId || null) : null;
@@ -158,6 +170,34 @@ export function ChatPageLayout({
       dataSourceId: expandedDataSourceId,
     });
   }, [expandedDataSourceId, messageHistoryProps.messages, enableDataSource]);
+
+  // Onboarding may have left a first message proposed for this account: fill the
+  // composer with it once, so the first screen shows the thing to ask rather
+  // than an empty box. It is only PROPOSED - the user presses send.
+  //
+  // Filling it trips the interaction pause above, which is what we want: a
+  // concrete sentence on screen should not compete with a rotating title.
+  //
+  // Gated on the composer being ON SCREEN, not merely on `showWelcomeMessage`.
+  // The welcome view is the LAST arm of a ternary chain, so the data-source and
+  // dashboard views win over it while that flag is still true; consuming the
+  // proposal there would spend it on a composer nobody is looking at and report
+  // it as filled. That is why this sits below those two values rather than with
+  // the other hooks at the top.
+  //
+  // The composer's OWN conversationId rather than the page's, so the slot left
+  // alone is the one the composer on screen reads. ChatPageV2 does not put
+  // `conversationId` in composerProps today, so this is `undefined` and both
+  // resolve to the new-chat slot: the coupling is right rather than currently
+  // load-bearing.
+  const welcomeComposerOnScreen =
+    showWelcomeMessage && !(expandedDataSourceContent && isDataView) && !dashboardPath;
+  useFirstBuildPromptProposal(
+    welcomeComposerOnScreen,
+    composerProps.inputValue,
+    composerProps.onInputChange,
+    composerProps.conversationId,
+  );
 
   // Helper function to minimize datasource - navigate back to chat
   const handleMinimizeDataSource = () => {
@@ -276,7 +316,7 @@ export function ChatPageLayout({
                           <div className="relative flex items-end justify-center">
                             <div className="max-w-3xl w-full">
                               <div className="p-4">
-                                <MessageComposer {...composerProps} />
+                                <MessageComposer {...composerProps} modeSwitch={homeModeSwitch} />
                               </div>
                             </div>
                           </div>
@@ -316,25 +356,12 @@ export function ChatPageLayout({
 
               {/* Mobile bottom composer (hidden on desktop where it's at 25% from top) */}
               <div className="block sm:hidden" onMouseDown={handleComposerInteract}>
-                <MessageComposer {...composerProps} />
+                <MessageComposer {...composerProps} modeSwitch={homeModeSwitch} />
               </div>
 
-              {/* Subtle jump-to-board affordance: a faint, gently bouncing down-chevron
-                  pinned at the bottom-center of the home view. On hover it expands into a
-                  labelled pill and navigates to the board. Desktop-only - on mobile the
-                  board is reached from the sidebar, and the bottom is taken by the composer. */}
-              <Link
-                href="/app/board"
-                title={tNav('nav.board')}
-                aria-label={tNav('nav.board')}
-                className="group absolute bottom-6 left-1/2 z-20 hidden -translate-x-1/2 items-center gap-1.5 rounded-full px-2.5 py-2 text-theme-muted opacity-40 transition-all duration-300 hover:bg-theme-secondary hover:px-3.5 hover:text-theme-primary hover:opacity-100 hover:shadow-md hover:ring-1 hover:ring-black/5 sm:flex dark:hover:ring-white/10"
-              >
-                <span className="flex max-w-0 items-center gap-1.5 overflow-hidden opacity-0 transition-all duration-300 group-hover:max-w-[10rem] group-hover:opacity-100">
-                  <Columns3 className="h-4 w-4 shrink-0" />
-                  <span className="whitespace-nowrap text-sm">{tNav('nav.board')}</span>
-                </span>
-                <ChevronDown className="h-4 w-4 shrink-0 animate-bounce group-hover:animate-none" />
-              </Link>
+              {/* Quick-open shortcut to the page the user picked in the sidebar's
+                  customize menu (Agenda unless they changed it). */}
+              <HomeQuickOpenButton />
             </>
           ) : (
             /* Active conversation - ChatCore handles streaming, service approval, auto-scroll */

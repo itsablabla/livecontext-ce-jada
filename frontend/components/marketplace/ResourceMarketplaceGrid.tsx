@@ -138,7 +138,7 @@ function PublicationCard({
               disabled={installBlocked}
               title={installBlocked ? tAcquire('installBusy') : undefined}
               onClick={() => { if (!installBlocked) onAcquire(publication); }}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:active:scale-100"
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--accent-foreground)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:active:scale-100"
             >
               <Download className="h-3 w-3" />
               {t('acquire')}

@@ -196,9 +196,34 @@ class DefaultSystemPromptsTest {
     // ═══════════════════════════════════════════════════════════════════════════════
 
     @Test
-    @DisplayName("ALL_RESOURCE_MODULES contains 11 modules (incl. generation, files, wait)")
-    void allResourceModulesContains11Modules() {
-        assertThat(DefaultSystemPrompts.ALL_RESOURCE_MODULES).hasSize(11);
+    @DisplayName("ALL_RESOURCE_MODULES contains 13 modules (incl. generation, files, wait, memory)")
+    void allResourceModulesContains13Modules() {
+        assertThat(DefaultSystemPrompts.ALL_RESOURCE_MODULES).hasSize(13);
+    }
+
+    /**
+     * Memory is declarative knowledge; SKILL next to it is procedural. The routing
+     * line has to carry that distinction and the declarative-phrasing rule itself,
+     * because the failure mode is not the model ignoring the tool: it is the model
+     * storing "always do X" as a memory, which is then re-read as a standing
+     * directive in every later conversation in the workspace.
+     */
+    @Test
+    @DisplayName("MEMORY module is registered with key 'memory' and teaches declarative-not-imperative")
+    void memoryModuleRegistered() {
+        assertThat(DefaultSystemPrompts.MEMORY.key()).isEqualTo("memory");
+        assertThat(DefaultSystemPrompts.MEMORY.toolNames()).containsExactly("memory");
+        assertThat(DefaultSystemPrompts.MEMORY.promptSection())
+                .contains("Declarative facts")
+                .contains("never instructions")
+                .contains("memory(action='get'");
+    }
+
+    @Test
+    @DisplayName("granting only the memory module resolves to exactly the memory tool")
+    void memoryModuleResolvesToItsToolAlone() {
+        ModularPromptResult result = DefaultSystemPrompts.build(Set.of("memory"), false);
+        assertThat(result.coreToolNames()).containsExactly("memory");
     }
 
     /**
@@ -251,6 +276,15 @@ class DefaultSystemPromptsTest {
     }
 
     @Test
+    @DisplayName("ASK_USER module is registered with key 'ask_user' and tells the agent how to end a pending turn")
+    void askUserModuleRegistered() {
+        assertThat(DefaultSystemPrompts.ASK_USER.key()).isEqualTo("ask_user");
+        assertThat(DefaultSystemPrompts.ASK_USER.toolNames()).containsExactly("ask_user");
+        assertThat(DefaultSystemPrompts.ASK_USER.promptSection())
+                .contains("ask_user(action='ask'", "pending_user", "Other");
+    }
+
+    @Test
     @DisplayName("WAIT module is registered with key 'wait' and points at workflow wait_run for runs")
     void waitModuleRegistered() {
         assertThat(DefaultSystemPrompts.WAIT.key()).isEqualTo("wait");
@@ -282,7 +316,7 @@ class DefaultSystemPromptsTest {
             .contains("catalog",
                 "table", "interface", "agent", "skill",
                 "workflow",
-                "application", "web_search", "generation", "files", "wait");
+                "application", "web_search", "generation", "files", "wait", "ask_user");
     }
 
     @Test

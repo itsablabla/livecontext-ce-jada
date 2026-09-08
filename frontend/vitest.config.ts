@@ -20,6 +20,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
+      // `server-only` throws on import by design, to fail a BUILD that pulls a
+      // server module into a client bundle. That check still runs where it
+      // matters (next build); here there is no client bundle to protect, and
+      // leaving it live breaks any suite whose component tree reaches a server
+      // module - which the shared public chrome now does, through the footer's
+      // integration column. See vitest.stubs/server-only.ts.
+      'server-only': path.resolve(__dirname, 'vitest.stubs/server-only.ts'),
     },
   },
 });

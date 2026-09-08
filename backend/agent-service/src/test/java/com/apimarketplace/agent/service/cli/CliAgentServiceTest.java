@@ -48,6 +48,7 @@ class CliAgentServiceTest {
 
     private CoreToolsCache coreToolsCache;
     private AgentService agentService;
+    private AgentObservabilityService observabilityService;
     private CliAgentService service;
 
     @BeforeEach
@@ -55,14 +56,49 @@ class CliAgentServiceTest {
         coreToolsCache = mock(CoreToolsCache.class);
         when(coreToolsCache.getCoreTools(anySet())).thenReturn(List.of());
         agentService = mock(AgentService.class);
+        observabilityService = mock(AgentObservabilityService.class);
 
         service = new CliAgentService(
             coreToolsCache,
             mock(RemoteToolExecutionService.class),
-            mock(AgentObservabilityService.class),
+            observabilityService,
             agentService,
             new ObjectMapper()
         );
+    }
+
+    @Nested
+    @DisplayName("Observability stop reason (regression: CLI rows had none)")
+    class ObservabilityStopReason {
+
+        @Test
+        @DisplayName("an explicitly ended session is recorded as a CLI run stopped with COMPLETED")
+        void endSessionRecordsCompletedStopReason() {
+            CliSessionStartRequest request = new CliSessionStartRequest(
+                null, null, "test-model", null, null, null, null, null, null, null);
+            CliSessionResponse started = service.startSession(request, "tenant-1", "org-test");
+
+            service.endSession(started.sessionId(), "tenant-1");
+
+            ArgumentCaptor<com.apimarketplace.agent.client.dto.AgentObservabilityRequest> captor =
+                ArgumentCaptor.forClass(com.apimarketplace.agent.client.dto.AgentObservabilityRequest.class);
+            verify(observabilityService).recordFromRequest(captor.capture());
+            assertThat(captor.getValue().getAgentType()).isEqualTo("CLI");
+            assertThat(captor.getValue().getStatus()).isEqualTo("COMPLETED");
+            assertThat(captor.getValue().getStopReason()).isEqualTo("COMPLETED");
+        }
+
+        @Test
+        @DisplayName("ending a session under the wrong tenant records nothing")
+        void wrongTenantRecordsNothing() {
+            CliSessionStartRequest request = new CliSessionStartRequest(
+                null, null, "test-model", null, null, null, null, null, null, null);
+            CliSessionResponse started = service.startSession(request, "tenant-1", "org-test");
+
+            service.endSession(started.sessionId(), "tenant-2");
+
+            verify(observabilityService, never()).recordFromRequest(any());
+        }
     }
 
     /** Stub the bound agent so startSession resolves its toolsConfig (workspace-scoped getAgent). */
@@ -360,6 +396,37 @@ class CliAgentServiceTest {
             // before, so removing it would have been invisible.
             assertThat(getSessionCredentials(response.sessionId()))
                 .containsEntry("__inactivityTimeoutSeconds__", 300);
+        }
+
+        @Test
+        @DisplayName("should carry the hold the bridge granted on its CLI, in ms, so a card can wait past the floor")
+        void shouldCarryTheCliMaxHold() throws Exception {
+            CliSessionStartRequest request = new CliSessionStartRequest(
+                null, null, "test-model", null, null, null, null, null, null, null, 300, 300);
+
+            CliSessionResponse response = service.startSession(request, "tenant-1", "org-test");
+
+            // The bridge writes the CLI's per-call timeout, so it is the one place that
+            // knows how long a parked call may wait there. Without this hop the gate falls
+            // back to a 25 s floor and a question card expires mid-read on every CLI.
+            assertThat(getSessionCredentials(response.sessionId()))
+                .containsEntry("__cliMaxParkMs__", 300_000L);
+        }
+
+        @Test
+        @DisplayName("should not invent a hold when the bridge sends none or a non-positive one")
+        void shouldNotInventACliMaxHold() throws Exception {
+            CliSessionStartRequest absent = new CliSessionStartRequest(
+                null, null, "test-model", null, null, null, null, null, null, null, 300);
+            CliSessionStartRequest zero = new CliSessionStartRequest(
+                null, null, "test-model", null, null, null, null, null, null, null, 300, 0);
+
+            assertThat(getSessionCredentials(service.startSession(absent, "tenant-1", "org-test").sessionId()))
+                .as("an older bridge says nothing: the gate keeps its floor")
+                .doesNotContainKey("__cliMaxParkMs__");
+            assertThat(getSessionCredentials(service.startSession(zero, "tenant-1", "org-test").sessionId()))
+                .as("0 is not a wait a person can answer in; it must not shadow the floor")
+                .doesNotContainKey("__cliMaxParkMs__");
         }
     }
 

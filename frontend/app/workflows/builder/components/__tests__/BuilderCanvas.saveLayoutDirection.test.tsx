@@ -30,7 +30,12 @@ vi.mock('@/contexts/WorkflowLayoutDirectionContext', () => ({
     setWorkflowDirection: vi.fn(),
   }),
 }));
-vi.mock('@/components/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light' }) }));
+// `useOptionalTheme` is mocked alongside `useTheme`: the icons in this tree render
+// through `useThemeSafely`, which reads the context OPTIONALLY so the same icons can
+// render on the public marketplace outside any ThemeProvider. A mock missing it throws.
+vi.mock('@/components/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light' }),
+  useOptionalTheme: () => ({ theme: 'light' }),
+}));
 vi.mock('@/components/LoadingSpinner', () => ({ default: () => <div data-testid="loading-spinner" /> }));
 vi.mock('@/components/chat/SimpleToast', () => ({
   SimpleToast: () => null,

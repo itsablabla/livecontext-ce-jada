@@ -54,7 +54,6 @@ export const FleetEdge = React.memo(function FleetEdge({
   const statusCounts = (data as any)?.statusCounts as Record<string, number> | undefined;
   const totalCalls = (data as any)?.totalCalls as number | undefined;
   const status = statusCounts ? deriveStatusFromCounts(statusCounts) : undefined;
-  const stroke = (style?.stroke as string) || 'var(--border-color)';
   const hasLabel = (statusCounts && status && status !== 'pending') || (totalCalls && totalCalls > 0);
 
   // ── Edit-mode hover action (delete / edit) ──
@@ -119,7 +118,6 @@ export const FleetEdge = React.memo(function FleetEdge({
               <EdgeStatusLabel
                 status={status as DerivedNodeStatus}
                 statusCounts={statusCounts}
-                strokeColor={stroke}
               />
             )}
             {totalCalls !== undefined && totalCalls > 0 && (

@@ -47,6 +47,9 @@ const SHIMMER_BY_VARIANT: Record<TriggerButtonVariant, string> = {
  * pattern from TriggerPanel's overflow menu, so positioning survives the
  * draggable canvas and clipping parents.
  */
+/** The menu's resting width; the clamp and `min-w-[200px]` read the same number. */
+const LAUNCH_MENU_WIDTH = 200;
+
 export function TriggerEditLaunchButton({ nodeId, variant, borderColor }: TriggerEditLaunchButtonProps) {
   const t = useTranslations('workflowBuilder.canvas');
   // Audit 2026-07-02 - VIEWER role in an org workspace is read-only: launching a
@@ -57,7 +60,7 @@ export function TriggerEditLaunchButton({ nodeId, variant, borderColor }: Trigge
   // once (the right side panel embeds its own), and an unscoped start ran them all.
   const { workflowId } = useWorkflowMode();
   // Anchored just below the button, centered on its horizontal axis.
-  const { open, isVisible, toggle, close, triggerRef, menuRef, menuStyle } = usePortalMenu('below');
+  const { open, isVisible, toggle, close, triggerRef, menuRef, menuStyle } = usePortalMenu('below', LAUNCH_MENU_WIDTH);
 
   const startAuto = React.useCallback(() => {
     close();
@@ -112,7 +115,7 @@ export function TriggerEditLaunchButton({ nodeId, variant, borderColor }: Trigge
         <div
           ref={menuRef}
           role="menu"
-          className="fixed z-[9999] min-w-[200px] bg-theme-primary rounded-2xl p-2 border border-gray-300/70 dark:border-gray-600/70 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-150 nodrag nopan"
+          className="fixed z-[9999] min-w-[200px] max-w-[calc(100vw-1rem)] bg-theme-primary rounded-2xl p-2 border border-gray-300/70 dark:border-gray-600/70 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-150 nodrag nopan"
           style={menuStyle}
           onMouseDown={(e) => e.stopPropagation()}
         >

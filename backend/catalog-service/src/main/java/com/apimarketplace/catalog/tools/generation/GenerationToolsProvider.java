@@ -108,6 +108,14 @@ public class GenerationToolsProvider implements ToolsProvider {
                         + "(create). Determines the format, the accepted parameters and the price.", false),
                 stringParam("kind", "Narrow action='models' to one format: image, video, audio, "
                         + "voice, music. Omit to list everything.", false),
+                stringParam("provider", "Narrow action='models' to one provider, matched against the "
+                        + "name each row shows in 'provider'. Use it when you are choosing between one "
+                        + "provider's tiers: a provider that charges differently for a quality or an "
+                        + "output size sells each as its own model id, and this is how you see them "
+                        + "together without reading every model of that format. A name nothing matches "
+                        + "answers with an empty list, which means your filter matched nothing, not "
+                        + "that the provider sells nothing: re-read it from a 'provider' field rather "
+                        + "than guessing it.", false),
                 // Reachable, not only documented. This is the one argument
                 // action='options' cannot work without, and a schema that omits
                 // it leaves an agent unable to call an action it can see: the
@@ -169,7 +177,11 @@ public class GenerationToolsProvider implements ToolsProvider {
                 - models: the model ids you can use, what each accepts, and what each costs.
                 - create: generate. Returns the produced file, plus the size it was billed on.
                 Model ids cannot be guessed. Call action='models' once before the first create.
-                Models priced per second or per character cost more for a longer request.""";
+                Models priced per second or per character cost more for a longer request.
+                Some choices are made by picking a MODEL, not by passing a parameter: several
+                providers sell a quality, a size or an image-to-image mode as its own model id
+                because each costs a different amount. If 'accepts' does not list what you want to
+                set, read the other ids from the same provider before deciding it cannot be done.""";
 
         return AgentToolDefinition.builder()
                 .name(TOOL_NAME)
@@ -200,13 +212,37 @@ public class GenerationToolsProvider implements ToolsProvider {
 
         Map<String, Object> actions = new LinkedHashMap<>();
         actions.put("models", Map.of(
-                "summary", "List the model ids you can generate with. Call this first.",
-                "params", Map.of("kind", "optional - image | video | audio | voice | music"),
-                "returns", "{ models[]: {model, kind, label, provider, accepts[], required[], limits{}, "
-                        + "billed_on, default_<billed_on>, price{}, async}, count, kinds[], price_note, "
-                        + "size_note }. A model's limits{} holds, per parameter, any of allowed[], "
-                        + "min, max and maxLength; a parameter with nothing to restrict is absent "
-                        + "rather than present and empty. A value outside a limit is normally "
+                "summary", "List the model ids you can generate with. Call this first. Ids from one "
+                        + "provider often differ only by a tier that is priced differently (a quality, "
+                        + "an output size, an image-to-image mode), so what one id does not accept "
+                        + "another one may: read a provider's ids together before concluding a "
+                        + "setting is unavailable.",
+                "params", Map.of(
+                        "kind", "optional - image | video | audio | voice | music. Without it the "
+                                + "answer carries every model of every format, which is the longest "
+                                + "answer this tool gives.",
+                        "provider", "optional - one provider, as shown in a row's 'provider' field. "
+                                + "The way to compare that provider's tiers without reading the rest. "
+                                + "An unmatched name answers with an empty list rather than an error."),
+                "returns", "{ models[]: {model, kind, label, provider, runs_on, accepts[], required[], "
+                        + "limits{}, inputs{}, fixed{}, billed_on, default_<billed_on>, price{}, async}, "
+                        + "count, kinds[], price_note, size_note, size_billed_note }. 'runs_on' says WHO "
+                        + "can pay for it here: platform_or_own_key; own_key_only when this "
+                        + "installation has no platform key for that provider or publishes no price "
+                        + "for that model, in which case a create on the platform key is refused "
+                        + "however well formed it is; or unknown when that could not be determined "
+                        + "just now, which is not a refusal and is worth one retry. 'fixed' is "
+                        + "everything the call sends whatever you pass, this model's tier and the "
+                        + "endpoint's own scaffolding both, and is what separates two ids that "
+                        + "accept the same parameters: a provider charging differently for a quality "
+                        + "or an output size sells each as its own model id, and 'fixed' is where that "
+                        + "shows. Its keys are the PROVIDER's own field names, not parameters you may "
+                        + "pass - the ones you may pass are in 'accepts'. Choosing a tier means "
+                        + "choosing another model id. limits{}, inputs{} and fixed{} are absent "
+                        + "rather than present and empty when there is nothing to say, so a missing "
+                        + "key means no restriction, no file and no pinned value. A model's limits{} "
+                        + "holds, per parameter, any of allowed[], "
+                        + "min, max and maxLength. A value outside a limit is normally "
                         + "refused before the provider is called, so testing one costs nothing - "
                         + "EXCEPT where the entry carries allowedEnforced:false. Those values are "
                         + "what the provider documents rather than a rule this platform checks: a "

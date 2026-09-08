@@ -146,6 +146,62 @@ class SplitAggregateHandlerTest {
         }
 
         @Test
+        @DisplayName("reports the configured fields as resolved_params (the aggregate reached through a split reported none, so its Params column was empty)")
+        @SuppressWarnings("unchecked")
+        void reportsConfiguredFieldsAsResolvedParams() {
+            AggregateNode aggregateNode = AggregateNode.builder()
+                .nodeId("core:aggregate")
+                .templateEngine(null)
+                .addField("names", "{{core:split.output.current_item.name}}")
+                .build();
+            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+            nodeMap.put("core:aggregate", aggregateNode);
+            ExecutionContext context = createContext(0);
+
+            SplitContext splitContext = SplitContext.create("core:split:0", List.of("item1", "item2"));
+            when(mockContextManager.findActiveContext("run-1", "core:aggregate", 0, nodeMap))
+                .thenReturn(Optional.of(splitContext));
+
+            NodeExecutionResult result = handler.handleAggregate("run-1", "core:aggregate", 0, context, nodeMap);
+
+            Map<String, Object> resolvedParams =
+                (Map<String, Object>) result.output().get("resolved_params");
+            assertNotNull(resolvedParams, "the split-aggregate path must report its configuration");
+            assertEquals(
+                List.of(Map.of("label", "names", "expression", "{{core:split.output.current_item.name}}")),
+                resolvedParams.get("fields"));
+            // ...and one key per author label, the same vocabulary AggregateNode
+            // uses on its own path. Whether {{core:<agg>.input.names}} resolves must
+            // not depend on whether the aggregate sits downstream of a split.
+            assertEquals("{{core:split.output.current_item.name}}", resolvedParams.get("names"));
+        }
+
+        @Test
+        @DisplayName("still reports the configured fields when no split context is found - that is exactly when the reader needs them")
+        @SuppressWarnings("unchecked")
+        void reportsConfiguredFieldsWithoutSplitContext() {
+            AggregateNode aggregateNode = AggregateNode.builder()
+                .nodeId("core:aggregate")
+                .templateEngine(null)
+                .addField("names", "{{core:split.output.current_item.name}}")
+                .build();
+            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+            nodeMap.put("core:aggregate", aggregateNode);
+            ExecutionContext context = createContext(0);
+
+            when(mockContextManager.findActiveContext("run-1", "core:aggregate", 0, nodeMap))
+                .thenReturn(Optional.empty());
+            when(mockContextManager.getAllContexts("run-1")).thenReturn(Map.of());
+
+            NodeExecutionResult result = handler.handleAggregate("run-1", "core:aggregate", 0, context, nodeMap);
+
+            Map<String, Object> resolvedParams =
+                (Map<String, Object>) result.output().get("resolved_params");
+            assertNotNull(resolvedParams);
+            assertEquals(1, ((List<Object>) resolvedParams.get("fields")).size());
+        }
+
+        @Test
         @DisplayName("should fall back to any active context when BFS fails")
         void shouldFallbackToAnyActiveContext() {
             Map<String, ExecutionNode> nodeMap = new HashMap<>();

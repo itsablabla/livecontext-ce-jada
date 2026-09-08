@@ -258,10 +258,25 @@ class ScheduleOverviewControllerTest {
             ScheduledExecutionDto result = createScheduleDto(WORKFLOW_ID_1, "trigger:t1", true);
             when(triggerClient.toggleSchedule(scheduleId, true, ORG_ID, TENANT_ID)).thenReturn(result);
 
-            ResponseEntity<?> response = controller.toggle(TENANT_ID, ORG_ID, scheduleId, Map.of("enabled", true));
+            ResponseEntity<?> response = controller.toggle(TENANT_ID, ORG_ID, "MEMBER", scheduleId, Map.of("enabled", true));
 
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             verify(triggerClient).toggleSchedule(scheduleId, true, ORG_ID, TENANT_ID);
+        }
+
+        @Test
+        @DisplayName("refuses an org VIEWER - pausing a schedule stops the workspace's automation")
+        void refusesViewer() {
+            // The agenda gates its move and run-early actions; pause is the third write of
+            // the same feature and was reachable directly with a VIEWER's token. The
+            // frontend hides the button, which is not a boundary.
+            UUID scheduleId = UUID.randomUUID();
+
+            ResponseEntity<?> response = controller.toggle(TENANT_ID, ORG_ID, "VIEWER", scheduleId,
+                    Map.of("enabled", false));
+
+            assertThat(response.getStatusCode().value()).isEqualTo(403);
+            verifyNoInteractions(triggerClient);
         }
 
         @Test
@@ -271,7 +286,7 @@ class ScheduleOverviewControllerTest {
             ScheduledExecutionDto result = createScheduleDto(WORKFLOW_ID_1, "trigger:t1", false);
             when(triggerClient.toggleSchedule(scheduleId, false, ORG_ID, TENANT_ID)).thenReturn(result);
 
-            ResponseEntity<?> response = controller.toggle(TENANT_ID, ORG_ID, scheduleId, Map.of("enabled", false));
+            ResponseEntity<?> response = controller.toggle(TENANT_ID, ORG_ID, "MEMBER", scheduleId, Map.of("enabled", false));
 
             assertThat(response.getStatusCode().value()).isEqualTo(200);
         }
@@ -282,7 +297,7 @@ class ScheduleOverviewControllerTest {
             UUID scheduleId = UUID.randomUUID();
             when(triggerClient.toggleSchedule(scheduleId, true, ORG_ID, TENANT_ID)).thenReturn(null);
 
-            ResponseEntity<?> response = controller.toggle(TENANT_ID, ORG_ID, scheduleId, Map.of("enabled", true));
+            ResponseEntity<?> response = controller.toggle(TENANT_ID, ORG_ID, "MEMBER", scheduleId, Map.of("enabled", true));
 
             assertThat(response.getStatusCode().value()).isEqualTo(404);
         }
@@ -300,7 +315,7 @@ class ScheduleOverviewControllerTest {
             UUID scheduleId = UUID.randomUUID();
             when(triggerClient.archiveScheduleById(scheduleId, "USER_DELETED", ORG_ID, TENANT_ID)).thenReturn(true);
 
-            ResponseEntity<?> response = controller.delete(TENANT_ID, ORG_ID, scheduleId);
+            ResponseEntity<?> response = controller.delete(TENANT_ID, ORG_ID, "MEMBER", scheduleId);
 
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             // v5: hard-delete was replaced with archive so the audit log + execution_count
@@ -309,14 +324,91 @@ class ScheduleOverviewControllerTest {
         }
 
         @Test
+        @DisplayName("refuses an org VIEWER - delete ARCHIVES the row, and archiving is permanent")
+        void deleteRefusesViewer() {
+            // The gate was added to toggle alone, on the argument that pausing a schedule
+            // stops a workspace's automation. Deleting does that AND cannot be undone
+            // (ARCHIVED is permanent; only an admin unarchive path recovers it), so a
+            // read-only member reaching this endpoint directly was the worse hole of the
+            // two. The frontend hides the button, which is not a boundary.
+            UUID scheduleId = UUID.randomUUID();
+
+            ResponseEntity<?> response = controller.delete(TENANT_ID, ORG_ID, "VIEWER", scheduleId);
+
+            assertThat(response.getStatusCode().value()).isEqualTo(403);
+            verify(triggerClient, never()).archiveScheduleById(any(), anyString(), anyString(), anyString());
+        }
+
+        @Test
         @DisplayName("Cross-organization schedule delete returns 404")
         void deleteScheduleFromDifferentOrganization() {
             UUID scheduleId = UUID.randomUUID();
             when(triggerClient.archiveScheduleById(scheduleId, "USER_DELETED", ORG_ID, TENANT_ID)).thenReturn(false);
 
-            ResponseEntity<?> response = controller.delete(TENANT_ID, ORG_ID, scheduleId);
+            ResponseEntity<?> response = controller.delete(TENANT_ID, ORG_ID, "MEMBER", scheduleId);
 
             assertThat(response.getStatusCode().value()).isEqualTo(404);
+        }
+    }
+
+    // ==================== VIEWER gate on the remaining writes ====================
+
+    /**
+     * A read-only member may not write, on ANY of this controller's four write endpoints.
+     *
+     * <p>Worth stating as its own suite because the failure mode is a gate that exists.
+     * {@code toggle} was gated and the other three were not, so the file read as protected
+     * at a glance while {@code create}, {@code update} and {@code delete} stayed open to a
+     * VIEWER's token. Each case below asserts the refusal AND that nothing was written -
+     * a 403 that still called through would be the same bug with a better status code.
+     */
+    @Nested
+    @DisplayName("VIEWER gate")
+    class ViewerGateTests {
+
+        @Test
+        @DisplayName("create is refused")
+        void createRefusesViewer() {
+            ResponseEntity<?> response = controller.create(TENANT_ID, ORG_ID, "VIEWER", "PRO", null);
+
+            assertThat(response.getStatusCode().value()).isEqualTo(403);
+            verify(triggerClient, never()).createStandaloneSchedule(anyString(), any(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("update is refused")
+        void updateRefusesViewer() {
+            UUID scheduleId = UUID.randomUUID();
+
+            ResponseEntity<?> response = controller.update(TENANT_ID, ORG_ID, "VIEWER", scheduleId, null);
+
+            assertThat(response.getStatusCode().value()).isEqualTo(403);
+            verify(triggerClient, never()).updateStandaloneSchedule(anyString(), any(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("a MEMBER is not refused - the gate must not lock out everyone")
+        void memberPassesTheGate() {
+            // The over-correction this guards against: refusing on a null/unknown role, or
+            // on every role, turns a security fix into an outage for ordinary users.
+            UUID scheduleId = UUID.randomUUID();
+            when(triggerClient.archiveScheduleById(scheduleId, "USER_DELETED", ORG_ID, TENANT_ID))
+                    .thenReturn(true);
+
+            assertThat(controller.delete(TENANT_ID, ORG_ID, "MEMBER", scheduleId)
+                    .getStatusCode().value()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("a personal workspace has no roles, so nothing is refused there")
+        void personalWorkspaceIsUnaffected() {
+            // organizationId null means there is no org to have a VIEWER of. Refusing here
+            // would break every personal-workspace user.
+            UUID scheduleId = UUID.randomUUID();
+
+            ResponseEntity<?> response = controller.update(TENANT_ID, null, "VIEWER", scheduleId, null);
+
+            assertThat(response.getStatusCode().value()).isNotEqualTo(403);
         }
     }
 

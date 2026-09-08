@@ -1,118 +1,52 @@
 package com.apimarketplace.trigger.service;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.support.CronExpression;
+import com.apimarketplace.common.schedule.CronOccurrences;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Cron expression parsing and validation.
  *
  * <p>Accepts a 5-field Unix-style cron expression and converts it to the 6-field
- * Spring representation used internally by {@link CronExpression}. The 5-field
- * input is the canonical user-facing format.
+ * Spring representation used internally. The 5-field input is the canonical
+ * user-facing format.
  *
- * <p><b>Strict step validation</b>: Spring's {@code CronExpression} silently
- * accepts {@code *&#47;N} step values where {@code N} exceeds the field's maximum
- * (e.g. {@code *&#47;120} in the minute field). The parsed expression collapses to
- * "the start of the field range only" (minute 0), so the user's intended
- * "every 120 minutes" becomes "every hour at HH:00". This class rejects such
- * expressions before Spring sees them so the validation error is honest.
+ * <p><b>The maths lives in {@link CronOccurrences}</b> (common-lib), not here.
+ * Orchestrator's agenda projects the same expressions over a date window to draw the
+ * calendar, and a second implementation would let the calendar disagree with this
+ * daemon about when a schedule fires. This class delegates validation and occurrence
+ * computation and keeps only {@link #getDescription(String)}, which is presentation.
  */
 @Service
 public class ScheduleCronParser {
-
-    private static final Logger logger = LoggerFactory.getLogger(ScheduleCronParser.class);
-
-    /** Maximum value per 5-field cron position (minute, hour, day, month, weekday). */
-    private static final int[] FIELD_MAX_5 = { 59, 23, 31, 12, 7 };
-
-    /** Minimum value per 5-field cron position. day/month start at 1; everything else at 0. */
-    private static final int[] FIELD_MIN_5 = { 0, 0, 1, 1, 0 };
-
-    /** Maximum value per 6-field Spring cron position (second, minute, hour, day, month, weekday). */
-    private static final int[] FIELD_MAX_6 = { 59, 59, 23, 31, 12, 7 };
-
-    /** Minimum value per 6-field Spring cron position. */
-    private static final int[] FIELD_MIN_6 = { 0, 0, 0, 1, 1, 0 };
 
     /**
      * Convert standard 5-field cron to 6-field Spring cron (prepends a "0" seconds field).
      * Returns the input unchanged if it already has 6 fields.
      */
     public String toSpringCron(String cron) {
-        if (cron == null || cron.isBlank()) return null;
-        String[] parts = cron.trim().split("\\s+");
-        if (parts.length == 5) {
-            return "0 " + cron.trim();
-        }
-        return cron.trim();
+        return CronOccurrences.toSpringCron(cron);
     }
 
     /**
-     * Validate a cron expression.
-     *
-     * <p>Two passes:
-     * <ol>
-     *   <li>Strict step validation: reject {@code *&#47;N} where {@code N} exceeds the
-     *       field's maximum (the silent-collapse footgun).</li>
-     *   <li>Delegate to Spring's {@code CronExpression.parse} for everything else
-     *       (syntax, ranges, lists, named months/weekdays, etc.).</li>
-     * </ol>
+     * Whether the expression can fire at all. Permissive on purpose - the schedule reapers
+     * archive a row PERMANENTLY when this is false, so it must not refuse an expression
+     * that still produces occurrences. See {@link CronOccurrences#isValid(String)}.
      */
     public boolean isValid(String cron) {
-        if (cron == null || cron.isBlank()) return false;
-        try {
-            String trimmed = cron.trim();
-            String[] parts = trimmed.split("\\s+");
-            if (parts.length == 5) {
-                if (!stepValuesWithinFieldRange(parts, FIELD_MIN_5, FIELD_MAX_5)) return false;
-            } else if (parts.length == 6) {
-                if (!stepValuesWithinFieldRange(parts, FIELD_MIN_6, FIELD_MAX_6)) return false;
-            }
-            CronExpression.parse(toSpringCron(trimmed));
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
+        return CronOccurrences.isValid(cron);
     }
 
     /**
-     * Validate that every {@code *&#47;N} step has {@code N} within the field's range.
-     * Applied to either the 5-field or 6-field shape via the matching min/max arrays.
-     * Returns {@code true} if all steps are sane.
-     *
-     * <p>Comma-separated lists are also checked: {@code 0,*&#47;120} in minutes is rejected
-     * because the embedded {@code *&#47;120} would still collapse silently.
+     * Whether a cron a caller is submitting should be accepted. Stricter than
+     * {@link #isValid(String)}: also refuses step values that silently collapse.
+     * See {@link CronOccurrences#isAcceptableInput(String)}.
      */
-    private boolean stepValuesWithinFieldRange(String[] fieldParts, int[] fieldMin, int[] fieldMax) {
-        for (int position = 0; position < fieldParts.length; position++) {
-            String field = fieldParts[position];
-            int max = fieldMax[position];
-            int min = fieldMin[position];
-            for (String part : field.split(",")) {
-                int slash = part.indexOf('/');
-                if (slash < 0) continue;
-                String stepStr = part.substring(slash + 1);
-                int step;
-                try {
-                    step = Integer.parseInt(stepStr);
-                } catch (NumberFormatException e) {
-                    return false;
-                }
-                if (step <= 0 || step > (max - min + 1)) {
-                    return false;
-                }
-            }
-        }
-        return true;
+    public boolean isAcceptableInput(String cron) {
+        return CronOccurrences.isAcceptableInput(cron);
     }
 
     /**
@@ -129,23 +63,7 @@ public class ScheduleCronParser {
      * is invalid or has no future firings, returns an empty list.
      */
     public List<Instant> getNextExecutions(String cron, String timezone, int count) {
-        List<Instant> result = new ArrayList<>(count);
-        if (!isValid(cron)) return result;
-        try {
-            CronExpression expression = CronExpression.parse(toSpringCron(cron));
-            ZoneId zone = timezone != null && !timezone.isBlank() ? ZoneId.of(timezone) : ZoneId.of("UTC");
-            LocalDateTime cursor = LocalDateTime.now(zone);
-            for (int i = 0; i < count; i++) {
-                LocalDateTime next = expression.next(cursor);
-                if (next == null) break;
-                result.add(next.atZone(zone).toInstant());
-                cursor = next;
-            }
-        } catch (Exception e) {
-            logger.error("Failed to calculate next executions for cron '{}': {}", cron, e.getMessage());
-            return new ArrayList<>();
-        }
-        return result;
+        return CronOccurrences.next(cron, timezone, count);
     }
 
     /**

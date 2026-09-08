@@ -92,7 +92,7 @@ public class OptionalComponentValidator implements WorkflowValidator {
                     }
                     result.addWarning("MEDIA_RENDERER_UNAVAILABLE",
                             nodeRef(core, "core"),
-                            "Media processing (probe/mux_audio/mix/extract_audio) needs the optional renderer "
+                            "Media processing needs the optional renderer "
                             + "component, which is not available on this installation. This node WILL fail at "
                             + "run time here (its media output is not best-effort); the workflow still runs on "
                             + "installations that have the component. Only the user or an administrator can "

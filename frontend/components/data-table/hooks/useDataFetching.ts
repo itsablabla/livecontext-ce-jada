@@ -10,6 +10,7 @@ import {
   updatePaginationState,
   createEmptyPaginationUpdate,
   normalizeRows,
+  withDisplayIdentity,
   parseErrorResponse,
   type SortConfig,
   type NormalizeRowContext,
@@ -758,41 +759,52 @@ export function useDataFetching({
             nestedData.forEach((item: any, itemIndex: number) => {
               const itemData = typeof item === 'object' && item !== null ? item : { value: item };
               const rowId = seqId++;
+              // The seqId is a FALLBACK identity, never an override: an item carrying its own `id`
+              // (table rows from a CRUD or agent step) keeps the real one. `array_index` stays
+              // authoritative on top of it - the grid groups and keys sub-rows on it.
+              const { data, injectedDataKeys } = withDisplayIdentity(itemData, rowId);
               normalizedRows.push({
                 id: rowId,
                 data_source_id: 0,
                 tenant_id: TENANT_ID,
-                data: { ...itemData, id: rowId, array_index: itemIndex },
+                data: { ...data, array_index: itemIndex },
                 priority: 0,
                 created_at: rowData.startTime || new Date().toISOString(),
                 updated_at: null,
+                // array_index is a position this view adds, never stored data - declared like the
+                // identity so a writer takes back everything the read path wrote.
+                _injectedDataKeys: [...injectedDataKeys, 'array_index'],
                 _jsonPath: jsonPath,
                 _isWorkflowStep: true,
               });
             });
           } else if (typeof nestedData === 'object') {
             const rowId = seqId++;
+            const { data, injectedDataKeys } = withDisplayIdentity(nestedData, rowId);
             normalizedRows.push({
               id: rowId,
               data_source_id: 0,
               tenant_id: TENANT_ID,
-              data: { ...nestedData, id: rowId },
+              data,
               priority: 0,
               created_at: rowData.startTime || new Date().toISOString(),
               updated_at: null,
+              _injectedDataKeys: injectedDataKeys,
               _jsonPath: jsonPath,
               _isWorkflowStep: true,
             });
           } else {
+            // Primitive: no key can collide, so the identity is always injected.
             const rowId = seqId++;
             normalizedRows.push({
               id: rowId,
               data_source_id: 0,
               tenant_id: TENANT_ID,
-              data: { value: nestedData, id: rowId },
+              data: { id: rowId, value: nestedData },
               priority: 0,
               created_at: rowData.startTime || new Date().toISOString(),
               updated_at: null,
+              _injectedDataKeys: ['id'],
               _jsonPath: jsonPath,
               _isWorkflowStep: true,
             });
@@ -933,6 +945,9 @@ export function useDataFetching({
               data_source_id: row.data_source_id ?? dataSourceId ?? 0,
               tenant_id: row.tenant_id ?? TENANT_ID,
               data: { ...itemData, array_index: idx },
+              // Declared like the workflow normalizer's, so a writer strips exactly what the read
+              // path added. This branch never touched `id`, so only the position is injected.
+              _injectedDataKeys: ['array_index'],
               priority: row.priority ?? 0,
               created_at: row.created_at ?? new Date().toISOString(),
               updated_at: row.updated_at ?? null,

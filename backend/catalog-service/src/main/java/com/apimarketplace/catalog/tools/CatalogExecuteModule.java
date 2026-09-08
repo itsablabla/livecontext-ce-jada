@@ -86,7 +86,7 @@ public class CatalogExecuteModule implements ToolModule {
      *
      * <p>Deliberately the same kind of channel the billing scope travels on.
      * Only the surfaces that know the account's credentials put a value here -
-     * the app dialog and the {@code core:generate} node, through
+     * the app dialog and the {@code agent:generate} node, through
      * {@code GenerationController} - and the tool arguments of a chat agent
      * never reach it. That is what makes the generation tool's help TRUE when
      * it says the account's default key runs: an agent calling that tool
@@ -338,7 +338,7 @@ public class CatalogExecuteModule implements ToolModule {
             // Present → the caller made an explicit design-time choice and the
             // catalog honours it strictly, with no fallback to the other pool.
             // GenerationModule has always forwarded the caller's
-            // credential_source here, and the `core:generate` node surfaces it
+            // credential_source here, and the `agent:generate` node surfaces it
             // as a toggle; without this branch the value was silently dropped
             // and a workflow that asked for its OWN key was billed the platform
             // price instead.

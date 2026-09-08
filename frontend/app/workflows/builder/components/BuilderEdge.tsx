@@ -24,24 +24,7 @@ import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { isFlowBackward } from './nodes/handleGeometry';
-// Get stroke color based on status
-function getStatusStrokeColor(status?: DerivedNodeStatus): string {
-  if (!status || status === 'pending') return 'var(--border-color)';
-  switch (status) {
-    case 'running':
-      return '#3b82f6'; // blue-500
-    case 'completed':
-      return '#10b981'; // emerald-500
-    case 'failed':
-      return '#ef4444'; // red-500
-    case 'skipped':
-      return '#94a3b8'; // slate-400
-    case 'partial_success':
-      return '#f59e0b'; // amber-500
-    default:
-      return 'var(--border-color)';
-  }
-}
+import { EDGE_LOOP_COLOR, getEdgeArrowMarkerUrl, getEdgeStrokeColor } from './edgeStatusVisuals';
 
 export function BuilderEdge({
   id,
@@ -245,24 +228,26 @@ export function BuilderEdge({
   // z-index: 5 par défaut (devant les notes), 20 si sélectionné (devant tout)
   const edgeZIndex = selected ? 20 : 5;
 
+  const edgeStatus = data?.status as DerivedNodeStatus | undefined;
   // Animation de pointillés pour les edges sélectionnés ou running
-  const isRunning = data?.status === 'running';
-  const shouldAnimate = selected || isRunning;
+  const isRunning = edgeStatus === 'running';
+  // A waiting edge is LIVE, not finished: it animates like a running one, only in
+  // its own amber and at the slower tempo the waiting nodes use (see
+  // NodeActivityShimmer). Painting it a still amber line made a run that was
+  // blocked on a user look exactly like one that had ended.
+  const isAwaiting = edgeStatus === 'awaiting_signal';
+  const shouldAnimate = selected || isRunning || isAwaiting;
 
   // Get stroke color based on status or selection
-  const statusStrokeColor = getStatusStrokeColor(data?.status as DerivedNodeStatus | undefined);
-  // ONE orange for looping. The old second shade (amber #f59e0b) collided with the
-  // partial_success status colour, so an idle back-edge was indistinguishable from a
-  // partially-failed one.
-  const whileBodyColor = '#f97316'; // orange-500
+  const statusStrokeColor = getEdgeStrokeColor(edgeStatus);
   // Loop identity only while the edge has no run status of its own. Once it does, the status
   // wins: a FAILED loop edge painted orange is indistinguishable from an idle one, which is
   // exactly when the colour matters most.
-  const keepsLoopColor = isWhileEdge && (!data?.status || data?.status === 'pending');
+  const keepsLoopColor = isWhileEdge && (!edgeStatus || edgeStatus === 'pending');
   const stroke = selected ? 'var(--accent-primary)'
-    : keepsLoopColor ? whileBodyColor
+    : keepsLoopColor ? EDGE_LOOP_COLOR
     : statusStrokeColor;
-  const isSkipped = data?.status === 'skipped';
+  const isSkipped = edgeStatus === 'skipped';
 
 
   // Select the appropriate arrow marker based on status/selection.
@@ -272,9 +257,7 @@ export function BuilderEdge({
   const getMarkerEnd = () => {
     if (selected) return 'url(#arrow-selected)';
     if (keepsLoopColor) return 'url(#arrow-while-body)';
-    const status = data?.status as DerivedNodeStatus | undefined;
-    if (!status || status === 'pending') return 'url(#arrow-default)';
-    return `url(#arrow-${status})`;
+    return getEdgeArrowMarkerUrl(edgeStatus);
   };
   const markerEndUrl = getMarkerEnd();
 
@@ -326,13 +309,19 @@ export function BuilderEdge({
         style={{
           ...style,
           stroke,
-          strokeWidth: isRunning ? 2 : 1.6,
+          strokeWidth: isRunning || isAwaiting ? 2 : 1.6,
           strokeDasharray: shouldAnimate || isSkipped || isBackEdge || isWhileEdge ? '8 4' : 'none',
           strokeDashoffset: shouldAnimate ? 0 : 0,
           transition: 'stroke 0.15s ease, opacity 0.15s ease, stroke-width 0.15s ease',
           zIndex: edgeZIndex,
           opacity: isSkipped && !selected ? 0.5 : 1,
-          animation: shouldAnimate ? (isRunning ? 'dash-flow 0.8s linear infinite' : 'dash-flow 1.5s linear infinite') : 'none',
+          // Tempo carries the meaning: brisk for work in flight, slow for a run
+          // parked on a signal, medium for a plain selection highlight.
+          animation: shouldAnimate
+            ? (isRunning ? 'dash-flow 0.8s linear infinite'
+              : isAwaiting ? 'dash-flow 2.5s linear infinite'
+              : 'dash-flow 1.5s linear infinite')
+            : 'none',
         }}
       />
       <BaseEdge
@@ -362,13 +351,12 @@ export function BuilderEdge({
           }}
         >
           {/* Edge Status Label */}
-          {data?.status && data.status !== 'pending' && (
+          {edgeStatus && edgeStatus !== 'pending' && (
             <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
               <EdgeStatusLabel
-                status={data.status as DerivedNodeStatus}
+                status={edgeStatus}
                 statusCounts={data.statusCounts}
                 isSkipped={isSkipped}
-                strokeColor={stroke}
               />
             </div>
           )}

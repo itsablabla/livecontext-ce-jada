@@ -4,8 +4,8 @@
 //   POST /internal/render/video       -> MP4 / WEBM bytes (records the page's animation)
 //   POST /internal/media              -> ffmpeg ops for the core:media node (probe /
 //                                        mux_audio / mix / extract_audio / concat / frame /
-//                                        overlay) - browser-free, guarded by its own
-//                                        semaphore, never a pool slot
+//                                        overlay / subtitles) - browser-free, guarded by
+//                                        its own semaphore, never a pool slot
 //
 // The orchestrator (InterfaceScreenshotServiceImpl / interface node) resolves templates,
 // inlines CSS/JS and injects __RESOLVED_DATA__ BEFORE the POST. This service knows nothing

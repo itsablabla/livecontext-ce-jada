@@ -402,6 +402,11 @@ public class ApplicationCrudModule implements ToolModule {
         // Keep category - it enables the agent to refine via
         // application(action='search', category='<slug>') for similar apps.
         if (pub.get("category") != null) out.put("category", pub.get("category"));
+        // The studio axis, when the app is on that shelf. Emitted only when true, the same economy
+        // ceExclusive follows below: absent means "not a studio app", and spending a key per item on
+        // saying so would bloat every page of a 50-app listing. Carried because the agent can SET it
+        // on create, and a value it can write but never read back is one it cannot verify.
+        if (Boolean.TRUE.equals(pub.get("studio"))) out.put("studio", true);
         // Self-hosted-only apps: surfaced ONLY when the app is CE-exclusive AND
         // this deployment is the one that would refuse it, so the agent learns
         // the constraint while browsing instead of on a refused acquire.
@@ -409,9 +414,14 @@ public class ApplicationCrudModule implements ToolModule {
         // a self-hosted install browses the same (proxied) cloud listing and can
         // install these apps, so annotating them there would make its agent
         // decline an install that works.
-        if (Boolean.TRUE.equals(pub.get("ceExclusive"))
-                && appEditionProvider != null && appEditionProvider.isManagedCloud()) {
+        boolean managedCloud = appEditionProvider != null && appEditionProvider.isManagedCloud();
+        if (Boolean.TRUE.equals(pub.get("ceExclusive")) && managedCloud) {
             out.put("ce_exclusive", true);
+        }
+        // The capability list travels even when nothing blocks, because a vector app is
+        // installable here from a plan and the agent's only way to see that coming is this field.
+        // Still managed-cloud only: on a self-hosted install nothing about it is actionable.
+        if (managedCloud && pub.get("ceExclusiveFeatures") != null) {
             out.put("ce_exclusive_features", pub.get("ceExclusiveFeatures"));
         }
 
@@ -656,6 +666,14 @@ public class ApplicationCrudModule implements ToolModule {
             return ToolExecutionResult.success(result);
         } catch (com.apimarketplace.auth.client.entitlement.LimitExceededException e) {
             return ToolExecutionResult.failure(ToolErrorCode.QUOTA_EXCEEDED, e.getMessage());
+        } catch (com.apimarketplace.publication.client.PublicationPlanUpgradeException e) {
+            // The app uses a capability this workspace has not bought. NOT terminal, unlike the
+            // CE case below: the message names the plan that unlocks it, and the person, not the
+            // agent, performs the upgrade. Reporting it through the CE path would have told the
+            // agent to give up on something one upgrade away.
+            return ToolExecutionResult.failure(ToolErrorCode.PERMISSION_DENIED,
+                    e.getMessage() + " You cannot change the plan yourself: tell the user which "
+                            + "plan the app needs, or install an app that does not use embeddings.");
         } catch (com.apimarketplace.publication.client.CeExclusiveAcquisitionException e) {
             // The app only runs on a self-hosted install. Terminal for this
             // deployment: no retry can succeed, so say so plainly rather than
@@ -973,6 +991,13 @@ public class ApplicationCrudModule implements ToolModule {
             publishRequest.put("creditsPerUse", 0);
             publishRequest.put("publisherName", tenantId);
             publishRequest.put("visibility", "PRIVATE");
+            // The studio axis, forwarded ONLY when the caller expressed one. Absent has to stay
+            // absent the whole way: publication-service reads a missing key as "no opinion" and
+            // leaves the stored value alone, so sending a default false here would take an app off
+            // the studio shelf every time an agent re-published it without mentioning the axis.
+            if (parameters.get("studio") instanceof Boolean studio) {
+                publishRequest.put("studio", studio);
+            }
             if (planVersion != null) {
                 publishRequest.put("planVersion", planVersion);
             }

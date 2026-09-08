@@ -5,6 +5,7 @@ import { Edge, Node, useEdgesState, useNodesState } from 'reactflow';
 import { useRouter } from 'next/navigation';
 import { resolveBadgeCycleResult } from '@/lib/utils/runStatusUtils';
 import { useQuery } from '@tanstack/react-query';
+import { track } from '@/lib/analytics/analytics';
 
 import { INITIAL_EDGES, INITIAL_NODES } from '../data/initialGraph';
 import type { BuilderNodeData } from '../types';
@@ -45,6 +46,7 @@ import { useEpochStateViewing } from '../hooks/useEpochStateViewing';
 import { useStepByStepHandlers } from '../hooks/useStepByStepHandlers';
 import { useWorkflowEventListeners } from '../hooks/useWorkflowEventListeners';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
+import { useInspectorRestingMode } from '../hooks/useInspectorRestingMode';
 import { useWorkflowPauseResume } from '../hooks/useWorkflowPauseResume';
 import { useWorkflowLoader } from '../hooks/useWorkflowLoader';
 import { useWorkflowExecution } from '../hooks/useWorkflowExecution';
@@ -326,6 +328,15 @@ export function WorkflowBuilder({
     }
   }, [isRunMode, isAdvancedMode]);
 
+  // How much of the inspector a node click opens, as the user asked for it once rather
+  // than once per node. The rule, and why it applies to the RESTING mode rather than to
+  // the opening itself, is in the hook.
+  useInspectorRestingMode({
+    isRunMode,
+    hasSelection: selectedNodeIds.length > 0,
+    setIsAdvancedMode,
+  });
+
   // Sync previewModeNodes from node data (showPreview persisted in plan)
   // Default is preview mode ON unless explicitly set to false
   React.useEffect(() => {
@@ -407,6 +418,14 @@ export function WorkflowBuilder({
       const endpointId = (node.data as any).standaloneFormEndpointId;
       formEndpointSettingsService.updateWorkflowReference(endpointId, id, workflowName).catch(() => {});
     }
+    track('workflow_saved', {
+      workflow_id: id,
+      node_count: currentNodes.length,
+      edge_count: edgesRef.current.length,
+      webhook_node_count: webhookNodes.length,
+      chat_node_count: chatNodes.length,
+      form_node_count: formNodes.length,
+    });
   }, [resetDirtyState, workflowNameState]);
 
   // Save-in-run: updates only run.plan, no version creation, no webhook/schedule sync.
@@ -513,6 +532,13 @@ export function WorkflowBuilder({
         type: 'warning',
         title: t('executionErrors.queueTimeoutTitle'),
         message: t('executionErrors.queueTimeoutMessage'),
+        duration: 8000,
+      });
+    } else if (error.type === 'rerun_refused') {
+      addToast({
+        type: 'warning',
+        title: t('executionErrors.rerunRefusedTitle'),
+        message: t('executionErrors.rerunRefusedMessage'),
         duration: 8000,
       });
     } else {
@@ -800,6 +826,11 @@ export function WorkflowBuilder({
       costCredits: runState.costCredits ?? null,
       costByEpoch: runState.costByEpoch ?? {},
       budgetCredits: runState.budgetCredits ?? null,
+      // The cap is compared against the period spend, not this run's lifetime
+      // cost, so the panel needs both figures to say anything true about it.
+      periodSpentCredits: runState.periodSpentCredits ?? null,
+      budgetPeriodMode: runState.budgetPeriodMode ?? null,
+      budgetPeriodResetsAt: runState.budgetPeriodResetsAt ?? null,
       // Synthesized cycle result -> drives the badge's display status/color (see above).
       metadata: lastCycleResult ? { lastCycleResult } : undefined,
     };
@@ -1118,7 +1149,9 @@ export function WorkflowBuilder({
   const agentConfigs = React.useMemo((): AgentSnapshotConfig[] => {
     if (!isRunMode) return [];
     return nodes
-      .filter(node => nodeRegistry.isAgentNode(node))
+      // isAgentNode covers the whole AI family; generate runs no LLM and has no
+      // config snapshot, so it would render an empty card in the Agent tab.
+      .filter(node => nodeRegistry.isAgentNode(node) && !nodeRegistry.isGenerateNode(node))
       .map(node => {
         const data = node.data as BuilderNodeData;
         const nodeKey = agentKey(data.label || '') || 'agent:';
@@ -1493,6 +1526,11 @@ export function WorkflowBuilder({
 
   const handleDeselectAll = React.useCallback(() => {
     setSelectedNodeIds([]);
+    // Left as a plain false, like the three other paths that clear the selection: the
+    // resting-mode hook re-states the preference on the very next render, so teaching it
+    // to each of them would be four copies of one rule. (This particular callback is also
+    // currently unreachable - BuilderCanvas declares `onDeselectAll` and never calls it -
+    // which is exactly why it is the wrong place to express anything.)
     setIsAdvancedMode(false);
     setIsFullscreenMode(false);
   }, []);

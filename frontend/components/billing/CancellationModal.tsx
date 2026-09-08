@@ -148,7 +148,7 @@ export default function CancellationModal({
 
                             <Button
                                 onClick={handleClose}
-                                variant="contrast"
+                                variant="default"
                                 className="w-full"
                             >
                                 {t('done')}

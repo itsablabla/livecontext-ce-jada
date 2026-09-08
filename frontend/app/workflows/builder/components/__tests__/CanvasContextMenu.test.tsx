@@ -6,7 +6,7 @@
  * edit mode. These tests pin that mode-aware item set.
  */
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import type { Node } from 'reactflow';
 import type { BuilderNodeData } from '../../types';
@@ -374,5 +374,50 @@ describe('default CanvasContextMenu wrapper (lazy dispatcher)', () => {
     );
     expect(screen.getByText('addNode')).toBeTruthy();
     expect(screen.getByTestId('canvas-context-menu').hasAttribute('variant')).toBe(false);
+  });
+});
+
+describe('the modifier key in the menu shortcuts', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('names the key through the messages rather than hardcoding Ctrl', () => {
+    // `Ctrl` is a word printed on the key: a German keyboard prints `Strg`.
+    // Under the key-echo translator mock a hardcoded literal would read "CtrlV".
+    render(
+      <PaneContextMenu x={0} y={0} editable canPaste hasNodes actions={paneActions()} onClose={() => {}} />,
+    );
+
+    expect(screen.getByText('ctrlKeyNameV')).toBeTruthy();
+  });
+
+  it('names it the same way in the node menu, which carries its own copy of the line', () => {
+    render(
+      <NodeContextMenu
+        node={testNode}
+        x={0}
+        y={0}
+        isRunMode={false}
+        isPreviewOnly={false}
+        hasDownstream
+        hasConnections
+        actions={nodeActions()}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByText('ctrlKeyNameD')).toBeTruthy();
+  });
+
+  it('uses the command glyph on a Mac', () => {
+    // Only that the platform is followed. That it is READ safely (after
+    // hydration, not during render) is what `lib/utils/__tests__/platform.test.ts`
+    // pins with a real server render - this assertion cannot tell the two apart.
+    vi.stubGlobal('navigator', { platform: 'MacIntel' });
+
+    render(
+      <PaneContextMenu x={0} y={0} editable canPaste hasNodes actions={paneActions()} onClose={() => {}} />,
+    );
+
+    expect(screen.getByText('⌘V')).toBeTruthy();
   });
 });

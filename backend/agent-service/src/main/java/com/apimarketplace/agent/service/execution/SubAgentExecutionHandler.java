@@ -90,6 +90,16 @@ public class SubAgentExecutionHandler {
     private SubAgentBridgeClient bridgeClient;
 
     /**
+     * Long-term memory block for the delegated agent. This handler assembles its
+     * own system prompt instead of going through
+     * {@code AgentRemoteExecutionService}, so it is the second - and only other -
+     * place the block has to be appended. Optional for the same reason as the
+     * gates below: unit tests construct this handler without wiring it.
+     */
+    @Autowired(required = false)
+    private com.apimarketplace.agent.memory.MemoryPromptSection memoryPromptSection;
+
+    /**
      * CE→cloud web-search relay gate. Per-tenant runtime filter: with the local
      * websearch engine disabled, sub-agents only see web_search when the tenant
      * is cloud-linked with the CLOUD source. Optional so unit tests that don't
@@ -105,6 +115,24 @@ public class SubAgentExecutionHandler {
      */
     @Autowired(required = false)
     private com.apimarketplace.agent.service.ModelCatalogService modelCatalog;
+
+    /**
+     * Model execution links: a delegated sub-agent's billed pair may have to run on
+     * another target, exactly like a top-level agent run. The router itself is an
+     * unconditional bean (it answers "no route" in CE, where the link store is off), so
+     * this is null only in a unit test that constructs the handler directly - which then
+     * runs the billed pair verbatim.
+     */
+    @Autowired(required = false)
+    private ExecutionLinkRouter executionLinkRouter;
+
+    /**
+     * Activity source reported for link resolution. It matches no surface scope, so a
+     * sub-agent can only ever be routed by an {@code ALL} link - the same wildcard-only
+     * treatment the browser agent and single completions get. It is the string the fleet
+     * activity feed already uses for these runs.
+     */
+    static final String ACTIVITY_SOURCE = "SUB_AGENT";
 
     /** Redis key prefix for per-turn rate limiting (distributed across instances). */
     private static final String RATE_LIMIT_PREFIX = "agent:rate-limit:turn:";
@@ -455,8 +483,29 @@ public class SubAgentExecutionHandler {
             }
 
             // 12. Build AgentLoopContext
+            // BILLED identity: what the ledger, the budget guards, the fleet feed and the
+            // bridge relabel all keep using, whatever a link redirects underneath.
             String model = entity.getModelName();
             String provider = entity.getModelProvider();
+
+            // Model execution link: without it a delegated sub-agent runs on the billed
+            // provider's own API key even when an admin routed that pair elsewhere, which
+            // is the one place a linked model could still hit the key it was linked away
+            // from. Only the loop below moves to the execution pair.
+            var executionRoute = executionLinkRouter != null
+                ? executionLinkRouter.runnableRoute(provider, model, ACTIVITY_SOURCE)
+                : null;
+            String execProvider = executionRoute != null ? executionRoute.executionProvider() : provider;
+            String execModel = executionRoute != null ? executionRoute.executionModel() : model;
+            if (executionRoute != null) {
+                log.info("[SUB_AGENT] Execution link: billed={}/{} -> exec={}/{}",
+                    provider, model, execProvider, execModel);
+                if (ExecutionLinkRouter.targetsBridge(executionRoute)) {
+                    // Restricted "API mode" on a linked CLI bridge run: platform MCP tools
+                    // only, empty cwd, no CLI leak - same contract as a linked agent run.
+                    subCredentials.put(ExecutionLinkRouter.RESTRICTED_TOOLSET_KEY, Boolean.TRUE);
+                }
+            }
 
             // Build the guard chain. Tenant guard runs first; the agent guard uses the
             // BudgetResolver to honour weekly/monthly resets and read the real per-agent
@@ -502,6 +551,23 @@ public class SubAgentExecutionHandler {
                 fullSystemPrompt = fullSystemPrompt + "\n\n" + taskSummary;
             }
 
+            // Long-term memory, appended last so the stable prefix above stays
+            // cacheable. A delegated sub-agent DOES get the workspace's memory:
+            // it is doing this workspace's work and needs to know the same facts.
+            // What it does not get is another agent's private entries - passing
+            // its OWN agentId scopes the query to workspace rows plus its own.
+            if (memoryPromptSection != null) {
+                try {
+                    fullSystemPrompt = memoryPromptSection.appendTo(fullSystemPrompt, organizationId, agentId);
+                } catch (RuntimeException memoryUnavailable) {
+                    // Degraded, never failed: a delegation that dies because the memory
+                    // lookup misbehaved loses the whole sub-agent's work, and the parent
+                    // gets an error it cannot act on. Same policy as the other two sites.
+                    log.warn("[MEMORY] Prompt enrichment failed for sub-agent {}; running without it: {}",
+                        agentId, memoryUnavailable.toString());
+                }
+            }
+
             // Inject __taskId__ if this agent has a current in-progress task and
             // the credential doesn't already carry one from the parent.
             if (subCredentials.get("__taskId__") == null && agentTaskService != null) {
@@ -514,8 +580,9 @@ public class SubAgentExecutionHandler {
             }
 
             AgentLoopContext context = AgentLoopContext.builder()
-                .provider(provider)
-                .model(model)
+                // EXECUTION identity (= the billed pair unless a link redirected it).
+                .provider(execProvider)
+                .model(execModel)
                 .systemPrompt(fullSystemPrompt)
                 .userPrompt(fullPrompt)
                 .conversationHistory(conversationHistory)
@@ -529,7 +596,7 @@ public class SubAgentExecutionHandler {
                 // MaxTokensClamp's safe 8192 floor.
                 .maxTokens(com.apimarketplace.agent.config.MaxTokensClamp.clamp(
                         entity.getMaxTokens() != null ? entity.getMaxTokens() : agentDefaults.getMaxTokens(),
-                        modelCatalog != null ? modelCatalog.resolveMaxOutputTokens(provider, model) : null))
+                        modelCatalog != null ? modelCatalog.resolveMaxOutputTokens(execProvider, execModel) : null))
                 .temperature(entity.getTemperature() != null ? entity.getTemperature().doubleValue() : 0.7)
                 .tenantId(tenantId)
                 .agentId(entity.getId() != null ? entity.getId().toString() : null)
@@ -546,8 +613,10 @@ public class SubAgentExecutionHandler {
                 // Reasoning effort (bridge/CLI providers): agent setting, then the
                 // per-model admin default. No per-conversation override on the
                 // sub-agent path. Null modelCatalog (e.g. unit tests) ⇒ agent value only.
+                // Effort is an EXECUTION concern (the CLI/provider that actually runs the
+                // turn), so it follows the execution pair when a link redirects the run.
                 .reasoningEffort(modelCatalog != null
-                    ? modelCatalog.resolveEffortWithDefault(entity.getReasoningEffort(), provider, model)
+                    ? modelCatalog.resolveEffortWithDefault(entity.getReasoningEffort(), execProvider, execModel)
                     : entity.getReasoningEffort())
                 .purpose(CallPurpose.MAIN)
                 .build();
@@ -566,7 +635,7 @@ public class SubAgentExecutionHandler {
             String taskId = taskIdFromCredentials(subCredentials);
             StreamingCallback callback = wrapWithFleetActivity(baseCallback, agentEntityIdStr, executionId, taskId);
 
-            boolean useBridge = bridgeClient != null && SubAgentBridgeClient.isBridgeProvider(provider);
+            boolean useBridge = bridgeClient != null && SubAgentBridgeClient.isBridgeProvider(execProvider);
 
             // Publish fleet activity: execution started
             agentActivityPublisher.publishExecutionStarted(

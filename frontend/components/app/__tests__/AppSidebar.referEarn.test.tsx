@@ -82,7 +82,6 @@ function renderCloudUserSection(onNavigate: () => void) {
       user={{ name: 'Cloud User', email: 'cloud@example.com' }}
       avatarUrl={null}
       numericUserId={1}
-      hasActiveSubscription={true}
       planCode="PRO"
       isSubscriptionLoading={false}
       themePreference="auto"

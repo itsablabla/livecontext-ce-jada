@@ -721,4 +721,81 @@ class StorageReconciliationServiceTest {
             verify(quotaService).updateUsage(specialTenantId);
         }
     }
+    // ========================================================================
+    // CONFIGURATION: long-term memory rides on the agent-service usage call
+    // ========================================================================
+
+    @Nested
+    @DisplayName("CONFIGURATION - long-term memory bytes")
+    class ConfigurationMemoryTests {
+
+        /** Stubs everything except the agent-service response, which each test shapes itself. */
+        private void stubEverythingExceptAgentUsage(long bytes, int count) {
+            Query mockQuery = mock(Query.class);
+            when(mockQuery.setParameter(eq("tid"), eq(TENANT_ID))).thenReturn(mockQuery);
+            when(mockQuery.getSingleResult()).thenReturn(
+                    new Object[]{BigInteger.valueOf(bytes), BigInteger.valueOf(count)});
+            when(entityManager.createNativeQuery(anyString())).thenReturn(mockQuery);
+            when(interfaceClient.getInterfaceStorageUsage(TENANT_ID)).thenReturn(
+                    Map.of("usedBytes", bytes, "itemCount", count));
+            when(conversationStorageClient.getStorageUsage(TENANT_ID)).thenReturn(
+                    new StorageUsageDto(bytes, count));
+            when(dataSourceClient.getDataSourceStorageUsage(TENANT_ID)).thenReturn(
+                    Map.of("usedBytes", bytes, "itemCount", count));
+            when(publicationClient.getPublicationStorageUsage(TENANT_ID)).thenReturn(
+                    Map.of("usedBytes", bytes, "itemCount", count));
+        }
+
+        @Test
+        @DisplayName("counts memory text toward the CONFIGURATION total, on top of workflows and skills")
+        void memoryBytesAreAddedToConfiguration() {
+            stubEverythingExceptAgentUsage(1000L, 3);
+            when(agentClient.getAgentStorageUsage(TENANT_ID)).thenReturn(Map.of(
+                    "AGENTS", Map.of("usedBytes", 1000L, "itemCount", 3),
+                    "SKILLS", Map.of("usedBytes", 20L, "itemCount", 1),
+                    "MEMORIES", Map.of("usedBytes", 7L, "itemCount", 2)
+            ));
+
+            service.reconcileTenant(TENANT_ID);
+
+            // 1000 workflow bytes + 20 skills + 7 memories. The three distinct values
+            // matter: with equal ones, a total that dropped memory or double-counted
+            // skills would still land on a plausible number.
+            verify(breakdownService).setUsage(TENANT_ID, "CONFIGURATION", 1027L, 3);
+        }
+
+        @Test
+        @DisplayName("treats an agent-service response with no memory key as zero rather than failing the category")
+        void missingMemoryKeyCountsAsZero() {
+            // An agent-service that predates the memory feature answers without the key.
+            // The category must still be reported, or a rolling upgrade would silently
+            // zero out every account's CONFIGURATION usage for as long as it lasts.
+            stubEverythingExceptAgentUsage(1000L, 3);
+            when(agentClient.getAgentStorageUsage(TENANT_ID)).thenReturn(Map.of(
+                    "AGENTS", Map.of("usedBytes", 1000L, "itemCount", 3),
+                    "SKILLS", Map.of("usedBytes", 20L, "itemCount", 1)
+            ));
+
+            service.reconcileTenant(TENANT_ID);
+
+            verify(breakdownService).setUsage(TENANT_ID, "CONFIGURATION", 1020L, 3);
+        }
+
+        @Test
+        @DisplayName("ignores a malformed memory entry instead of propagating a class cast into the whole reconciliation")
+        void malformedMemoryEntryCountsAsZero() {
+            // The value arrives as untyped JSON from another service. A string where a
+            // map is expected must cost the memory line, not the CONFIGURATION category.
+            stubEverythingExceptAgentUsage(1000L, 3);
+            when(agentClient.getAgentStorageUsage(TENANT_ID)).thenReturn(Map.of(
+                    "AGENTS", Map.of("usedBytes", 1000L, "itemCount", 3),
+                    "SKILLS", Map.of("usedBytes", 20L, "itemCount", 1),
+                    "MEMORIES", "not-a-map"
+            ));
+
+            service.reconcileTenant(TENANT_ID);
+
+            verify(breakdownService).setUsage(TENANT_ID, "CONFIGURATION", 1020L, 3);
+        }
+    }
 }

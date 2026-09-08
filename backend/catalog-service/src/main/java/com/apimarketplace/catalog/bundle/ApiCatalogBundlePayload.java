@@ -1,12 +1,15 @@
 package com.apimarketplace.catalog.bundle;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonEncoding;
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FilterOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -104,7 +107,7 @@ public final class ApiCatalogBundlePayload {
             String authHeaderName, String authHeaderValue, String visibility, Boolean isPublic,
             Boolean isActive, Boolean isLocal, String pricingModel, String status, String version,
             String iconSlug, String platformCredentialName, String iconUrl, String apiVersion,
-            String documentation, String rateLimits, List<ToolRow> tools) {}
+            String documentation, String rateLimits, String errorPolicy, List<ToolRow> tools) {}
 
     /** {@code catalog.credentials} template row. Unique key is (credentialName, variant). */
     public record CredentialTemplateRow(
@@ -172,53 +175,165 @@ public final class ApiCatalogBundlePayload {
                                         List<ApiRow> apis,
                                         List<CredentialTemplateRow> credentialTemplates,
                                         List<GenerationPriceRow> generationPrices) {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream(1 << 16);
+        writeCanonical(bos, version, schemaVersion, issuer, snapshotTakenAt, apis,
+                credentialTemplates, generationPrices);
+        return bos.toByteArray();
+    }
+
+    /**
+     * Streams the same canonical bytes into {@code out}, returning how many were
+     * written. <b>This is the form the production build MUST use</b>; the
+     * {@code byte[]} overloads above are for tests and for callers that already
+     * know the payload is small.
+     *
+     * <p><b>Why streaming is not a micro-optimisation here.</b> The whole-catalog
+     * payload is hundreds of megabytes of JSON, and building it as a {@code Map}
+     * tree and then asking for a {@code byte[]} needs all of it resident at
+     * once, several times over: the row tree, Jackson's output segments, the
+     * final array copy, and then a further copy to compress it. On the cloud's
+     * catalog pod (896 MB heap) that ended in {@code OutOfMemoryError} as soon
+     * as the catalog grew past ~19k endpoints: every "Build bundle" answered
+     * HTTP 500, so the fleet stopped receiving API updates altogether and the
+     * only symptom a reader got was a generic error.
+     *
+     * <p><b>What this does and does not fix.</b> It removes those extra copies:
+     * only one row's tree exists at a time, and the bytes reach the caller's
+     * stream as they are produced. It does NOT make the build independent of
+     * catalog size - {@code ApiCatalogSnapshotReader} materialises every row,
+     * with the raw JSONB strings that are the bulk of the payload, before this
+     * method is called. So the peak goes from roughly four copies of the
+     * content to one (the snapshot) plus the compressed output. If this OOMs
+     * again after another jump in catalog size, the snapshot is where to look,
+     * not here.
+     *
+     * <p><b>The bytes are identical to the tree form, by construction:</b> each
+     * row is still built as a sorted {@code TreeMap} and serialised by the same
+     * {@code CANONICAL_MAPPER}; only the root object is emitted by hand, in the
+     * alphabetical key order a root {@code TreeMap} produced. The golden-hash
+     * test pins that against a digest recorded from the pre-streaming
+     * implementation - the signer, and every bundle already published, depend on
+     * it.
+     *
+     * <p>The caller keeps ownership of {@code out}: it is flushed, never closed,
+     * so wrapping it in a {@link GZIPOutputStream} still leaves the caller to
+     * write the gzip trailer.
+     */
+    public static long writeCanonical(OutputStream out, long version, int schemaVersion, String issuer,
+                                      Instant snapshotTakenAt,
+                                      List<ApiRow> apis,
+                                      List<CredentialTemplateRow> credentialTemplates,
+                                      List<GenerationPriceRow> generationPrices) {
+        if (out == null) {
+            throw new IllegalArgumentException("writeCanonical requires a non-null output stream");
+        }
         if (issuer == null || snapshotTakenAt == null || apis == null) {
             throw new IllegalArgumentException(
-                    "canonicalBytes requires non-null issuer, snapshotTakenAt, apis");
+                    "writeCanonical requires non-null issuer, snapshotTakenAt, apis");
         }
-        if (credentialTemplates == null) credentialTemplates = List.of();
-
-        Map<String, Object> root = new TreeMap<>();
-        root.put("version", version);
-        root.put("schemaVersion", schemaVersion);
-        root.put("issuer", issuer);
-        root.put("snapshotAt", snapshotTakenAt.toString());
+        List<CredentialTemplateRow> templates =
+                credentialTemplates == null ? List.of() : credentialTemplates;
 
         List<ApiRow> sortedApis = new ArrayList<>(apis);
         sortedApis.sort(Comparator.comparing(a -> String.valueOf(a.id())));
-        List<Map<String, Object>> apiJson = new ArrayList<>(sortedApis.size());
-        for (ApiRow api : sortedApis) {
-            apiJson.add(apiMap(api));
-        }
-        root.put("apis", apiJson);
 
-        List<CredentialTemplateRow> sortedTemplates = new ArrayList<>(credentialTemplates);
+        List<CredentialTemplateRow> sortedTemplates = new ArrayList<>(templates);
         sortedTemplates.sort(Comparator
                 .comparing(CredentialTemplateRow::credentialName, Comparator.nullsLast(String::compareTo))
                 .thenComparing(CredentialTemplateRow::variant, Comparator.nullsLast(String::compareTo)));
-        List<Map<String, Object>> templateJson = new ArrayList<>(sortedTemplates.size());
-        for (CredentialTemplateRow t : sortedTemplates) {
-            templateJson.add(templateMap(t));
-        }
-        root.put("credentialTemplates", templateJson);
 
-        if (generationPrices != null && !generationPrices.isEmpty()) {
-            List<GenerationPriceRow> sortedPrices = new ArrayList<>(generationPrices);
-            sortedPrices.sort(Comparator
-                    .comparing(GenerationPriceRow::integrationName, Comparator.nullsLast(String::compareTo))
-                    .thenComparing(GenerationPriceRow::apiToolId, Comparator.nullsLast(String::compareTo))
-                    .thenComparing(p -> p.modelId() == null ? "" : p.modelId()));
-            List<Map<String, Object>> priceJson = new ArrayList<>(sortedPrices.size());
-            for (GenerationPriceRow p : sortedPrices) {
-                priceJson.add(generationPriceMap(p));
+        List<GenerationPriceRow> sortedPrices = new ArrayList<>(
+                generationPrices == null ? List.<GenerationPriceRow>of() : generationPrices);
+        sortedPrices.sort(Comparator
+                .comparing(GenerationPriceRow::integrationName, Comparator.nullsLast(String::compareTo))
+                .thenComparing(GenerationPriceRow::apiToolId, Comparator.nullsLast(String::compareTo))
+                .thenComparing(p -> p.modelId() == null ? "" : p.modelId()));
+
+        CountingOutputStream counter = new CountingOutputStream(out);
+        try (JsonGenerator gen = CANONICAL_MAPPER.getFactory()
+                .createGenerator(counter, JsonEncoding.UTF8)
+                // The caller owns the stream: a GZIP wrapper has to stay open
+                // long enough for the caller to write its trailer.
+                .disable(JsonGenerator.Feature.AUTO_CLOSE_TARGET)) {
+
+            // Root keys in the alphabetical order the root TreeMap produced.
+            gen.writeStartObject();
+
+            gen.writeFieldName("apis");
+            gen.writeStartArray();
+            for (ApiRow api : sortedApis) {
+                CANONICAL_MAPPER.writeValue(gen, apiMap(api));
             }
-            root.put("generationPrices", priceJson);
+            gen.writeEndArray();
+
+            gen.writeFieldName("credentialTemplates");
+            gen.writeStartArray();
+            for (CredentialTemplateRow t : sortedTemplates) {
+                CANONICAL_MAPPER.writeValue(gen, templateMap(t));
+            }
+            gen.writeEndArray();
+
+            // Omitted entirely when empty - that is what keeps a price-less
+            // catalog byte-identical to the pre-V430 payload.
+            if (!sortedPrices.isEmpty()) {
+                gen.writeFieldName("generationPrices");
+                gen.writeStartArray();
+                for (GenerationPriceRow p : sortedPrices) {
+                    CANONICAL_MAPPER.writeValue(gen, generationPriceMap(p));
+                }
+                gen.writeEndArray();
+            }
+
+            gen.writeStringField("issuer", issuer);
+            gen.writeNumberField("schemaVersion", schemaVersion);
+            gen.writeStringField("snapshotAt", snapshotTakenAt.toString());
+            gen.writeNumberField("version", version);
+
+            gen.writeEndObject();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to serialise canonical API catalog payload", e);
+        }
+        return counter.written();
+    }
+
+    /**
+     * Counts the bytes that reach the delegate, so a caller can record the raw
+     * payload size without ever holding the payload.
+     *
+     * <p>Pass-through only: what keeps the caller's stream open is the generator
+     * having {@code AUTO_CLOSE_TARGET} disabled, which is the single mechanism so
+     * that removing it fails a test rather than being masked by a second guard
+     * here.
+     *
+     * <p>Both {@code write} overloads count, though Jackson's UTF-8 generator
+     * only ever calls the array form. The single-byte one is kept because
+     * {@link java.io.FilterOutputStream}'s inherited version would forward the
+     * byte and NOT count it, so dropping the override would make the reported
+     * size wrong for any future caller that writes through this stream directly
+     * - and the size it reports is what a build persists as {@code
+     * raw_bytes_size}. It is covered by its own test for the same reason.
+     */
+    private static final class CountingOutputStream extends FilterOutputStream {
+        private long written;
+
+        CountingOutputStream(OutputStream delegate) {
+            super(delegate);
         }
 
-        try {
-            return CANONICAL_MAPPER.writeValueAsBytes(root);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Failed to serialise canonical API catalog payload", e);
+        @Override
+        public void write(int b) throws IOException {
+            out.write(b);
+            written++;
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            out.write(b, off, len);
+            written += len;
+        }
+
+        long written() {
+            return written;
         }
     }
 
@@ -259,6 +374,7 @@ public final class ApiCatalogBundlePayload {
         putIfNotNull(row, "apiVersion", api.apiVersion());
         putIfNotNull(row, "documentation", api.documentation());
         putIfNotNull(row, "rateLimits", api.rateLimits());
+        putIfNotNull(row, "errorPolicy", api.errorPolicy());
 
         List<ToolRow> tools = api.tools() == null ? List.of() : api.tools();
         List<ToolRow> sorted = new ArrayList<>(tools);

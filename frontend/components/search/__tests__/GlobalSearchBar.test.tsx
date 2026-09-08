@@ -45,7 +45,11 @@ vi.mock('@/lib/providers/smart-providers', () => ({
 vi.mock('@/lib/edition', () => ({ IS_CE: false }));
 
 const searchConversations = vi.fn();
-vi.mock('@/lib/api/conversationApi', () => ({
+// Only the client is stood in for. `conversationKind` is a pure reader the component uses to route
+// a studio thread to its own surface: replacing the whole module with a literal left it undefined,
+// and the component threw while rendering results.
+vi.mock('@/lib/api/conversationApi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api/conversationApi')>()),
   conversationApi: { searchConversations: (...args: unknown[]) => searchConversations(...args) },
 }));
 
@@ -310,5 +314,26 @@ describe('GlobalSearchBar settings sections', () => {
     render(<GlobalSearchBar />);
     await typeAndSettle('node types');
     expect(screen.getByText('Node Types')).toBeTruthy();
+  });
+});
+
+describe('GlobalSearchBar shortcut hint', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reads its keycap from the messages rather than hardcoding Ctrl', () => {
+    // `Ctrl` is a word printed on the key, and a German keyboard prints `Strg`.
+    // Under the key-echo translator mock, a hardcoded literal would show
+    // "Ctrl K" instead of the message key.
+    render(<GlobalSearchBar />);
+
+    expect(screen.getByText('shortcutKeys')).toBeTruthy();
+  });
+
+  it('switches to the Mac keycap on a Mac', () => {
+    vi.stubGlobal('navigator', { platform: 'MacIntel' });
+
+    render(<GlobalSearchBar />);
+
+    expect(screen.getByText('shortcutKeysMac')).toBeTruthy();
   });
 });

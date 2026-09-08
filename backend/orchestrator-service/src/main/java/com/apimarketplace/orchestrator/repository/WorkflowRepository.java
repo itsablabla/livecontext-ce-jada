@@ -128,11 +128,19 @@ public interface WorkflowRepository extends JpaRepository<WorkflowEntity, UUID> 
      * <p>Returns the scope columns ({@code tenantId, organizationId}) alongside the version so the
      * caller can apply {@code ScopeGuard.isInStrictScope} - the SAME strict-workspace predicate the
      * per-card {@code /versions} endpoint this replaces used ({@code WorkflowVersionController#verifyOwnership}).
-     * Each row is {@code [UUID id, Integer pinnedVersion, String tenantId, String organizationId]}.
+     * Each row is {@code [UUID id, Integer pinnedVersion, String tenantId, String organizationId,
+     * BigDecimal budgetCredits, String budgetPeriodMode, BigDecimal budgetPeriodSpent,
+     * Instant budgetPeriodStartedAt]}.
      * Filtering in Java (not SQL) reuses the one canonical scope helper instead of duplicating its
      * two-branch predicate, and keeps the projection trivially testable.
+     *
+     * <p>The budget columns ride along so an application card can show what it is
+     * costing without a second request: this batch already resolves one row per
+     * card, and the alternative was an N+1 the page exists to avoid.
      */
-    @Query("SELECT w.id, w.pinnedVersion, w.tenantId, w.organizationId FROM WorkflowEntity w WHERE w.id IN :ids")
+    @Query("SELECT w.id, w.pinnedVersion, w.tenantId, w.organizationId, "
+            + "w.budgetCredits, w.budgetPeriodMode, w.budgetPeriodSpent, w.budgetPeriodStartedAt "
+            + "FROM WorkflowEntity w WHERE w.id IN :ids")
     List<Object[]> findPinnedVersionScopeRows(@Param("ids") Collection<UUID> ids);
 
     /**
@@ -529,5 +537,171 @@ public interface WorkflowRepository extends JpaRepository<WorkflowEntity, UUID> 
             + "WHERE w.folderId IN :folderIds AND w.tenantId = :ownerId AND w.organizationId IS NULL")
     int clearFolderForOwner(@Param("folderIds") Collection<UUID> folderIds,
                             @Param("ownerId") String ownerId);
+
+    /**
+     * Accumulate what a governed fire spent onto the workflow's period budget,
+     * rolling the period over in the same statement when it has expired. For
+     * the modes that DO reset (monthly, weekly).
+     *
+     * <p>{@code periodStart} is the start of the period the caller computed for
+     * "now" ({@code WorkflowBudgetPeriod.periodStart}). Passing it in rather
+     * than computing it in SQL keeps ONE rollover rule, in Java, unit-testable
+     * without a database, and shared by the guard and the epoch gate that read
+     * the same columns.
+     *
+     * <p>Reset and add happen in a single UPDATE on purpose: doing them as a
+     * read-then-write in application code would let two agent notifications
+     * crossing a period boundary either double-reset (losing the first cost of
+     * the new period) or skip the reset entirely.
+     *
+     * <p>The second CASE only ever moves the marker FORWARD. Two pods whose
+     * clocks straddle a period boundary would otherwise take turns resetting
+     * each other's period, and the counter would sit near zero for as long as
+     * the skew lasts - a cap that never fires. Refusing to move it backwards
+     * costs at most a slight over-count in the new period, which errs towards
+     * enforcing the cap rather than towards spending.
+     *
+     * <p>No {@code cast(... as timestamptz)} on the bind, and that is the direct
+     * pay-off of the split below: a cast was only ever needed to tell Postgres
+     * the type of a NULL, and there is no null here any more. Removing it also
+     * makes the statement executable on H2, so the branch logic below can be
+     * covered by a real SQL test instead of a mock that agrees with whatever the
+     * author assumed (see {@code WorkflowBudgetPeriodRepositoryIntegrationTest}).
+     *
+     * <p><b>Separate from the cumulative statement on purpose, and NOT one
+     * statement with a nullable parameter.</b> Binding a null timestamp is a
+     * known production trap here: Postgres cannot infer a null parameter's type
+     * in a prepared statement, H2 accepts the same SQL happily, and this repo
+     * has already shipped exactly that bug once (see {@code BudgetResolver}) -
+     * green unit tests, then a failure on the first real reset in production.
+     * The failure would have been invisible too, swallowed by the accumulator's
+     * caller, leaving cumulative caps silently inert. Two statements, each with
+     * only non-null binds, remove the hazard instead of testing for it.
+     *
+     * <p>Does NOT touch {@code updated_at}: a cost increment is bookkeeping, not
+     * a user edit, and bumping it would reshuffle every list sorted by "last
+     * modified" on every agent call.
+     *
+     * @return rows updated (0 = workflow deleted meanwhile)
+     */
+    @Modifying
+    @Transactional
+    @Query(value = """
+        UPDATE workflows
+        SET budget_period_spent = CASE
+                WHEN budget_period_started_at IS NULL
+                     OR budget_period_started_at < :periodStart
+                    THEN cast(:credits as numeric)
+                ELSE budget_period_spent + cast(:credits as numeric)
+            END,
+            budget_period_started_at = CASE
+                WHEN budget_period_started_at IS NOT NULL
+                     AND budget_period_started_at > :periodStart
+                    THEN budget_period_started_at
+                ELSE :periodStart
+            END
+        WHERE id = cast(:workflowId as uuid)
+        """, nativeQuery = true)
+    int incrementBudgetPeriodSpendWithReset(@Param("workflowId") UUID workflowId,
+                                            @Param("credits") java.math.BigDecimal credits,
+                                            @Param("periodStart") Instant periodStart);
+
+    /**
+     * Accumulate onto a CUMULATIVE budget, which never resets: a plain add, and
+     * the period marker is left exactly as it is.
+     *
+     * <p>See {@link #incrementBudgetPeriodSpendWithReset} for why this is its
+     * own statement rather than the same one with a null period start.
+     *
+     * @return rows updated (0 = workflow deleted meanwhile)
+     */
+    @Modifying
+    @Transactional
+    @Query(value = """
+        UPDATE workflows
+        SET budget_period_spent = budget_period_spent + cast(:credits as numeric)
+        WHERE id = cast(:workflowId as uuid)
+        """, nativeQuery = true)
+    int incrementBudgetPeriodSpendCumulative(@Param("workflowId") UUID workflowId,
+                                             @Param("credits") java.math.BigDecimal credits);
+
+    /**
+     * Read back the period spend committed by
+     * {@link #incrementBudgetPeriodSpendWithReset} (or its cumulative
+     * sibling), from inside the same transaction.
+     *
+     * <p>Needed because the value cannot be derived in application code. Two
+     * settles racing (routine inside a split, where several agent items settle
+     * in parallel) both read the same stored figure BEFORE the update, so both
+     * compute the same "fresh" total and each of them under-reports. The row is
+     * serialised by the UPDATE's lock, so re-reading it afterwards returns the
+     * true post-increment value, including any increment that committed while
+     * this one waited. That matters twice: it is the figure the run bar shows,
+     * and it is what decides whether this settle is the one that crossed the
+     * cap. Derived arithmetic makes two racing settles BOTH conclude they are
+     * still under, and the crossing notification is then lost for good.
+     */
+    @Query(value = "SELECT budget_period_spent FROM workflows "
+            + "WHERE id = cast(:workflowId as uuid)", nativeQuery = true)
+    Optional<java.math.BigDecimal> findBudgetPeriodSpentById(@Param("workflowId") UUID workflowId);
+
+    /**
+     * Start the spending cap's period over: zero the counter and stamp it with
+     * {@code periodStart}.
+     *
+     * <p>Called when the user CHANGES the terms of the cap, and only then: when
+     * a cap appears on a workflow that had none, and when the reset cadence
+     * changes. Both of those would otherwise be traps rather than settings.
+     * Setting a first cap would judge it against spend accumulated while no cap
+     * existed, so a workflow that had quietly spent 50 credits this month would
+     * be refused the instant its owner prudently capped it at 10, with no way to
+     * clear the counter and no fire possible until the period rolled over.
+     * Changing the cadence would re-file an existing figure under a period it
+     * does not belong to: the same stored number means "this month" under
+     * monthly and "for all time" under cumulative, so a monthly-to-cumulative
+     * switch would silently promote one month's spend to the lifetime total, and
+     * the reverse would leave a lifetime total to be spent again every month.
+     *
+     * <p>Deliberately NOT called on an ordinary save. A rename must never reset
+     * anyone's spending counter.
+     *
+     * <p>A separate statement because the period columns are mapped
+     * {@code insertable=false, updatable=false} on the entity - that fence is
+     * what stops a stale in-memory copy from clobbering live spend on every
+     * unrelated save, so the few writes that ARE legitimate go through explicit
+     * SQL like this one.
+     *
+     * @return rows updated (0 = workflow deleted meanwhile)
+     */
+    @Modifying
+    @Transactional
+    @Query(value = """
+        UPDATE workflows
+        SET budget_period_spent = 0,
+            budget_period_started_at = :periodStart
+        WHERE id = cast(:workflowId as uuid)
+        """, nativeQuery = true)
+    int resetBudgetPeriodAt(@Param("workflowId") UUID workflowId,
+                            @Param("periodStart") Instant periodStart);
+
+    /**
+     * Start a CUMULATIVE cap over: zero the counter and clear the period marker,
+     * which a lifetime cap has no use for.
+     *
+     * <p>Its own statement, with a literal NULL rather than a null bind, for the
+     * same reason the increment is split in two: Postgres cannot infer the type
+     * of a null parameter, and this repo has already shipped that bug once.
+     *
+     * @return rows updated (0 = workflow deleted meanwhile)
+     */
+    @Modifying
+    @Transactional
+    @Query(value = """
+        UPDATE workflows
+        SET budget_period_spent = 0,
+            budget_period_started_at = NULL
+        WHERE id = cast(:workflowId as uuid)
+        """, nativeQuery = true)
+    int resetBudgetPeriodCumulative(@Param("workflowId") UUID workflowId);
 
 }

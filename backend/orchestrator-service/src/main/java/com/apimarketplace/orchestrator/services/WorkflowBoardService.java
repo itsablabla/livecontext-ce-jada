@@ -532,7 +532,27 @@ public class WorkflowBoardService {
                 visibility,
                 remote,
                 run != null ? run.getCostCredits() : null,
-                w.getBudgetCredits()
+                w.getBudgetCredits(),
+                // Roll the stored period spend forward here rather than shipping
+                // the raw column: a workflow that hit its cap last month is NOT
+                // over budget today, and a card that says otherwise is the exact
+                // silent-death-sentence the period was introduced to remove.
+                //
+                // Sent unconditionally, cap or no cap, so this field means the
+                // same thing in all three card DTOs (WorkflowSummary and
+                // ApplicationRunVersionSummary always send it too). Returning
+                // null here "when uncapped" made one field carry two meanings
+                // and put two surfaces in disagreement about the same workflow.
+                // Whether a chip is worth drawing is a rendering question, and
+                // budgetChipHasContent answers it on the client for every
+                // surface at once.
+                com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod.effectiveSpent(
+                        w.getBudgetPeriodMode(), w.getBudgetPeriodStartedAt(),
+                        w.getBudgetPeriodSpent(), java.time.Instant.now()),
+                com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                        .normaliseMode(w.getBudgetPeriodMode()),
+                com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                        .nextPeriodStart(w.getBudgetPeriodMode(), java.time.Instant.now())
         );
     }
 }

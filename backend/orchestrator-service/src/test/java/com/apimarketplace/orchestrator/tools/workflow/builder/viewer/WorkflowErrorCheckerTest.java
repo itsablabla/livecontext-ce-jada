@@ -980,7 +980,7 @@ class WorkflowErrorCheckerTest {
         }
 
         @Test
-        @DisplayName("media without an operation -> MISSING_INPUT listing the seven operations")
+        @DisplayName("media without an operation -> MISSING_INPUT listing every operation")
         void missingOperationFlagged() {
             stubSessionWithCores(List.of(mediaCore(Map.of("video", "{{x}}"))));
 
@@ -1412,6 +1412,285 @@ class WorkflowErrorCheckerTest {
             assertThat(result.errors()).isEmpty();
             assertThat(result.canCreate()).isTrue();
         }
+
+        // ---- subtitles ----
+
+        private Map<String, Object> cue(Object start, Object end, String text) {
+            Map<String, Object> c = new LinkedHashMap<>();
+            c.put("start_seconds", start);
+            c.put("end_seconds", end);
+            c.put("text", text);
+            return c;
+        }
+
+        @Test
+        @DisplayName("subtitles missing cues -> MISSING_INPUT (video provided is not flagged)")
+        void subtitlesMissingCuesFlagged() {
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles", "video", "{{core:reel.output.file}}"))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors())
+                    .anyMatch(e -> "MISSING_INPUT".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("requires cues"));
+            assertThat(result.errors())
+                    .noneMatch(e -> ((String) e.get("message")).contains("requires a video"));
+        }
+
+        @Test
+        @DisplayName("subtitles missing video -> MISSING_INPUT for the video param")
+        void subtitlesMissingVideoFlagged() {
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles",
+                    "cues", List.of(cue(0, 2.4, "It starts here"))))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors())
+                    .anyMatch(e -> "MISSING_INPUT".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("requires a video"));
+        }
+
+        @Test
+        @DisplayName("subtitles cue with end_seconds <= start_seconds -> INVALID_CONFIG naming the cue")
+        void subtitlesZeroLengthCueFlagged() {
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles",
+                    "video", "{{core:reel.output.file}}",
+                    "cues", List.of(cue(2, 2, "Never visible"))))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors())
+                    .anyMatch(e -> "INVALID_CONFIG".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("cues[0]")
+                            && ((String) e.get("message")).contains("end_seconds must be greater"));
+        }
+
+        @Test
+        @DisplayName("subtitles overlapping cues -> INVALID_CONFIG explaining they would be drawn on top of each other")
+        void subtitlesOverlappingCuesFlagged() {
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles",
+                    "video", "{{core:reel.output.file}}",
+                    "cues", List.of(cue(0, 3, "First"), cue(2, 5, "Overlaps"))))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors())
+                    .anyMatch(e -> "INVALID_CONFIG".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("cues[1]")
+                            && ((String) e.get("message")).contains("non-overlapping"));
+        }
+
+        @Test
+        @DisplayName("subtitles cue without text -> MISSING_INPUT naming the cue")
+        void subtitlesCueWithoutTextFlagged() {
+            Map<String, Object> textless = new LinkedHashMap<>();
+            textless.put("start_seconds", 0);
+            textless.put("end_seconds", 2.4);
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles",
+                    "video", "{{core:reel.output.file}}",
+                    "cues", List.of(textless)))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors())
+                    .anyMatch(e -> "MISSING_INPUT".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("cues[0] requires a text"));
+        }
+
+        @Test
+        @DisplayName("subtitles cue with no timings -> MISSING_INPUT at BUILD time, not only when the run refuses it")
+        void subtitlesCueWithoutTimingsFlagged() {
+            Map<String, Object> timeless = new LinkedHashMap<>();
+            timeless.put("text", "Typed the line, not the timings yet");
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles",
+                    "video", "{{core:reel.output.file}}",
+                    "cues", List.of(timeless)))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors())
+                    .anyMatch(e -> "MISSING_INPUT".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("cues[0] needs both start_seconds and end_seconds"));
+            assertThat(result.canCreate()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a BLANK timing counts as missing, the same as an absent one")
+        void subtitlesBlankTimingFlagged() {
+            Map<String, Object> blank = new LinkedHashMap<>();
+            blank.put("start_seconds", "");
+            blank.put("end_seconds", "");
+            blank.put("text", "Hi");
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles",
+                    "video", "{{core:reel.output.file}}",
+                    "cues", List.of(blank)))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors())
+                    .anyMatch(e -> ((String) e.get("message")).contains("cues[0] needs both start_seconds and end_seconds"));
+        }
+
+        @Test
+        @DisplayName("subtitles cue timings written as {{...}} templates are NOT judged here (they resolve at run time)")
+        void subtitlesTemplateTimingsNotFlagged() {
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles",
+                    "video", "{{core:reel.output.file}}",
+                    "cues", List.of(
+                            cue("{{core:timing.output.result.start}}", "{{core:timing.output.result.end}}", "Line"))))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors()).isEmpty();
+            assertThat(result.canCreate()).isTrue();
+        }
+
+        @Test
+        @DisplayName("subtitles beyond the cue cap -> INVALID_CONFIG naming the cap and the count")
+        void subtitlesTooManyCuesFlagged() {
+            List<Map<String, Object>> many = new java.util.ArrayList<>();
+            for (int i = 0; i < 601; i++) {
+                many.add(cue(i, i + 0.5, "line " + i));
+            }
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles", "video", "{{core:reel.output.file}}", "cues", many))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors())
+                    .anyMatch(e -> "INVALID_CONFIG".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("at most 600 cues")
+                            && ((String) e.get("message")).contains("601"));
+        }
+
+        @Test
+        @DisplayName("a cue that is not an object at all -> MISSING_INPUT naming its index")
+        void subtitlesNonObjectCueFlagged() {
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles", "video", "{{core:reel.output.file}}",
+                    "cues", List.of("0 -> 2.4 It starts here")))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors())
+                    .anyMatch(e -> "MISSING_INPUT".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("cues[0] must be an object"));
+        }
+
+        @Test
+        @DisplayName("a caption line over the character limit -> INVALID_CONFIG at BUILD time, not only at run time")
+        void subtitlesOverlongTextFlagged() {
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles", "video", "{{core:reel.output.file}}",
+                    "cues", List.of(cue(0, 2, "x".repeat(241)))))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors())
+                    .anyMatch(e -> "INVALID_CONFIG".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("241 characters"));
+        }
+
+        @Test
+        @DisplayName("subtitles look bounds are checked here too, like overlay's are")
+        void subtitlesLookBoundsFlagged() {
+            Map<String, Object> base = new LinkedHashMap<>();
+            base.put("operation", "subtitles");
+            base.put("video", "{{core:reel.output.file}}");
+            base.put("cues", List.of(cue(0, 2, "Hi")));
+
+            Map<String, Object> tooBig = new LinkedHashMap<>(base);
+            tooBig.put("font_size_percent", 30);
+            stubSessionWithCores(List.of(mediaCore(tooBig)));
+            assertThat(checker.checkForErrors(session).errors())
+                    .anyMatch(e -> "INVALID_CONFIG".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("between 1 and 20"));
+
+            Map<String, Object> offFrame = new LinkedHashMap<>(base);
+            offFrame.put("position_percent", 140);
+            stubSessionWithCores(List.of(mediaCore(offFrame)));
+            assertThat(checker.checkForErrors(session).errors())
+                    .anyMatch(e -> "INVALID_CONFIG".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("between 0 and 100"));
+        }
+
+        @Test
+        @DisplayName("a negative cue timing is INVALID_CONFIG here, not only when the run refuses it")
+        void subtitlesNegativeTimingFlagged() {
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles", "video", "{{core:reel.output.file}}",
+                    "cues", List.of(cue(-1, 2, "Too early"))))));
+
+            assertThat(checker.checkForErrors(session).errors())
+                    .anyMatch(e -> "INVALID_CONFIG".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("negative timing"));
+        }
+
+        @Test
+        @DisplayName("a track past the TOTAL character limit is flagged here, matching what the run enforces")
+        void subtitlesTotalLengthFlagged() {
+            List<Map<String, Object>> cues = new java.util.ArrayList<>();
+            for (int i = 0; i < 600; i++) {
+                cues.add(cue(i, i + 0.5, "x".repeat(240)));
+            }
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles", "video", "{{core:reel.output.file}}", "cues", cues))));
+
+            assertThat(checker.checkForErrors(session).errors())
+                    .anyMatch(e -> "INVALID_CONFIG".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("characters of caption in total"));
+        }
+
+        @Test
+        @DisplayName("cues given as an EXPRESSION are accepted: a caption track is often computed upstream")
+        void subtitlesTemplatedCuesAccepted() {
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles",
+                    "video", "{{core:reel.output.file}}",
+                    "cues", "{{core:build_cues.output.result.cues}}"))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors()).isEmpty();
+            assertThat(result.canCreate()).isTrue();
+        }
+
+        @Test
+        @DisplayName("an expression for cues still does not excuse an out-of-range look value")
+        void subtitlesTemplatedCuesStillCheckLookBounds() {
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles",
+                    "video", "{{core:reel.output.file}}",
+                    "cues", "{{core:build_cues.output.result.cues}}",
+                    "font_size_percent", 30))));
+
+            assertThat(checker.checkForErrors(session).errors())
+                    .anyMatch(e -> "INVALID_CONFIG".equals(e.get("type"))
+                            && ((String) e.get("message")).contains("between 1 and 20"));
+        }
+
+        @Test
+        @DisplayName("well-formed subtitles with ordered cues -> no error, workflow creatable")
+        void wellFormedSubtitlesNotFlagged() {
+            stubSessionWithCores(List.of(mediaCore(Map.of(
+                    "operation", "subtitles",
+                    "video", "{{core:reel.output.file}}",
+                    "style", "tiktok",
+                    "cues", List.of(cue(0, 2.4, "First line"), cue(2.4, 5, "Second line"))))));
+
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors()).isEmpty();
+            assertThat(result.canCreate()).isTrue();
+        }
     }
 
     // ==================== EXPRESSION_NOT_EVALUATED (F15/F21 boundary trap) ====================
@@ -1832,14 +2111,19 @@ class WorkflowErrorCheckerTest {
             params.put("model", "seedance-2.0-fast");
             params.put("credential_source", "user");
             if (credentialId != null) params.put("credential_id", credentialId);
-            Map<String, Object> core = new LinkedHashMap<>();
-            core.put("id", "core:make_clip");
-            core.put("type", "generate");
-            core.put("label", "Make Clip");
-            core.put("params", params);
+            // The AI nodes of a session live in getMcps(), discriminated by
+            // isAgent. A check that only walked the cores would never see a
+            // generate node again, and the whole guard would pass vacuously.
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("id", "agent:make_clip");
+            node.put("type", "generate");
+            node.put("label", "Make Clip");
+            node.put("isAgent", true);
+            node.put("isGenerate", true);
+            node.put("params", params);
 
             stubValidSession(List.of());
-            lenient().when(session.getCores()).thenReturn(List.of(core));
+            lenient().when(session.getMcps()).thenReturn(List.of(node));
             return checker.checkForErrors(session);
         }
 
@@ -1855,6 +2139,80 @@ class WorkflowErrorCheckerTest {
             assertThat(result.errors()).anySatisfy(e ->
                     assertThat(String.valueOf(e.get("message"))).contains("credential_id"));
             assertThat(result.canCreate()).isFalse();
+        }
+
+        /** Same node, same pin, but the pool that never reads it. */
+        private WorkflowErrorChecker.CheckResult checkWithSource(Object credentialId, String source) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("model", "seedance-2.0-fast");
+            params.put("credential_source", source);
+            if (credentialId != null) params.put("credential_id", credentialId);
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("id", "agent:make_clip");
+            node.put("type", "generate");
+            node.put("label", "Make Clip");
+            node.put("isAgent", true);
+            node.put("isGenerate", true);
+            node.put("params", params);
+
+            stubValidSession(List.of());
+            lenient().when(session.getMcps()).thenReturn(List.of(node));
+            return checker.checkForErrors(session);
+        }
+
+        /**
+         * The one path neither add_node nor set_plan sees.
+         *
+         * <p>`modify` merges what it is given without judging it, so a pin beside
+         * the platform pool can only be caught here. Left uncaught, the plan names
+         * a key the executor discards, and the run bills the platform while the
+         * plan says otherwise - with nothing on screen saying which happened.
+         */
+        /**
+         * An UNSTATED source is the platform, so a pin beside it is refused too.
+         *
+         * <p>The distinction that made this worth writing: the guard used to test
+         * for the literal "platform", so a plan that simply omitted the field kept
+         * a pin no run would ever read. Omitting it is not neutral here - the node
+         * substitutes the platform key before the run, so leaving it out is a
+         * choice of payer, and the same choice.
+         */
+        @Test
+        @DisplayName("a pin beside an UNSTATED source is refused too, since unstated means platform")
+        void aPinBesideAnUnstatedSourceIsRefused() {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("model", "seedance-2.0-fast");
+            params.put("credential_id", 42);
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("id", "agent:make_clip");
+            node.put("type", "generate");
+            node.put("label", "Make Clip");
+            node.put("isAgent", true);
+            node.put("isGenerate", true);
+            node.put("params", params);
+
+            stubValidSession(List.of());
+            lenient().when(session.getMcps()).thenReturn(List.of(node));
+            WorkflowErrorChecker.CheckResult result = checker.checkForErrors(session);
+
+            assertThat(result.errors()).anySatisfy(e ->
+                    assertThat(String.valueOf(e.get("message"))).contains("credential_id"));
+        }
+
+        @Test
+        @DisplayName("a pin beside the PLATFORM pool is refused, since that pool never reads it")
+        void aPinBesideThePlatformPoolIsRefused() {
+            WorkflowErrorChecker.CheckResult result = checkWithSource(42, "platform");
+
+            assertThat(result.errors()).anySatisfy(e ->
+                    assertThat(String.valueOf(e.get("message"))).contains("credential_id"));
+        }
+
+        @Test
+        @DisplayName("the same pin beside the OWNER pool passes: that is the arrangement it describes")
+        void theSamePinBesideTheUserPoolPasses() {
+            assertThat(checkWithSource(42, "user").errors()).noneSatisfy(e ->
+                    assertThat(String.valueOf(e.get("message"))).contains("credential_id"));
         }
 
         @Test

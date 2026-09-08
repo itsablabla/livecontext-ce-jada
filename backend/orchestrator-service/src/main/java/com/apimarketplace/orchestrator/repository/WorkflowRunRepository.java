@@ -318,15 +318,44 @@ public interface WorkflowRunRepository extends JpaRepository<WorkflowRunEntity, 
     Optional<java.math.BigDecimal> findCostCreditsByRunIdPublic(@Param("runIdPublic") String runIdPublic);
 
     /**
-     * The budget (credits) of the workflow this run belongs to, or empty when
-     * the run has no budget set. Read via the {@code @ManyToOne} association as
-     * a JPQL field access so it works outside a transaction. Consumed by
-     * {@code RunCostService} to stamp {@code budgetCredits} on the emitted cost
-     * event (so the frontend can paint the over-budget warning without a second
-     * fetch) and by the epoch budget gate.
+     * The full spending-cap state of the workflow this run belongs to: the cap,
+     * the period mode, the stored period spend with the period it belongs to,
+     * and the two identity flags that decide whether the cap governs this run
+     * at all. One round-trip through the lazy association (JPQL field access,
+     * safe outside a transaction).
+     *
+     * <p>The stored spend may belong to an already-expired period, so callers
+     * MUST read it through {@code WorkflowBudgetState.effectiveSpent(now)}
+     * rather than comparing the raw column: the reset is lazy and only happens
+     * when the next cost is recorded.
+     *
+     * <p>Selects the run's metadata MAP and reduces it to the
+     * {@code __editorRun__} flag in Java (see {@link WorkflowBudgetStateRow}).
+     * The obvious native {@code metadata->>'__editorRun__'} is a Postgres-only
+     * operator and a syntax error on the H2 these repositories are tested
+     * against, which would have left the read that every agent call performs
+     * covered by nothing but mocks.
+     *
+     * <p>{@code productionRun} is computed as a CASE rather than compared in
+     * Java because {@code production_run_id} is frequently NULL, and the CASE
+     * yields a real {@code false} where a bare comparison would yield SQL NULL.
      */
-    @Query("SELECT wr.workflow.budgetCredits FROM WorkflowRunEntity wr WHERE wr.runIdPublic = :runIdPublic")
-    Optional<java.math.BigDecimal> findWorkflowBudgetByRunIdPublic(@Param("runIdPublic") String runIdPublic);
+    @Query("SELECT new com.apimarketplace.orchestrator.services.credit.WorkflowBudgetStateRow("
+            + "wr.workflow.id, "
+            + "CASE WHEN wr.id = wr.workflow.productionRunId THEN true ELSE false END, "
+            + "wr.metadata, "
+            + "wr.workflow.budgetCredits, wr.workflow.budgetPeriodMode, "
+            + "wr.workflow.budgetPeriodSpent, wr.workflow.budgetPeriodStartedAt) "
+            + "FROM WorkflowRunEntity wr WHERE wr.runIdPublic = :runIdPublic")
+    Optional<com.apimarketplace.orchestrator.services.credit.WorkflowBudgetStateRow>
+            findBudgetStateRowByRunIdPublic(@Param("runIdPublic") String runIdPublic);
+
+    /** Typed view of {@link #findBudgetStateRowByRunIdPublic}. */
+    default Optional<com.apimarketplace.orchestrator.services.credit.WorkflowBudgetState>
+            findBudgetStateByRunIdPublic(String runIdPublic) {
+        return findBudgetStateRowByRunIdPublic(runIdPublic)
+                .map(com.apimarketplace.orchestrator.services.credit.WorkflowBudgetStateRow::toState);
+    }
 
     /**
      * Fresh cost of a single epoch bucket from {@code cost_by_epoch}, in credits.

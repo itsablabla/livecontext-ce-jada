@@ -109,8 +109,8 @@ public class TaskNode extends BaseNode {
 
         inputData.put("title", title);
         inputData.put("instructions", instructions);
-        inputData.put("agent_id", agentIdStr);
-        inputData.put("reviewer_agent_id", reviewerStr);
+        inputData.put("agentId", agentIdStr);
+        inputData.put("reviewerAgentId", reviewerStr);
         inputData.put("priority", priority);
 
         if (title == null || title.isBlank()) {
@@ -134,6 +134,7 @@ public class TaskNode extends BaseNode {
                 }
             }
             request.put("taskContext", resolvedCtx);
+            inputData.put("taskContext", resolvedCtx);
         }
 
         Map<String, Object> response = agentClient.createTaskForWorkflow(tenantId, request);
@@ -152,7 +153,7 @@ public class TaskNode extends BaseNode {
     private Map<String, Object> executeGet(ExecutionContext context, String tenantId,
                                             Map<String, Object> inputData) {
         String taskIdStr = resolveTemplateString(config.taskId(), context);
-        inputData.put("task_id", taskIdStr);
+        inputData.put("taskId", taskIdStr);
 
         if (taskIdStr == null || taskIdStr.isBlank()) {
             throw new IllegalArgumentException("'taskId' is required for get_task operation.");
@@ -181,12 +182,12 @@ public class TaskNode extends BaseNode {
         String priority = config.priority();
         String status = config.status();
 
-        inputData.put("task_id", taskIdStr);
+        inputData.put("taskId", taskIdStr);
         inputData.put("title", title);
         inputData.put("instructions", instructions);
         inputData.put("priority", priority);
         inputData.put("status", status);
-        inputData.put("agent_id", agentIdStr);
+        inputData.put("agentId", agentIdStr);
 
         if (taskIdStr == null || taskIdStr.isBlank()) {
             throw new IllegalArgumentException("'taskId' is required for update_task operation.");
@@ -216,7 +217,7 @@ public class TaskNode extends BaseNode {
     private Map<String, Object> executeDelete(ExecutionContext context, String tenantId,
                                                Map<String, Object> inputData) {
         String taskIdStr = resolveTemplateString(config.taskId(), context);
-        inputData.put("task_id", taskIdStr);
+        inputData.put("taskId", taskIdStr);
 
         if (taskIdStr == null || taskIdStr.isBlank()) {
             throw new IllegalArgumentException("'taskId' is required for delete_task operation.");
@@ -246,7 +247,7 @@ public class TaskNode extends BaseNode {
 
         inputData.put("status", status);
         inputData.put("priority", priority);
-        inputData.put("agent_id", agentIdStr);
+        inputData.put("agentId", agentIdStr);
         inputData.put("search", search);
         inputData.put("limit", limit);
 

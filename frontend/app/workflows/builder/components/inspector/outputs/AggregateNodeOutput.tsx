@@ -71,6 +71,7 @@ export function AggregateNodeOutput({
           stepAlias={stepAlias}
           dataType="output"
           isDraggable={false}
+          node={currentNode}
         />
       ) : (
         /* Aggregate output fields - each field becomes an array */

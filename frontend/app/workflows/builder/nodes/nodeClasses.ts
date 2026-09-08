@@ -308,6 +308,20 @@ export const NODE_CLASSES: BuilderNodeClass[] = [
     palette: { category: 'ai', quickGroup: 'Core', quickBg: QUICK_COLOR.core },
     inspector: 'ai',
   }),
+  new BuilderNodeClass({
+    id: 'generate',
+    label: 'Generate',
+    description: 'Generate an image, video, audio, voice or music clip from a prompt',
+    kind: 'generate',
+    nodeType: 'flowNode',
+    // AI, not core. It runs a model and hands back what the model produced,
+    // which is what the rest of this family does; nothing about it is control
+    // flow. It is keyed `agent:<label>` like its siblings.
+    family: 'ai',
+    aliases: ['generation', 'image', 'text-to-image', 'text-to-video', 'text-to-speech'],
+    palette: { category: 'ai', quickGroup: 'Core', quickBg: QUICK_COLOR.core },
+    inspector: 'generate',
+  }),
 
   // Flow control nodes
   new BuilderNodeClass({
@@ -494,17 +508,6 @@ export const NODE_CLASSES: BuilderNodeClass[] = [
     aliases: ['audio', 'mux'],
     palette: { category: 'core', quickGroup: 'Data', quickBg: QUICK_COLOR.data },
     inspector: 'media',
-  }),
-  new BuilderNodeClass({
-    id: 'generate',
-    label: 'Generate',
-    description: 'Generate an image, video, audio, voice or music clip from a prompt',
-    kind: 'generate',
-    nodeType: 'flowNode',
-    family: 'core',
-    aliases: ['generation', 'image', 'text-to-image', 'text-to-video', 'text-to-speech'],
-    palette: { category: 'core', quickGroup: 'Data', quickBg: QUICK_COLOR.data },
-    inspector: 'generate',
   }),
   new BuilderNodeClass({
     id: 'http-request',

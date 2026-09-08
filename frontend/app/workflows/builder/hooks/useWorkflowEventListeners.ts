@@ -9,6 +9,7 @@ import { orchestratorApi } from '@/lib/api';
 import { getActivePublicPreview } from '@/contexts/PublicationSnapshotContext';
 import { WorkflowPlanImporter } from '../services/workflowPlanImporter/WorkflowPlanImporter';
 import { applyDagreLayout, layoutConfigForDirection } from '../services/LayoutService';
+import { dispatchLayoutApplied } from '@/lib/workflow/layoutAppliedEvent';
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 
 interface UseWorkflowEventListenersOptions {
@@ -159,7 +160,9 @@ export function useWorkflowEventListeners({
           React.startTransition(async () => {
             try {
               const planJson = JSON.stringify(plan);
-              const importResult = await WorkflowPlanImporter.importPlan(planJson, [], layoutDirectionRef.current);
+              const importResult = await WorkflowPlanImporter.importPlan(
+                planJson, [], layoutDirectionRef.current, { queryClient, isRunMode },
+              );
 
               if (importResult.success) {
                 // Always apply Dagre layout after sync (same algo as the toolbox auto-layout button)
@@ -199,6 +202,17 @@ export function useWorkflowEventListeners({
                 nodesRef.current = layoutedNodes;
                 edgesRef.current = importResult.edges;
                 console.log('[WorkflowEventListeners] ✅ Plan refreshed with Dagre layout');
+
+                // This handler just re-laid the whole graph from label ESTIMATES (nothing
+                // is measured at import time), and those estimates decide both where a
+                // node is centred and how much room the next rank gets. Say so, and let
+                // MeasuredLayoutSync replay the layout on the real sizes once the browser
+                // has painted them. This is the ONLY announcement in the app: a load is
+                // laid out from estimates too, but a correction there necessarily lands
+                // after the dirty and undo baselines have settled and would mark a
+                // workflow the user merely opened as edited
+                // (postLoadPositionWriteArmsBaselines.test.tsx is that fact, executable).
+                dispatchLayoutApplied(workflowId);
 
                 // Trigger fit view after a short delay to let React render the new nodes
                 setTimeout(() => {

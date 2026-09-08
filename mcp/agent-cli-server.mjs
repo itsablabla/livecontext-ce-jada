@@ -79,11 +79,16 @@ const CONVERSATION_SERVICE_URL = process.env.CONVERSATION_SERVICE_URL || '';
 const STREAM_ID = process.env.STREAM_ID || '';
 const IS_NEW_CONVERSATION = process.env.IS_NEW_CONVERSATION === 'true';
 const AGENT_ENTITY_ID = process.env.AGENT_ENTITY_ID || '';
+// How long a tool call may be held on the CLI this subprocess serves (seconds), worked out
+// by the bridge from the per-call timeout it configured for that CLI. '' = not known.
+const AGENT_CLI_MAX_TOOL_HOLD_SECONDS = process.env.AGENT_CLI_MAX_TOOL_HOLD_SECONDS || '';
 // Canonical enabled MODULE keys (JSON array) forwarded by the bridge from the agent's
 // toolsConfig (AgentModuleResolver vocabulary). Included in the CliSessionStartRequest body
 // so CliAgentService.resolveModules scopes the core tool set to the agent's mode - without
 // this the session defaulted to ALL modules and the CLI advertised every core tool schema,
-// billing it on every turn. Empty/malformed ⇒ null ⇒ backend treats as unrestricted.
+// billing it on every turn. An EMPTY ARRAY is preserved as an empty array and means NO
+// modules (a tool-less judge). Only an unset or malformed value falls back to null, which
+// the backend reads as its no-config module set.
 let ENABLED_MODULES = null;
 try {
   if (process.env.ENABLED_MODULES) {
@@ -208,6 +213,9 @@ async function startSession() {
   // (parity with the direct loop). Omitted ⇒ CliAgentService.resolveModules(null) ⇒ the
   // NO-CONFIG module set: everything EXCEPT the credit-spending opt-ins (image_generation,
   // generation). "Nobody scoped this session" is not "this session may spend credits".
+  // An empty array must SURVIVE this check (it is truthy in JS, unlike its .length): it is
+  // how a tool-less caller asks for zero tools, and a `?.length` here would silently hand
+  // that caller the whole no-config set instead.
   if (ENABLED_MODULES) {
     body.enabledModules = ENABLED_MODULES;
   }
@@ -240,6 +248,13 @@ async function startSession() {
   const inactivitySeconds = Number(AGENT_INACTIVITY_SECONDS);
   if (AGENT_INACTIVITY_SECONDS !== '' && Number.isFinite(inactivitySeconds) && inactivitySeconds >= 0) {
     body.inactivityTimeoutSeconds = inactivitySeconds;
+  }
+  // Forward how long the CLI keeps waiting on one tool call, so the server-side gate can
+  // hold a question card (or an approval card) for the person instead of ending it at the
+  // floor sized for the shortest CLI. Absent when the bridge did not say.
+  const maxHoldSeconds = Number(AGENT_CLI_MAX_TOOL_HOLD_SECONDS);
+  if (AGENT_CLI_MAX_TOOL_HOLD_SECONDS !== '' && Number.isFinite(maxHoldSeconds) && maxHoldSeconds > 0) {
+    body.maxToolHoldSeconds = Math.floor(maxHoldSeconds);
   }
 
   const data = await apiPost('/api/agent/cli/session', body, FETCH_TIMEOUT_MS);

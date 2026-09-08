@@ -296,7 +296,6 @@ export function AvailableCredentialsList({
               }
               clearTemplateSelection();
             }}
-            className="rounded-md bg-black dark:bg-white text-white dark:text-black"
           >
             {t('connectCount', { count: selectedTemplates.size })}
           </Button>

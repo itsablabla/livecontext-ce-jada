@@ -81,11 +81,21 @@ describe('AgentsShowcase', () => {
   it('renders the sidebar rail mirroring the real AppSidebar nav, Agents active', () => {
     render(<AgentsShowcase />);
 
-    // Same entries and order as AppSidebar's chatNavItems. The rail is
-    // aria-hidden (decorative), so target the title tooltips.
-    for (const label of ['Marketplace', 'Board', 'Agents', 'Applications', 'Workflows', 'Interfaces', 'Tables', 'Files']) {
-      expect(screen.getByTitle(label)).toBeInTheDocument();
-    }
+    // Same entries, same order, and NOTHING else, because the rail is built from
+    // SIDEBAR_NAV_ITEMS rather than a copy of it: Agenda is in this list because
+    // the product gained it, not because anyone remembered to add it. Asserting
+    // the sequence rather than membership is what makes that true: the old
+    // per-label loop passed on a rail that rendered twenty items backwards.
+    // The rail is aria-hidden (decorative), so target the title tooltips.
+    // Anchored on the rail's own first entry rather than on "the first
+    // aria-hidden node in the document", which silently retargets the day
+    // anything else aria-hidden renders above it.
+    const rail = screen.getByTitle('Marketplace').parentElement!;
+    const railLabels = Array.from(rail.querySelectorAll('[title]')).map((el) => el.getAttribute('title'));
+    expect(railLabels).toEqual([
+      'Marketplace', 'Board', 'Agenda', 'Agents', 'Applications',
+      'Workflows', 'Interfaces', 'Tables', 'Files', 'Account',
+    ]);
     expect(screen.getByTitle('Agents')).toHaveAttribute('data-active', 'true');
     expect(screen.getByTitle('Marketplace')).not.toHaveAttribute('data-active');
     expect(screen.getByTitle('Account')).toBeInTheDocument();

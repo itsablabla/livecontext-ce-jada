@@ -19,6 +19,13 @@ vi.mock('@/components/app/SidePanel', () => ({ SidePanel: () => <div data-testid
 vi.mock('@/contexts/ConversationActivityContext', () => ({
   ConversationActivityProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+// The shell binds the app-wide quick-open shortcut. Its behaviour is covered in
+// lib/sidebar/__tests__/useQuickOpenShortcut.test.tsx; here it is a spy, so
+// these layout tests can also pin that every arrangement binds it.
+const bindQuickOpenShortcut = vi.fn();
+vi.mock('@/lib/sidebar/useQuickOpenShortcut', () => ({
+  useQuickOpenShortcut: () => bindQuickOpenShortcut(),
+}));
 
 import { AppShell } from '../AppShell';
 import { SidePanelLayoutProvider } from '@/contexts/SidePanelLayoutContext';
@@ -81,5 +88,20 @@ describe('AppShell dock arrangement', () => {
     // The panel is a direct child of the root column (sibling of the inner row).
     expect(panel.parentElement).toBe(root);
     expect(root.contains(sidebar)).toBe(true);
+  });
+});
+
+describe('AppShell and the app-wide quick-open shortcut', () => {
+  it('binds it in every dock arrangement, so the keys the customize menu prints always work', () => {
+    // The menu spells these keys out on every page. Binding them on the home
+    // button instead - where they started - left them dead everywhere else.
+    (['right', 'bottom', 'bottom-full'] as const).forEach((position) => {
+      bindQuickOpenShortcut.mockClear();
+
+      renderShell(position);
+
+      expect(bindQuickOpenShortcut, position).toHaveBeenCalled();
+      cleanup();
+    });
   });
 });

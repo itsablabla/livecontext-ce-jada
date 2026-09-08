@@ -38,7 +38,8 @@ class PublicationListItemTest {
                 PROJECT_ID, null, null, null, null, null,
                 "test-title", "john-doe",
                 true, "[\"CLI_AGENT\",\"VECTOR_SEARCH\"]"
-        );
+        ,
+        false);
     }
 
     private PublicationListItem createMinimalItem(String status, String visibility,
@@ -58,7 +59,8 @@ class PublicationListItemTest {
                 null, null, null, null, null,
                 null, null, null, null, null, null,
                 null, null,
-                null, null
+                null, null,
+                false
         );
     }
 
@@ -241,7 +243,8 @@ class PublicationListItemTest {
                     null, null, "preset:robot", "anthropic", "claude-sonnet", null,
                     null, null,
                     false, null
-            );
+            ,
+            false);
             Map<String, Object> response = item.toResponseMap();
             assertThat(response).containsEntry("agentAvatarUrl", "preset:robot");
             assertThat(response).containsEntry("agentModelProvider", "anthropic");
@@ -264,7 +267,8 @@ class PublicationListItemTest {
                     null, null, null, null, null, "datasource-42",
                     null, null,
                     false, null
-            );
+            ,
+            false);
             Map<String, Object> response = item.toResponseMap();
             assertThat(response).containsEntry("resourceId", "datasource-42");
             assertThat(response).containsEntry("publicationType", "TABLE");
@@ -289,7 +293,8 @@ class PublicationListItemTest {
                     0, 0, 0, 0, 0, null, 0, PUBLISHED_AT, UPDATED_AT,
                     null, null, null, null, null, null, null, null, null, null, null,
                     null, null,
-                    true, "{not json");
+                    true, "{not json",
+                    false);
 
             Map<String, Object> response = item.toResponseMap();
 

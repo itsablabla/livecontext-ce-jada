@@ -103,6 +103,14 @@ public class ApiEntity {
     private JsonbString rateLimits;
 
     /**
+     * Ordered error-classification rules from the seed ({@code errorPolicy}), read by
+     * {@link com.apimarketplace.catalog.service.http.ErrorPolicyEngine}. NULL for almost every
+     * API: the built-in 429/503 retry needs no declaration.
+     */
+    @Column("error_policy")
+    private JsonbString errorPolicy;
+
+    /**
      * Soft-delete by API-catalog bundle apply (V331): set when a bundle no
      * longer lists this row. Hidden from list/search paths, still executable
      * by UUID. NULL = live. Only bundle-managed rows
@@ -369,6 +377,14 @@ public class ApiEntity {
 
     public void setRateLimits(String rateLimits) {
         this.rateLimits = JsonbString.of(rateLimits);
+    }
+
+    public String getErrorPolicy() {
+        return errorPolicy == null ? null : errorPolicy.value();
+    }
+
+    public void setErrorPolicy(String errorPolicy) {
+        this.errorPolicy = JsonbString.of(errorPolicy);
     }
 
     public java.time.Instant getDeprecatedAt() {

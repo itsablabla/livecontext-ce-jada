@@ -22,6 +22,7 @@ import java.io.OutputStream;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
@@ -133,7 +134,7 @@ class InternalFileControllerTest {
     }
 
     @Test
-    @DisplayName("Client disconnect mid-stream → upstream closed (S3 connection released)")
+    @DisplayName("Client disconnect mid-stream: upstream closed (S3 connection released) and no error raised")
     void clientDisconnectClosesUpstream() throws IOException {
         String key = "1/general/catalog-binary/x.png";
         byte[] payload = new byte[]{1, 2, 3, 4};
@@ -152,8 +153,14 @@ class InternalFileControllerTest {
             }
         };
 
-        assertThatThrownBy(() -> response.getBody().writeTo(brokenOut))
-                .isInstanceOf(IOException.class);
+        // The disconnect is now swallowed rather than rethrown. Rethrowing sent
+        // Spring into its async error dispatch on a response already committed
+        // with part of the body sent, which made Tomcat fail inside its own
+        // recycled MimeHeaders (prod logged 9 such stack traces in 6 hours whose
+        // real cause was a closed tab). A server-side read failure still
+        // propagates - see ClientStreamCopierTest.
+        assertThatCode(() -> response.getBody().writeTo(brokenOut))
+                .doesNotThrowAnyException();
         assertThat(upstream.closed)
                 .as("upstream S3 stream must be closed on client-disconnect IOException")
                 .isTrue();

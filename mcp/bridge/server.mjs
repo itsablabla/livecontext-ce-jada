@@ -43,6 +43,7 @@ import { AgentBudgetGuard, TenantBudgetGuard, chainBudgetGuards } from './lib/bu
 import { internalSignedHeaders } from './lib/gatewayAuth.mjs';
 import { resolveInactivityMs } from './lib/inactivityResolver.mjs';
 import { createInactivityWatchdog } from './lib/inactivityWatchdog.mjs';
+import { maxToolHoldSecondsFor } from './lib/toolHold.mjs';
 import { detectAll, detectOne, invalidateCache, CLI_IDS } from './cli-detector.mjs';
 import { extractToolResultAndMetadata } from './lib/toolContent.mjs';
 
@@ -652,8 +653,11 @@ async function executeViaCli({ prompt, systemPrompt, model, maxTurns, spawnTimeo
       AGENT_ENTITY_ID: agentEntityId || '',
       // Canonical enabled MODULE keys (JSON array) → agent-cli-server.mjs forwards them in
       // the CliSessionStartRequest body so CliAgentService scopes the core tool set to the
-      // agent's toolsConfig.mode (parity with the direct loop). Empty ⇒ unrestricted (the
-      // CLI omits enabledModules and the backend keeps all modules).
+      // agent's toolsConfig.mode (parity with the direct loop). An EMPTY ARRAY is a real
+      // answer, not an absence: it travels as '[]' and scopes the session to NO modules
+      // (a tool-less judge, e.g. a classify or guardrail run). Only a non-array (absent)
+      // value means "nobody scoped this", which the backend reads as its no-config module
+      // set, never as every module.
       ENABLED_MODULES: Array.isArray(enabledModules) ? JSON.stringify(enabledModules) : '',
       // Path to the source checkout on the bridge host. When set (prod, via the
       // lc-bridge systemd drop-in), agent-cli-server.mjs advertises + executes the
@@ -689,6 +693,12 @@ async function executeViaCli({ prompt, systemPrompt, model, maxTurns, spawnTimeo
       // still leaves time to run the tool once the user answers. Without it the gate falls
       // back to its own default and the watchdog kills the run mid-execution.
       AGENT_INACTIVITY_SECONDS: String(Math.max(0, Math.round((inactivityMs || 0) / 1000))),
+      // How long a tool call may be HELD on this CLI (an approval card, an ask_user
+      // question), derived from the per-call timeout the adapter configured for it. The
+      // backend gate otherwise bounds a hold by the floor sized for the shortest CLI, which
+      // ends a question card while the person is still reading it. Empty when the adapter
+      // does not know its CLI's wait: the gate keeps its floor.
+      AGENT_CLI_MAX_TOOL_HOLD_SECONDS: maxToolHoldSecondsFor(adapter),
     },
   };
 

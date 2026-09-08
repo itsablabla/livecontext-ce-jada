@@ -332,7 +332,6 @@ export const OutputColumn = ({
     if (isDownloadFileNode) return { schema: withEnvelope(getOutputSchema('DOWNLOAD_FILE')), nodePrefix: 'core' };
     if (isPublicLinkNode) return { schema: withEnvelope(getOutputSchema('PUBLIC_LINK')), nodePrefix: 'core' };
     if (isMediaNode) return { schema: withEnvelope(getOutputSchema('MEDIA')), nodePrefix: 'core' };
-    if (isGenerateNode) return { schema: withEnvelope(getOutputSchema('GENERATE')), nodePrefix: 'core' };
     if (isHttpRequestNode) return { schema: withEnvelope(getOutputSchema('HTTP_REQUEST')), nodePrefix: 'core' };
     if (isDataInputNode) {
       const dataInputItems = (currentNode?.data as any)?.dataInputItems;
@@ -376,6 +375,11 @@ export const OutputColumn = ({
     if (isClassifyNode) return { schema: withEnvelope(getOutputSchema('CLASSIFY')), nodePrefix: 'agent' };
     if (isGuardrailNode) return { schema: withEnvelope(getOutputSchema('GUARDRAIL')), nodePrefix: 'agent' };
     if (isBrowserAgentNode) return { schema: withEnvelope(getOutputSchema('BROWSER_AGENT')), nodePrefix: 'agent' };
+    // Generate runs no LLM, but it is an AI node keyed `agent:<label>`, and this
+    // prefix is what builds the reference the author drags into a downstream
+    // field. Left in the core block above it handed out {{core:...}}, which
+    // resolves to an empty string rather than failing.
+    if (isGenerateNode) return { schema: withEnvelope(getOutputSchema('GENERATE')), nodePrefix: 'agent' };
     // Trigger nodes (Form trigger is handled separately with dynamic fields)
     if (isManualTrigger) return { schema: withEnvelope(getOutputSchema('MANUAL_TRIGGER')), nodePrefix: 'trigger' };
     if (isChatTrigger) return { schema: withEnvelope(getOutputSchema('CHAT_TRIGGER')), nodePrefix: 'trigger' };

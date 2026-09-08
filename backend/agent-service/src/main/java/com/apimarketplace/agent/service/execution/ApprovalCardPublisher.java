@@ -96,6 +96,28 @@ public class ApprovalCardPublisher {
     }
 
     /**
+     * "Pick one" card: a question the agent put to the person ({@code ask_user}).
+     *
+     * <p>{@code question} is the channel-agnostic payload ({@code toolCallId} +
+     * {@code questions}); the event nests it under {@code askUser}, which is the frontend's
+     * discriminant for this card, alongside {@code blocking}/{@code gateKey} exactly like the
+     * authorization card.
+     */
+    public String publishUserQuestion(String streamId, String conversationId,
+                                      Map<String, Object> question, boolean blocking, String gateKey) {
+        Map<String, Object> askUser = new LinkedHashMap<>(question);
+        if (blocking) {
+            askUser.put("blocking", true);
+            askUser.put("gateKey", gateKey);
+        }
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("streamId", streamId);
+        event.put("askUser", askUser);
+        event.put("timestamp", Instant.now().toString());
+        return publish(streamId, conversationId, event, "ask_user_required");
+    }
+
+    /**
      * Take a card back out of the replay buffer once it is settled.
      *
      * <p>The buffer is what makes a card survive a reload, and that is exactly why an
@@ -143,7 +165,8 @@ public class ApprovalCardPublisher {
             // the user already dealt with (an install they completed, say) back on screen,
             // and nothing would ever take them out again.
             if (Boolean.TRUE.equals(event.get("blocking"))
-                    || isBlockingAuthorization(event)) {
+                    || isBlockingAuthorization(event)
+                    || isBlockingUserQuestion(event)) {
                 buffer(streamId, json);
             }
             log.info("[APPROVAL_CARD] Published {} - stream={} ({} recv), ws={}",
@@ -162,6 +185,13 @@ public class ApprovalCardPublisher {
     private static boolean isBlockingAuthorization(Map<String, Object> event) {
         return event.get("toolAuthorization") instanceof Map<?, ?> authorization
                 && Boolean.TRUE.equals(((Map<String, Object>) authorization).get("blocking"));
+    }
+
+    /** Same nesting for the question card. */
+    @SuppressWarnings("unchecked")
+    private static boolean isBlockingUserQuestion(Map<String, Object> event) {
+        return event.get("askUser") instanceof Map<?, ?> askUser
+                && Boolean.TRUE.equals(((Map<String, Object>) askUser).get("blocking"));
     }
 
     /**

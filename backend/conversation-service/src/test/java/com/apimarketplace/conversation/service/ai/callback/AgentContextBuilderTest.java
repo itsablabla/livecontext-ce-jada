@@ -528,7 +528,8 @@ class AgentContextBuilderTest {
         @Test
         @DisplayName("emits __fileAccessMode__ into credentials when the agent's fileAccessMode is read (chat-path read-only file enforcement)")
         void emitsFileAccessModeCredential() {
-            // fileAccessMode is the LAST canonical component; set it to 'read'.
+            // fileAccessMode is the second-to-last canonical component (memoryAccessMode
+            // was appended after it); set it to 'read'.
             ToolsConfig tc = new ToolsConfig("all", List.of(), null, null, null, null, null, null,
                     null, null, null, null, null, null, null,
                     null, null, null, null, null, "read");
@@ -542,6 +543,25 @@ class AgentContextBuilderTest {
                     null, null, null, null, null, null, null,
                     null, null, null, null, null, null);
             assertThat(credentialsFor(tc)).doesNotContainKey("__fileAccessMode__");
+        }
+
+        @Test
+        @DisplayName("emits __memoryAccessMode__ when the agent is recall-only, so chat honours the restriction too")
+        void emitsMemoryAccessModeCredential() {
+            // The full canonical constructor: memoryAccessMode is the last component.
+            ToolsConfig tc = new ToolsConfig("all", List.of(), null, null, null, null, null, null,
+                    null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, "read");
+            assertThat(credentialsFor(tc)).containsEntry("__memoryAccessMode__", "read");
+        }
+
+        @Test
+        @DisplayName("omits __memoryAccessMode__ when unset, which leaves the default full access every family has")
+        void omitsMemoryAccessModeWhenAbsent() {
+            ToolsConfig tc = new ToolsConfig("all", List.of(), null, null, null, null, null, null,
+                    null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null);
+            assertThat(credentialsFor(tc)).doesNotContainKey("__memoryAccessMode__");
         }
 
         @Test

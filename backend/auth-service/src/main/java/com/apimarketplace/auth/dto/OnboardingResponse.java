@@ -22,6 +22,10 @@ public class OnboardingResponse {
     private List<String> interests;
     private List<String> useCases;
     private String experienceLevel;
+    private String primaryGoal;
+    private List<String> toolsUsed;
+    private String previousTool;
+    private String referralSource;
 
     // Constructors
 
@@ -54,6 +58,10 @@ public class OnboardingResponse {
         response.setInterests(onboarding.getInterests());
         response.setUseCases(onboarding.getUseCases());
         response.setExperienceLevel(onboarding.getExperienceLevel());
+        response.setPrimaryGoal(onboarding.getPrimaryGoal());
+        response.setToolsUsed(onboarding.getToolsUsed());
+        response.setPreviousTool(onboarding.getPreviousTool());
+        response.setReferralSource(onboarding.getReferralSource());
         return response;
     }
 
@@ -155,5 +163,37 @@ public class OnboardingResponse {
 
     public void setExperienceLevel(String experienceLevel) {
         this.experienceLevel = experienceLevel;
+    }
+
+    public String getPrimaryGoal() {
+        return primaryGoal;
+    }
+
+    public void setPrimaryGoal(String primaryGoal) {
+        this.primaryGoal = primaryGoal;
+    }
+
+    public List<String> getToolsUsed() {
+        return toolsUsed;
+    }
+
+    public void setToolsUsed(List<String> toolsUsed) {
+        this.toolsUsed = toolsUsed;
+    }
+
+    public String getPreviousTool() {
+        return previousTool;
+    }
+
+    public void setPreviousTool(String previousTool) {
+        this.previousTool = previousTool;
+    }
+
+    public String getReferralSource() {
+        return referralSource;
+    }
+
+    public void setReferralSource(String referralSource) {
+        this.referralSource = referralSource;
     }
 }

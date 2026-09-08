@@ -65,7 +65,7 @@ class InternalPublicationControllerPendingReviewConflictTest {
     void publishWorkflowPendingReviewReturnsConflict() {
         when(publicationService.publishWorkflow(
                 any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), anyBoolean(), any()))
+                any(), any(), any(), any(), anyBoolean(), any(), any()))
                 .thenThrow(new PublicationPendingReviewException(PENDING));
 
         ResponseEntity<?> response = controller.publishWorkflow(
@@ -105,7 +105,7 @@ class InternalPublicationControllerPendingReviewConflictTest {
     void publishWorkflowTransientIllegalStateStays500() {
         when(publicationService.publishWorkflow(
                 any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), anyBoolean(), any()))
+                any(), any(), any(), any(), anyBoolean(), any(), any()))
                 .thenThrow(new IllegalStateException("Showcase snapshot capture failed"));
 
         ResponseEntity<?> response = controller.publishWorkflow(

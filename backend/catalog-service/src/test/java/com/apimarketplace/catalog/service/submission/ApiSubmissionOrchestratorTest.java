@@ -606,6 +606,58 @@ class ApiSubmissionOrchestratorTest {
     // Stable UUID tests (catalog-service-import round-trip)
     // ========================================================================
 
+    @Nested
+    @DisplayName("errorPolicy persistence")
+    class ErrorPolicyTests {
+
+        /**
+         * The link that actually writes the column. The rest of the chain (importer, DTO,
+         * converter, bundle) is asserted elsewhere; without this one, a policy could travel the
+         * whole way and still never be stored.
+         */
+        @Test
+        @DisplayName("a declared errorPolicy is stored on the entity")
+        void errorPolicyIsPersisted() {
+            ObjectNode payload = createBasicPayload();
+            ArrayNode policy = payload.putArray("errorPolicy");
+            ObjectNode rule = policy.addObject();
+            rule.putObject("match").put("bodyContains", "spam_risk_too_many_posts");
+            rule.put("action", "user_error");
+            rule.put("message", "Daily posting limit reached.");
+
+            when(categoryRepository.existsById(testCategoryId)).thenReturn(true);
+            when(apiRepository.save(any(ApiEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            orchestrator.process(new ApiSubmissionCommand(
+                    payload, "user-123", toList(objectMapper.createArrayNode())));
+
+            ArgumentCaptor<ApiEntity> captor = ArgumentCaptor.forClass(ApiEntity.class);
+            verify(apiRepository).save(captor.capture());
+            assertNotNull(captor.getValue().getErrorPolicy(),
+                    "the rules must reach catalog.apis.error_policy, or every one of them is inert");
+            assertTrue(captor.getValue().getErrorPolicy().contains("spam_risk_too_many_posts"));
+        }
+
+        @Test
+        @DisplayName("a policy that is not an array is dropped rather than stored")
+        void nonArrayPolicyIsDropped() {
+            // Stored, it would be re-parsed on every failed call, rejected by the engine and
+            // logged as malformed forever. NULL is the honest representation of "no policy".
+            ObjectNode payload = createBasicPayload();
+            payload.putObject("errorPolicy").put("match", "nonsense");
+
+            when(categoryRepository.existsById(testCategoryId)).thenReturn(true);
+            when(apiRepository.save(any(ApiEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            orchestrator.process(new ApiSubmissionCommand(
+                    payload, "user-123", toList(objectMapper.createArrayNode())));
+
+            ArgumentCaptor<ApiEntity> captor = ArgumentCaptor.forClass(ApiEntity.class);
+            verify(apiRepository).save(captor.capture());
+            assertNull(captor.getValue().getErrorPolicy());
+        }
+    }
+
     /**
      * Tests that a payload carrying {@code apiId} (top-level) and {@code id}
      * (per tool) - the shape emitted by {@code ApiMigrationImporter} after the

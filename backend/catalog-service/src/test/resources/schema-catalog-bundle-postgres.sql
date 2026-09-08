@@ -12,6 +12,7 @@
 --   V107 (tool_credentials.variant + UNIQUE(api_tool_id, credential_name, variant))
 --   V166 (api_tools.required_scopes)
 --   V331 (deprecated_at on apis/api_tools/credentials)
+--   V477 (apis.error_policy)
 --
 -- Why not schema-h2.sql: H2 2.3.232 in MODE=PostgreSQL cannot parse
 -- `ON CONFLICT (…) DO UPDATE` (the three core upserts) nor
@@ -82,6 +83,7 @@ CREATE TABLE IF NOT EXISTS catalog.apis (
     api_version VARCHAR(50),
     documentation VARCHAR(1000),
     rate_limits JSONB,
+    error_policy JSONB,
     deprecated_at TIMESTAMPTZ,
     created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
     updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,

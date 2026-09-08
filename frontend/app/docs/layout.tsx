@@ -6,14 +6,15 @@ import { DocsNav } from './_components/DocsNav';
 import { DocsMobileNav } from './_components/DocsMobileNav';
 import { DocsToc } from './_components/DocsToc';
 import { DocsPrevNext } from './_components/DocsPrevNext';
-import { DocsThemeToggle } from './_components/DocsThemeToggle';
 import { IS_CE } from '@/lib/edition';
 
 // Docs shell. Reuses the public `LandingShell` chrome (header, footer, light-by-
-// default decoupled theme; the toggle below persists a docs-only choice under
-// `docs-theme`) and injects the docs CSS via `extraStyles`, then lays out a
-// sidebar / content / TOC grid inside it. English-only: this whole tree lives
-// outside `app/[locale]`, so nothing here may call next-intl hooks.
+// default decoupled theme persisted under `docs-theme`, so flipping it here never
+// changes the marketing pages) and injects the docs CSS via `extraStyles`, then
+// lays out a sidebar / content / TOC grid inside it. The theme is switched from
+// the footer toggle the whole public site already carries - the docs header adds
+// no control of its own. English-only: this whole tree lives outside
+// `app/[locale]`, so nothing here may call next-intl hooks.
 export const metadata: Metadata = {
   title: {
     template: '%s · LiveContext Docs',
@@ -30,7 +31,6 @@ export default function DocsLayout({ children }: { children: ReactNode }) {
   return (
     <LandingShell
       extraStyles={docsStyles}
-      headerExtra={<DocsThemeToggle />}
       themeStorageKey="docs-theme"
       themeRespectStored
       siteBaseUrl={siteBaseUrl}

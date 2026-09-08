@@ -11,6 +11,7 @@
  * | NodeConfigurationRule   | 8        | #9 params, #10 tool ID, #11-13 decision/loop/switch  |
  * | CrudValidationRule      | 9        | #14-15 datasource validation                         |
  * | CredentialValidationRule| 10       | #16 missing credential                               |
+ * | PlanAvailabilityRule    | 11       | #20 node/endpoint above the subscribed plan          |
  * | InterfaceValidationRule | 11       | #20 missing ID/HTML, #21 unmapped vars               |
  * | CycleDetectionRule      | 12       | #4 cycle detection                                   |
  * | BackEdgeValidationRule  | 13       | Back-edge condition/target validation                 |
@@ -29,6 +30,7 @@ import { NodeConfigurationRule } from './NodeConfigurationRule';
 import { MockConfigurationRule } from './MockConfigurationRule';
 import { CrudValidationRule } from './CrudValidationRule';
 import { CredentialValidationRule } from './CredentialValidationRule';
+import { PlanAvailabilityRule } from './PlanAvailabilityRule';
 import { InterfaceValidationRule } from './InterfaceValidationRule';
 import { CycleDetectionRule } from './CycleDetectionRule';
 import { BackEdgeValidationRule } from './BackEdgeValidationRule';
@@ -48,6 +50,7 @@ const RULE_INSTANCES: ValidationRule[] = [
   new MockConfigurationRule(),
   new CrudValidationRule(),
   new CredentialValidationRule(),
+  new PlanAvailabilityRule(),
   new InterfaceValidationRule(),
   new CycleDetectionRule(),
   new BackEdgeValidationRule(),
@@ -85,6 +88,7 @@ export { NodeConfigurationRule } from './NodeConfigurationRule';
 export { MockConfigurationRule } from './MockConfigurationRule';
 export { CrudValidationRule } from './CrudValidationRule';
 export { CredentialValidationRule } from './CredentialValidationRule';
+export { PlanAvailabilityRule } from './PlanAvailabilityRule';
 export { InterfaceValidationRule } from './InterfaceValidationRule';
 export { CycleDetectionRule } from './CycleDetectionRule';
 export { BackEdgeValidationRule } from './BackEdgeValidationRule';

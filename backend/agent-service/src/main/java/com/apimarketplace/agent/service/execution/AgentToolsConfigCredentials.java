@@ -61,6 +61,7 @@ public final class AgentToolsConfigCredentials {
         passAccessMode(credentials, tc, "applicationAccessMode");
         passAccessMode(credentials, tc, "skillAccessMode");
         passAccessMode(credentials, tc, "fileAccessMode");
+        passAccessMode(credentials, tc, "memoryAccessMode");
     }
 
     /**

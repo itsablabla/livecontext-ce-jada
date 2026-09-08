@@ -34,6 +34,7 @@ import { NodeBottomBar } from './NodeBottomBar';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { getSourceHandleGeometry, getTargetHandleGeometry, getSideAttachment } from './handleGeometry';
+import { NodeActivityShimmer } from './NodeActivityShimmer';
 interface InterfacePreviewNodeProps extends NodeProps<BuilderNodeData> {
   onOpenFullscreen?: () => void;
 }
@@ -64,12 +65,21 @@ export function InterfacePreviewNode({ data, selected, id }: InterfacePreviewNod
   const stepByStepStatus = useNodeExecutionStatus(id, {
     label: data.label,
     kind: data.kind,
+    // While one epoch is focused this is THAT epoch's outcome - what the run controls
+    // must speak about there (the context's own sets accumulate across every epoch).
+    status: data.status,
   });
 
   // Determine effective status: use step-by-step context as source of truth in step-by-step mode
   // Otherwise fall back to data.status (streaming updates for automatic mode)
   const effectiveStatus = React.useMemo((): DerivedNodeStatus | undefined => {
     if (stepByStepStatus.isStepByStepMode) {
+      // A node parked on a signal is NOT running, but it stays in `runningSteps`:
+      // yielding never rewrites the RUNNING step row, so the two sets overlap and
+      // whichever is tested first wins. Awaiting is the newer, more specific fact,
+      // so it goes first - otherwise the waiting state is unreachable and the node
+      // reads blue "running" while its own badge shows an amber pause chip.
+      if (stepByStepStatus.isAwaitingSignal) return 'awaiting_signal';
       if (stepByStepStatus.isRunning) return 'running';
       if (stepByStepStatus.isFailed) return 'failed';
       if (stepByStepStatus.isSkipped) return 'skipped';
@@ -83,6 +93,7 @@ export function InterfacePreviewNode({ data, selected, id }: InterfacePreviewNod
       return 'pending';
     }
     // Auto mode: check running override from streaming
+    if (stepByStepStatus.isAwaitingSignal) return 'awaiting_signal';
     if (stepByStepStatus.isRunning) return 'running';
     return data.status;
   }, [stepByStepStatus, data.status]);
@@ -447,17 +458,7 @@ export function InterfacePreviewNode({ data, selected, id }: InterfacePreviewNod
         }}
         tabIndex={0}
       >
-        {/* Shimmer effect when running */}
-        {isNodeRunning && (
-          <div
-            className="absolute inset-0 pointer-events-none rounded-[26px]"
-            style={{
-              background: 'linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.15) 50%, transparent 100%)',
-              backgroundSize: '200% 100%',
-              animation: 'shimmer-scan 2.5s ease-in-out infinite',
-            }}
-          />
-        )}
+        <NodeActivityShimmer status={effectiveStatus} className="rounded-[26px]" />
 
         {/* Node header - same as FlowNode */}
         <NodeHeader
@@ -637,17 +638,7 @@ export function InterfacePreviewNode({ data, selected, id }: InterfacePreviewNod
         )}
       </div>
 
-      {/* Shimmer effect when running */}
-      {isNodeRunning && (
-        <div
-          className="absolute inset-0 pointer-events-none rounded-xl"
-          style={{
-            background: 'linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.15) 50%, transparent 100%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer-scan 2.5s ease-in-out infinite',
-          }}
-        />
-      )}
+      <NodeActivityShimmer status={effectiveStatus} className="rounded-xl" />
 
       {/* Pagination controls - below node (spawn items only, not epochs).
           Scoped to a focused epoch on purpose: across all epochs the items of

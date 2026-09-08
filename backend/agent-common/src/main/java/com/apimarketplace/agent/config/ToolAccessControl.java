@@ -34,6 +34,10 @@ public final class ToolAccessControl {
         Map.entry("agent",       Set.of("get", "list", "help", "inbox", "outbox", "review_inbox", "backlog", "recurrence_list", "get_history", "search_messages")),
         Map.entry("application", Set.of("search", "my", "get", "visualize", "help")),
         Map.entry("skill",       Set.of("get", "list", "list_folders", "help")),
+        // Memory: save and delete are the only writes. `search` is a READ and is
+        // listed as one - denying recall to a read-only agent would leave it with
+        // a memory index in its context and no way to open anything in it.
+        Map.entry("memory",      Set.of("get", "list", "search", "help")),
         Map.entry("catalog",     Set.of("search", "response_schema", "help")),
         Map.entry("web_search",  Set.of("search", "fetch")),
         // Files: read actions. Write actions (create_folder / move_to_folder) are NOT

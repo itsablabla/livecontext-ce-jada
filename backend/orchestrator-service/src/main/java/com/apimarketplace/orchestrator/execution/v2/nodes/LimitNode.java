@@ -62,7 +62,7 @@ public class LimitNode extends BaseNode {
         earlyInputData.put("count", count);
         earlyInputData.put("from", from);
         earlyInputData.put("offset", offset);
-        earlyInputData.put("input_expression", inputExpression);
+        earlyInputData.put("input", inputExpression);
 
         // Input is required
         if (inputExpression == null || inputExpression.isBlank()) {

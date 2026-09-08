@@ -1122,7 +1122,8 @@ public class ConversationToolExecutionService implements ToolExecutionService {
         }
         // Forward access modes (read/write per resource)
         for (String key : List.of("__tableAccessMode__", "__workflowAccessMode__", "__interfaceAccessMode__",
-                "__agentAccessMode__", "__applicationAccessMode__", "__skillAccessMode__", "__fileAccessMode__")) {
+                "__agentAccessMode__", "__applicationAccessMode__", "__skillAccessMode__", "__fileAccessMode__",
+                "__memoryAccessMode__")) {
             if (credentials != null && credentials.get(key) != null) {
                 request.put(key.substring(2, key.length() - 2), credentials.get(key)); // strip __ prefix/suffix
             }

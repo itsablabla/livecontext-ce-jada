@@ -195,6 +195,24 @@ public class ToolExecutionRequest {
     private String billingStepId;
 
     /**
+     * Workflow (plan) id the call ran under, for product analytics ONLY. Forwarded
+     * from the {@code X-Lc-Workflow-Id} header by the controller, never from the
+     * body (sealed like the billing scope, so a caller cannot attribute its call
+     * to someone else's workflow). Null outside a workflow run.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String analyticsWorkflowId;
+
+    /**
+     * Workflow node id the call ran under, for product analytics ONLY. Forwarded
+     * from the {@code X-Lc-Node-Id} header. Deliberately distinct from
+     * {@link #billingStepId}: that one shapes the ledger source-id, so lighting it
+     * up for attribution would change what is charged. This one changes nothing.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String analyticsNodeId;
+
+    /**
      * V428 generation model priced for this call, populated ONLY from the
      * {@code X-Lc-Generation-Model} header by the controller. Null for an
      * ordinary tool call.

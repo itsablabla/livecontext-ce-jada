@@ -77,6 +77,28 @@ export interface SidePanelContextValue {
   collapsed: boolean;
   setCollapsed(collapsed: boolean): void;
   /**
+   * The panel is showing FULL SCREEN: the same panel, the same tabs, the same
+   * mounted content, painted over the whole viewport instead of in its dock.
+   *
+   * The exact opposite of `collapsed`, and held next to it for the same reason:
+   * it is a pure render mode. It changes neither `isOpen` nor the dock position,
+   * so restoring puts the panel back on the dock the user had, at the width they
+   * had dragged it to, with every `keepMounted` tab (a running canvas, an SSE
+   * stream, an interface iframe) untouched. Nothing outside the panel needs to
+   * branch on it: a maximised panel is MORE forward, never less, so `isForward`
+   * is already right without reading it.
+   *
+   * Session-only, like `collapsed`: a reload should not land on a full-screen
+   * panel with no memory of asking for one.
+   */
+  maximized: boolean;
+  /**
+   * Enter or leave full screen. Going full screen lifts the shade at the SOURCE,
+   * so "maximised implies not shaded" holds for every caller rather than only for
+   * the button that happens to be on screen today.
+   */
+  setMaximized(maximized: boolean): void;
+  /**
    * Is the panel actually SHOWING something? Open and shaded is neither.
    *
    * Derived here rather than at each surface, because "open" is the wrong question
@@ -296,6 +318,17 @@ export function SidePanelProvider({ children }: { children: ReactNode }) {
    * of them bumped it.
    */
   const liftShade = useCallback(() => setCollapsed(false), []);
+
+  const [maximized, setMaximizedState] = useState(false);
+  /**
+   * Full screen and shaded are contradictory states, so the two are reconciled
+   * here rather than at each call site: whoever maximises the panel gets an
+   * un-shaded one, including a caller added later that never thought about it.
+   */
+  const setMaximized = useCallback((next: boolean) => {
+    if (next) setCollapsed(false);
+    setMaximizedState(next);
+  }, []);
   const open = useCallback(() => { liftShade(); setIsOpen(true); }, [liftShade]);
   /**
    * Bringing a tab forward, which is the ONLY reason anything calls this: a live
@@ -425,6 +458,20 @@ export function SidePanelProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  /**
+   * A closed panel is not full screen.
+   *
+   * Stated as a RULE about the closed state, not as a close->restore transition:
+   * a transition has to be fired by whichever of the several close routes the
+   * user took, and the one that is missed strands the flag, so the NEXT open
+   * covers the whole app with no control having asked for it. As a rule it cannot
+   * strand, and it is also what makes closing the panel a way out of full screen.
+   */
+  useEffect(() => {
+    if (isOpen) return;
+    setMaximizedState(false);
+  }, [isOpen]);
+
   const isForward = isOpen && !collapsed;
   const bringForward = useCallback(() => {
     if (!isOpenRef.current || !collapsedRef.current) return false;
@@ -450,10 +497,12 @@ export function SidePanelProvider({ children }: { children: ReactNode }) {
     openTabDeferred,
     collapsed,
     setCollapsed,
+    maximized,
+    setMaximized,
     isForward,
     bringForward,
     dismissPeek,
-  }), [isOpen, tabs, activeTabId, isPeeking, collapsed, isForward, bringForward, open, close, toggle, addTab, removeTab, updateTab, setActiveTab, clearTabs, moveTab, openTab, openTabDeferred, dismissPeek]);
+  }), [isOpen, tabs, activeTabId, isPeeking, collapsed, maximized, setMaximized, isForward, bringForward, open, close, toggle, addTab, removeTab, updateTab, setActiveTab, clearTabs, moveTab, openTab, openTabDeferred, dismissPeek]);
 
   return (
     <SidePanelContext.Provider value={value}>

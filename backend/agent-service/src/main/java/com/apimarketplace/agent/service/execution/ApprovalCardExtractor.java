@@ -26,7 +26,9 @@ import java.util.Optional;
  * <ol>
  *   <li>{@code serviceApprovalRequested} metadata with a non-empty {@code services} list,</li>
  *   <li>{@code toolAuthorizationRequired} metadata carrying a {@code rule},</li>
- *   <li>{@code approval_needed} JSON in the content (the catalog credential pre-flight).</li>
+ *   <li>{@code approval_needed} JSON in the content (the catalog credential pre-flight),</li>
+ *   <li>{@code userQuestionRequested} metadata carrying a {@code userQuestion} payload (the
+ *       {@code ask_user} tool, when its park ran out of time and the question is still open).</li>
  * </ol>
  */
 @Slf4j
@@ -49,9 +51,27 @@ public class ApprovalCardExtractor {
             /** "Connect this service to continue" - a missing credential. */
             SERVICE,
             /** "Authorize this action" - a sensitive action gated by policy. */
-            AUTHORIZATION
+            AUTHORIZATION,
+            /**
+             * "Pick one" - a question the agent put to the person ({@code ask_user}). The
+             * card payload travels in {@code authorizationMetadata} under {@code userQuestion}.
+             */
+            USER_QUESTION
+        }
+
+        /** The question payload, for {@link Kind#USER_QUESTION}; {@code null} otherwise. */
+        @SuppressWarnings("unchecked")
+        public Map<String, Object> userQuestion() {
+            return authorizationMetadata != null
+                    && authorizationMetadata.get(USER_QUESTION_KEY) instanceof Map<?, ?> m
+                    ? (Map<String, Object>) m : null;
         }
     }
+
+    /** Metadata flag set by the {@code ask_user} tool when its question is still open. */
+    public static final String USER_QUESTION_REQUESTED_KEY = "userQuestionRequested";
+    /** Metadata entry carrying the question payload ({@code toolCallId} + {@code questions}). */
+    public static final String USER_QUESTION_KEY = "userQuestion";
 
     /**
      * @return the card this result asks for, or empty when it asks for nothing. A failed
@@ -89,7 +109,18 @@ public class ApprovalCardExtractor {
             return Optional.empty();
         }
 
-        // 3) Soft "approval_needed" JSON returned in the tool content (catalog credential miss).
+        // 3) A question the agent put to the person and that nobody has answered yet.
+        if (metadata != null && Boolean.TRUE.equals(metadata.get(USER_QUESTION_REQUESTED_KEY))
+                && metadata.get(USER_QUESTION_KEY) instanceof Map<?, ?> question) {
+            Object toolCallId = question.get("toolCallId");
+            if (toolCallId != null && !String.valueOf(toolCallId).isBlank()) {
+                return Optional.of(new ApprovalCard(
+                        ApprovalCard.Kind.USER_QUESTION, null, null, false, metadata, "ask:" + toolCallId));
+            }
+            return Optional.empty();
+        }
+
+        // 4) Soft "approval_needed" JSON returned in the tool content (catalog credential miss).
         String content = result.content();
         if (content != null && content.contains("approval_needed")) {
             try {

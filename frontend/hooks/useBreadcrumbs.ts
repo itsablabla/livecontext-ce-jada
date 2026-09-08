@@ -1,5 +1,6 @@
 'use client';
 
+import type { AgentPageTab } from '@/components/views/AgentPageTabBar';
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Home, Table as TableIcon, Workflow, LayoutPanelTop, Zap, Bot } from 'lucide-react';
@@ -87,8 +88,24 @@ interface UseBreadcrumbsReturn {
   filesDetail: FilesDetailState | null;
 }
 
+/**
+ * Agents-page tabs (?view=) and the trailing crumb each one gets under "Agents".
+ *
+ * Keyed by the tab union MINUS the default tab, so adding a tab to AgentPageTab without
+ * giving it a crumb is a COMPILE error rather than a silent fall-through to the bare
+ * "Agents" crumb - which is how the Memory tab shipped crumbless.
+ */
+export const AGENT_TAB_CRUMBS: Record<Exclude<AgentPageTab, 'agents'>, string> = {
+  'fleet': 'Fleet',
+  'metrics': 'Metrics',
+  'skills': 'Skills',
+  'memory': 'Memory',
+  'settings': 'Settings',
+};
+
 const SETTINGS_LABELS: Record<string, string> = {
   'overview': 'Overview',
+  'agents': 'Agents & Chat',
   'subscription': 'Subscription',
   'api': 'MCPs',
   'apis': 'MCPs',
@@ -781,25 +798,20 @@ export function useBreadcrumbs(_options: UseBreadcrumbsOptions = {}): UseBreadcr
     // Agent breadcrumbs
     if (isAgentView) {
       const view = searchParams.get('view');
-      if (view === 'fleet') {
+      // Every non-default Agents tab is one crumb under 'Agents'; AGENT_TAB_CRUMBS is keyed by
+      // the tab union, so a new tab cannot reach here without one. hasOwnProperty, not a bare
+      // lookup: ?view= is whatever the address bar holds, and 'toString' or '__proto__' would
+      // otherwise resolve up the prototype chain to a truthy non-string and land a function or
+      // an object where the crumb expects a label. An unknown ?view= is not a tab and falls
+      // through to the plain Agents crumb below.
+      const tabLabel = view && Object.prototype.hasOwnProperty.call(AGENT_TAB_CRUMBS, view)
+        ? AGENT_TAB_CRUMBS[view as Exclude<AgentPageTab, 'agents'>]
+        : undefined;
+      if (tabLabel) {
         return [
           homeItem,
           { label: 'Agents', onClick: () => goToListPage('/app/agent') },
-          { label: 'Fleet' },
-        ];
-      }
-      if (view === 'metrics') {
-        return [
-          homeItem,
-          { label: 'Agents', onClick: () => goToListPage('/app/agent') },
-          { label: 'Metrics' },
-        ];
-      }
-      if (view === 'skills') {
-        return [
-          homeItem,
-          { label: 'Agents', onClick: () => goToListPage('/app/agent') },
-          { label: 'Skills' },
+          { label: tabLabel },
         ];
       }
       const agentFolderPath = folderCrumbs('agent');

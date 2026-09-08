@@ -356,8 +356,11 @@ public class OAuth2Service {
         // are normalized against the URL template (scheme/path stripped, a pasted host suffix like
         // ".myshopify.com" removed) so both the redirect and the stored value stay consistent.
         // No-op for the vast majority of providers (empty map -> URLs unchanged).
-        Map<String, String> templateVars =
-                normalizeHostVarsAgainstTemplate(request.templateVarsOrEmpty(), providerConfig.authorizationUrl());
+        Map<String, String> templateVars = normalizeHostVarsAgainstTemplates(
+                request.templateVarsOrEmpty(),
+                providerConfig.authorizationUrl(),
+                providerConfig.tokenUrl(),
+                credentialTemplateBaseUrl(template));
         if (!templateVars.isEmpty()) {
             providerConfig = providerConfig.withUrls(
                     substituteHostVars(providerConfig.authorizationUrl(), templateVars),
@@ -430,8 +433,10 @@ public class OAuth2Service {
         // the token URL template so a pasted full host collapses to the bare id. The
         // authorization_code branch handles its own vars earlier (this path returns before it); this
         // is the client_credentials counterpart. No-op for providers with no host vars.
-        credentialData.putAll(
-                normalizeHostVarsAgainstTemplate(request.templateVarsOrEmpty(), providerConfig.tokenUrl()));
+        credentialData.putAll(normalizeHostVarsAgainstTemplates(
+                request.templateVarsOrEmpty(),
+                providerConfig.tokenUrl(),
+                credentialTemplateBaseUrl(template)));
 
         HttpEntity<?> requestEntity =
                 engine.buildClientCredentialsRequest(providerConfig, clientId, clientSecret);
@@ -1321,6 +1326,23 @@ public class OAuth2Service {
      * dropped so the fail-fast guard can flag a required-but-missing var.
      */
     Map<String, String> normalizeHostVarsAgainstTemplate(Map<String, String> vars, String urlTemplate) {
+        return normalizeHostVarsAgainstTemplates(vars, urlTemplate);
+    }
+
+    /**
+     * Same contract as {@link #normalizeHostVarsAgainstTemplate}, but the suffix is looked up
+     * across SEVERAL URL templates and the first one that actually contains the placeholder wins.
+     *
+     * <p>A per-instance host can live only in the API's {@code baseUrl} and not in the OAuth
+     * authorize/token URLs (Salesforce {@code {instance}} in
+     * {@code https://{instance}.my.salesforce.com}, while it authorizes against the literal
+     * {@code login.salesforce.com}). Normalizing such a var against the authorize URL alone finds
+     * no suffix to strip, so a user who pastes {@code https://acme.my.salesforce.com} keeps
+     * {@code acme.my.salesforce.com} and the runtime base URL becomes
+     * {@code https://acme.my.salesforce.com.my.salesforce.com}. Passing the baseUrl as a fallback
+     * template makes the suffix discoverable and keeps the strip generic, with no per-provider code.
+     */
+    Map<String, String> normalizeHostVarsAgainstTemplates(Map<String, String> vars, String... urlTemplates) {
         if (vars == null || vars.isEmpty()) {
             return Map.of();
         }
@@ -1329,12 +1351,37 @@ public class OAuth2Service {
             if (e.getKey() == null || e.getValue() == null) {
                 continue;
             }
-            String cleaned = normalizeHostVarValue(e.getValue(), hostSuffixFor(urlTemplate, e.getKey()));
+            String cleaned = normalizeHostVarValue(e.getValue(), firstHostSuffixFor(urlTemplates, e.getKey()));
             if (!cleaned.isEmpty()) {
                 out.put(e.getKey(), cleaned);
             }
         }
         return out;
+    }
+
+    /**
+     * The API's {@code baseUrl} as stored on the credential template ({@code test_endpoint}), or
+     * {@code null}. Used only as a fallback URL template for host-var suffix stripping.
+     */
+    private String credentialTemplateBaseUrl(JsonNode template) {
+        if (template == null || template.isNull()) {
+            return null;
+        }
+        String v = template.path("test_endpoint").asText("");
+        return v.isBlank() ? null : v;
+    }
+
+    /** Suffix from the first template that carries {@code {key}}; empty when none does. */
+    private String firstHostSuffixFor(String[] urlTemplates, String key) {
+        if (urlTemplates == null) {
+            return "";
+        }
+        for (String t : urlTemplates) {
+            if (t != null && t.contains("{" + key + "}")) {
+                return hostSuffixFor(t, key);
+            }
+        }
+        return "";
     }
 
     /** Literal text following {@code {key}} in {@code url}, up to the next path/port/placeholder. */

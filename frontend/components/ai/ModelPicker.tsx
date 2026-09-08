@@ -37,6 +37,8 @@ import { getProviderIconSlug, getProviderDisplayName } from '@/lib/ai-providers/
 import { ModelOptionDisplay, ModelInfoPopover } from '@/components/ai/ModelInfo';
 import { UpgradeRequiredNotice } from '@/components/billing/UpgradeRequiredBadge';
 import { useMonthlyCreditsCannotPay } from '@/lib/hooks/useMonthlyCreditsCannotPay';
+import { useModelCostBasis } from '@/lib/hooks/useModelCostBasis';
+import type { CostProfileId } from '@/lib/billing/model-cost-estimate';
 import { NoProviderCta } from '@/components/ai/NoProviderCta';
 import { IS_CE } from '@/lib/edition';
 
@@ -71,6 +73,15 @@ export interface ModelPickerProps {
    * time. Default false (primary-model pickers keep the full catalog).
    */
   excludeBridgeProviders?: boolean;
+  /**
+   * Which shape of work the credit estimate beside each model should price.
+   * The surface knows what it is configuring and the caller must say so: an
+   * agent that calls tools costs roughly a hundred times a classify step, so a
+   * single default would be wrong on every screen but one. Defaults to the
+   * agent conversation, the dearest case, so an un-updated call site
+   * over-states rather than under-states the cost.
+   */
+  costProfile?: CostProfileId;
 }
 
 /**
@@ -88,12 +99,16 @@ export function ModelPicker({
   className,
   filterCapability = 'chat',
   excludeBridgeProviders = false,
+  costProfile = 'agentConversation',
 }: ModelPickerProps) {
   const { providers, defaultModel, defaultProvider, isLoading, error } = useVisibleModels();
   // Asked ONCE for the whole list: the answer is about the account, not about
   // any one model, and a query observer per option would be a waste of the same
   // cached answer.
   const { blocked: upgradeRequired } = useMonthlyCreditsCannotPay();
+  // Same reasoning, same shape: one answer for the whole list, handed down to
+  // the presentational rows rather than fetched behind each of them.
+  const { basis: costBasis } = useModelCostBasis();
 
   // Apply the capability (and optional bridge-exclusion) filter ONCE at the
   // top: providers without any matching model are dropped entirely (so the
@@ -235,7 +250,9 @@ export function ModelPicker({
           <Label className="text-sm font-semibold text-slate-500 dark:text-slate-400">
             {modelLabel}
           </Label>
-          {selectedModel && <ModelInfoPopover model={selectedModel} />}
+          {selectedModel && (
+            <ModelInfoPopover model={selectedModel} costBasis={costBasis} costProfile={costProfile} />
+          )}
         </div>
         <Select
           key={currentProvider}
@@ -258,7 +275,12 @@ export function ModelPicker({
                   exactly like the dropdown rows, so the collapsed trigger and the
                   menu stay visually identical. */}
               {selectedModel ? (
-                <ModelOptionDisplay model={selectedModel} upgradeRequired={upgradeRequired} />
+                <ModelOptionDisplay
+                  model={selectedModel}
+                  upgradeRequired={upgradeRequired}
+                  costBasis={costBasis}
+                  costProfile={costProfile}
+                />
               ) : (
                 <span className="truncate text-sm font-medium">{selectedModelName}</span>
               )}
@@ -275,7 +297,12 @@ export function ModelPicker({
                     height={16}
                     className="w-4 h-4 flex-shrink-0 rounded-md p-0.5 dark:bg-slate-100/10 mt-0.5"
                   />
-                  <ModelOptionDisplay model={model} upgradeRequired={upgradeRequired} />
+                  <ModelOptionDisplay
+                    model={model}
+                    upgradeRequired={upgradeRequired}
+                    costBasis={costBasis}
+                    costProfile={costProfile}
+                  />
                 </div>
               </SelectItem>
             ))}

@@ -224,6 +224,19 @@ public class CeDownloadController {
         // this endpoint exists to serve).
         response.put("ceExclusive", publication.isCeExclusive());
         response.put("ceExclusiveFeatures", publication.getCeExclusiveFeatures());
+        // The studio axis, DESCRIBED and not yet acted on - exactly like ceExclusive above.
+        //
+        // Nothing on the acquiring side reads it today: RemoteMarketplaceService.acquirePublication
+        // takes the snapshot apart for the fields it needs to clone (publicationType, title,
+        // creditsPaid, the two snapshots) and writes a receipt plus cloned orchestrator resources.
+        // It creates no local publication row, and there is no column on the cloned workflow for an
+        // axis to land in, so an acquired studio app is not on the acquirer's shelf. Saying it were
+        // would be a comment describing an intention rather than the code.
+        //
+        // It ships anyway for the same reason ceExclusive does: this payload is the whole public
+        // description of a publication, an install may be a version ahead of the cloud it is
+        // reading, and a field withheld now is one a future acquirer cannot ask for retroactively.
+        response.put("studio", publication.isStudio());
         return response;
     }
 

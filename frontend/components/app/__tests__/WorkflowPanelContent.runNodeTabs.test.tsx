@@ -72,7 +72,11 @@ vi.mock('@/components/app/NodeCreatorPanelContent', () => ({
 }));
 
 import { panelTabClass } from '@/components/ui/panel-tab';
-import { WorkflowPanelContent } from '@/components/app/WorkflowPanelContent';
+import {
+  NODE_CREATOR_TAB_ID,
+  WorkflowPanelContent,
+  setPendingActivateTab,
+} from '@/components/app/WorkflowPanelContent';
 import {
   clearRunPanelCache,
   makeEmptyRunPanelData,
@@ -155,6 +159,54 @@ describe('WorkflowPanelContent - Run / Add Node sub-tabs', () => {
     act(() => openNodeCreatorPanel({ workflowId: 'wf-1' }));
 
     expect(screen.getByTestId('node-creator')).toBeTruthy();
+  });
+
+  it('refuses a palette request on a workflow the caller may not change, without moving the user', () => {
+    // The canvas "+" reaches the listener directly, so the tab-bar guard alone
+    // would not hold. Leaving the refusal to the availability effect - which
+    // resets the tab a commit later - is not equivalent either: it lands the user
+    // on the canvas, i.e. the "+" still took them off the tab they were reading.
+    // Staying put is what proves the request was refused where it arrived.
+    render(<WorkflowPanelContent workflowId="wf-1" workflowCanvasSlot={<div />} canEditWorkflow={false} />);
+    act(() => { screen.getByText('sidePanel.aiChat').closest('button')!.click(); });
+    expect(screen.getByTestId('chat')).toBeTruthy();
+
+    act(() => openNodeCreatorPanel({ workflowId: 'wf-1' }));
+
+    expect(screen.queryByTestId('node-creator')).toBeNull();
+    expect(
+      screen.getByText('sidePanel.aiChat').closest('button')!.getAttribute('aria-pressed'),
+      'the request was refused, not bounced back through the canvas',
+    ).toBe('true');
+  });
+
+  it('refuses a palette activation sent by another surface, without moving the user', () => {
+    // The cross-component activate event is a second way in and does not pass
+    // through the listener above, so it needs the same refusal - otherwise the
+    // canvas toggle in the application view could still send a reader of the AI
+    // chat to a palette this panel does not offer.
+    render(<WorkflowPanelContent workflowId="wf-1" workflowCanvasSlot={<div />} canEditWorkflow={false} />);
+    act(() => { screen.getByText('sidePanel.aiChat').closest('button')!.click(); });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('workflowPanelActivateTab', {
+        detail: { tabId: '__add_node__', workflowId: 'wf-1' },
+      }));
+    });
+
+    expect(screen.queryByTestId('node-creator')).toBeNull();
+    expect(screen.getByText('sidePanel.aiChat').closest('button')!.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('never MOUNTS the palette for a handoff recorded outside either listener', () => {
+    // The pending-tab handoff bypasses both listeners and lands straight in the
+    // active tab, so the availability effect only undoes it on the NEXT commit -
+    // by which point the palette has already been mounted once. Reading the final
+    // DOM cannot see that; reading whether the component ever rendered can.
+    setPendingActivateTab(NODE_CREATOR_TAB_ID, 'wf-probe');
+    render(<WorkflowPanelContent workflowId="wf-probe" workflowCanvasSlot={<div />} canEditWorkflow={false} />);
+
+    expect(nodeCreatorProps.current, 'mounted for one commit, then taken back').toBeNull();
   });
 
   it('ignores a palette request aimed at another workflow', () => {
@@ -254,6 +306,21 @@ describe('WorkflowPanelContent - Run / Add Node sub-tabs', () => {
     render(<WorkflowPanelContent workflowId="wf-1" isPreviewOnly workflowCanvasSlot={<div />} allowRunHistory />);
     act(() => openRunPanel({ workflowId: 'wf-1' }));
     expect(runPanelProps.current.allowHistory).toBe(false);
+  });
+
+  it('withholds the palette on a workflow the caller may not change', () => {
+    // An installed application's canvas: not a preview, and it can sit with no
+    // run bound, so neither existing guard covered it. Its plan is frozen by the
+    // backend, so a node dropped from the palette could never be saved - and the
+    // Save button beside it is withheld for exactly that reason.
+    render(<WorkflowPanelContent workflowId="wf-1" workflowCanvasSlot={<div />} canEditWorkflow={false} />);
+    expect(screen.queryByText('workflowBuilder.canvas.addNode')).toBeNull();
+
+    cleanup();
+
+    // Control: the same surface for someone who MAY change it still gets it.
+    render(<WorkflowPanelContent workflowId="wf-1" workflowCanvasSlot={<div />} canEditWorkflow />);
+    expect(screen.getByText('workflowBuilder.canvas.addNode')).toBeTruthy();
   });
 
   it('keeps the Run tab in marketplace preview but never the palette', () => {

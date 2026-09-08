@@ -24,11 +24,20 @@ WORKDIR /app
 # Pass the PEM via --build-arg BUILD_EXTRA_CA="$(cat root.pem)" (the e2e slot
 # compose forwards $BUILD_EXTRA_CA). Empty (default) = strict no-op, CI-safe.
 ARG BUILD_EXTRA_CA=""
+# keytool -importcert reads only the FIRST certificate of a PEM file, so a
+# bundle carrying several interception roots has to be split and imported one
+# by one - otherwise every root but the first is silently dropped and the build
+# dies on a PKIX error that names none of this.
 RUN if [ -n "$BUILD_EXTRA_CA" ]; then \
       printf '%s\n' "$BUILD_EXTRA_CA" > /tmp/build-extra-ca.pem \
-      && keytool -importcert -noprompt -trustcacerts -alias build-extra-ca \
-           -file /tmp/build-extra-ca.pem -cacerts -storepass changeit \
-      && echo "Imported extra build CA into JVM truststore"; \
+      && mkdir -p /tmp/build-extra-ca.d \
+      && awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/build-extra-ca.d/ca-" n ".pem")}' /tmp/build-extra-ca.pem \
+      && for cert in /tmp/build-extra-ca.d/*.pem; do \
+           keytool -importcert -noprompt -trustcacerts \
+             -alias "build-extra-ca-$(basename "$cert" .pem)" \
+             -file "$cert" -cacerts -storepass changeit; \
+         done \
+      && echo "Imported $(ls /tmp/build-extra-ca.d | wc -l) extra build CA(s) into JVM truststore"; \
     fi
 
 # Copy parent POM

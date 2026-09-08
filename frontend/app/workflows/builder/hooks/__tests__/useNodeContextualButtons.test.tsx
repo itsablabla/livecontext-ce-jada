@@ -28,6 +28,12 @@ vi.mock('@/components/app/AgentPanelContent', () => ({
 vi.mock('@/components/app/DataSourcePanelContent', () => ({
   DataSourcePanelContent: () => null,
 }));
+// The hook reads which canvas it belongs to from this context (and nothing else
+// from it), so a stand-in is enough - the real provider needs a Next router.
+const hostWorkflowId = vi.hoisted(() => ({ current: undefined as string | undefined }));
+vi.mock('@/contexts/WorkflowModeContext', () => ({
+  useWorkflowMode: () => ({ workflowId: hostWorkflowId.current }),
+}));
 const openFilesPanelMock = vi.fn();
 vi.mock('@/lib/sidePanel/openFilesPanel', () => ({
   openFilesPanel: (...args: unknown[]) => openFilesPanelMock(...args),
@@ -119,10 +125,15 @@ describe('deriveNodeContextFlags', () => {
 describe('useNodeContextualButtons', () => {
   beforeEach(() => {
     mockSidePanel = { openTab: vi.fn(), updateTab: vi.fn(), setActiveTab: vi.fn(), open: vi.fn(), tabs: [] };
+    hostWorkflowId.current = undefined;
   });
 
-  const render = (data: BuilderNodeData, opts?: { isRunMode?: boolean; includeFiles?: boolean; currentFile?: any }) => {
+  const render = (
+    data: BuilderNodeData,
+    opts?: { isRunMode?: boolean; includeFiles?: boolean; currentFile?: any; hostWorkflowId?: string },
+  ) => {
     const flags = deriveNodeContextFlags(data, data.id);
+    hostWorkflowId.current = opts?.hostWorkflowId;
     return renderHook(() =>
       useNodeContextualButtons({
         data,
@@ -161,6 +172,23 @@ describe('useNodeContextualButtons', () => {
     const evt = spy.mock.calls[0][0] as CustomEvent;
     expect(evt.type).toBe('workflowOpenSubWorkflow');
     expect(evt.detail).toMatchObject({ workflowId: 'wf-42', nodeId: 'sub_workflow' });
+    spy.mockRestore();
+  });
+
+  it('addresses that request to the canvas it was clicked on', () => {
+    // Every listener sits on `window` and they all build the same tab id, so an
+    // unaddressed request is answered by all of them and the last one wins - which
+    // is how a workflow tab mounted elsewhere could re-open a sub-workflow the
+    // application panel had just opened locked. The source travels with the event.
+    const { result } = render(
+      nodeData({ id: 'sub_workflow', kind: 'sub_workflow', subWorkflowId: 'wf-42', workflowData: { workflowName: 'Child' } }),
+      { isRunMode: true, hostWorkflowId: 'host-wf-1' },
+    );
+    const spy = vi.spyOn(window, 'dispatchEvent');
+    result.current.find((b) => b.key === 'subworkflow')!.onClick({ stopPropagation() {} } as any);
+
+    const evt = spy.mock.calls[0][0] as CustomEvent;
+    expect(evt.detail).toMatchObject({ workflowId: 'wf-42', sourceWorkflowId: 'host-wf-1' });
     spy.mockRestore();
   });
 

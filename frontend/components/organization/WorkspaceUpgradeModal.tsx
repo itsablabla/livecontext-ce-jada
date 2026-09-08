@@ -61,7 +61,7 @@ export function WorkspaceUpgradeModal({ open, onClose, variant = 'teammates' }: 
           </Button>
           <button
             onClick={onClose}
-            className="mt-3 text-xs text-theme-muted hover:text-theme-primary underline-offset-2 hover:underline"
+            className="mt-3 block w-full text-xs text-theme-muted hover:text-theme-primary underline-offset-2 hover:underline"
           >
             {t('dismiss')}
           </button>

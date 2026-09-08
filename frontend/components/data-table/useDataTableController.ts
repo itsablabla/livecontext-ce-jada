@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
 import { useToast } from '@/components/Toast';
 import type { ColumnDefinition, DataSourceItemRow, DataTableProps } from '@/components/data-table/types';
-import { createViewConfig, type ViewConfig } from './viewConfig';
+import { createViewConfig, getFixedColumns, getRowLevelExportFields, type ViewConfig } from './viewConfig';
 import {
   useTableSelection,
   useTableExport,
@@ -38,6 +38,11 @@ export function useDataTableController({ dataSourceId, jsonPath, workflowContext
     () => createViewConfig(workflowContext, showIdColumn, jsonPath, readOnly, isSnapshot),
     [workflowContext, showIdColumn, jsonPath, readOnly, isSnapshot]
   );
+
+  // The fields this view renders as fixed lanes. Memoized: it feeds a callback dep array, and a
+  // fresh array each render would quietly cost that callback its referential stability.
+  const fixedColumnFields = useMemo(() => getFixedColumns(viewConfig), [viewConfig]);
+  const rowLevelFields = useMemo(() => getRowLevelExportFields(viewConfig), [viewConfig]);
 
   // Use pagination hook
   const { pagination, setPagination } = usePagination({ initialPageSize: 20 });
@@ -158,12 +163,15 @@ export function useDataTableController({ dataSourceId, jsonPath, workflowContext
     newRowPriority,
     isAddingRow,
     isAddingRowInline,
+    isDuplicatingRows,
+    revealedRowIds,
     setShowAddRowModal,
     setNewRowData,
     setNewRowPriority,
     handleSaveEdit,
     addNewRow,
     deleteSelectedRows: deleteSelectedRowsBase,
+    duplicateSelectedRows: duplicateSelectedRowsBase,
     startAddingRowInline,
     cancelAddingRowInline,
     handleRowDataChange,
@@ -174,6 +182,9 @@ export function useDataTableController({ dataSourceId, jsonPath, workflowContext
     rows,
     setRows,
     pagination,
+    sortConfig,
+    columns,
+    rowLevelFields,
     fetchData: (page, pageSize) => fetchDataBase(page, pageSize, sortConfig, null, serverFilters),
     addToast,
   });
@@ -183,6 +194,15 @@ export function useDataTableController({ dataSourceId, jsonPath, workflowContext
     await deleteSelectedRowsBase(selectedRows, getRowUniqueKey);
     setSelectedRows(new Set());
   }, [deleteSelectedRowsBase, selectedRows, getRowUniqueKey, setSelectedRows]);
+
+  // Wrapper for duplicateSelectedRows. The selection is dropped only when EVERY selected row was
+  // copied: leaving the originals ticked next to freshly highlighted copies reads as if the copies
+  // were the selection. A partial result keeps it, because the rows that did not get copied are
+  // exactly the ones the user needs still ticked to try again.
+  const duplicateSelectedRows = useCallback(async () => {
+    const written = await duplicateSelectedRowsBase(selectedRows, getRowUniqueKey);
+    if (written === selectedRows.size) setSelectedRows(new Set());
+  }, [duplicateSelectedRowsBase, selectedRows, getRowUniqueKey, setSelectedRows]);
 
   // Use column operations hook
   const {
@@ -195,6 +215,7 @@ export function useDataTableController({ dataSourceId, jsonPath, workflowContext
     showEditColumnModal,
     columnToEdit,
     isEditingColumn,
+    revealedColumnField,
     setShowAddColumnModal,
     setNewColumnName,
     setSelectedColumnStyle,
@@ -305,6 +326,7 @@ export function useDataTableController({ dataSourceId, jsonPath, workflowContext
   } = useDataSourceCreation({
     dataSourceId,
     displayRows: displayRows as any,
+    columns,
     selectedRows,
     selectedColumns,
     getRowUniqueKey,
@@ -335,6 +357,8 @@ export function useDataTableController({ dataSourceId, jsonPath, workflowContext
     pagination,
     addToast,
     getUniqueColumns,
+    fixedColumnFields,
+    rowLevelFields,
   });
 
   // Track previous config to detect changes and reset state
@@ -427,6 +451,9 @@ export function useDataTableController({ dataSourceId, jsonPath, workflowContext
     addNewRow,
     cancelAddingRowInline,
     deleteSelectedRows,
+    duplicateSelectedRows,
+    isDuplicatingRows,
+    revealedRowIds,
     handleRowDataChange,
     handleSaveEdit,
     isAddingRow,
@@ -465,6 +492,7 @@ export function useDataTableController({ dataSourceId, jsonPath, workflowContext
     setColumnToEdit,
     setShowEditColumnModal,
     showEditColumnModal,
+    revealedColumnField,
 
     // Selection
     clearColumnSelection,

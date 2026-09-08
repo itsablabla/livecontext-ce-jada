@@ -226,11 +226,6 @@ function connectedComponents(
 }
 
 /**
- * Lay out a single (connected) graph with Dagre and return ReactFlow-positioned
- * nodes. Loop-back edges are skipped (cycles); While exit edges are rerouted from
- * the last body node so the exit lands after the body chain.
- */
-/**
  * Center connected nodes on the CROSS axis (perpendicular to the flow) so a parent
  * sits over the middle of its children and a single child lines up under its parent,
  * making the main edge run straight instead of bending.
@@ -245,8 +240,9 @@ function connectedComponents(
  * overlap back to a non-overlapping spread centred on the same midpoint. So it can
  * only straighten alignment, never introduce a collision dagre had avoided.
  *
- * Runs in BOTH directions (the offset exists on either axis); horizontal users get
- * the same straightening, which is why the audit's "do it in horizontal too" applies.
+ * Direction-agnostic in itself, but only the VERTICAL path calls it: horizontal keeps
+ * the historical plain-Dagre placement so long-standing left-to-right canvases lay out
+ * exactly as they always did (see the gate in applyDagreLayout).
  */
 export function centerOnCrossAxis(
   laid: Node<BuilderNodeData>[],
@@ -347,6 +343,71 @@ export function centerOnCrossAxis(
   return laid;
 }
 
+/**
+ * Below this, a move is float noise from re-running the same arithmetic, and emitting it
+ * would mark an untouched workflow dirty for nothing.
+ */
+export const RELAYOUT_MIN_SHIFT_PX = 0.5;
+
+/** Every node has painted, so a layout computed from these dims describes what is on screen. */
+export function hasMeasuredDimensions(nodes: Node<BuilderNodeData>[]): boolean {
+  return nodes.every((n) => isMeasured(n.width) && isMeasured(n.height));
+}
+
+/**
+ * Replay the layout on the dimensions the browser actually PAINTED.
+ *
+ * The builder lays out from deterministic estimates, never from measured dims
+ * (`LAYOUT_CONFIG.ignoreMeasured`), which is what keeps the auto-layout button
+ * reproducible. Every estimate that is wrong then shows up twice on the canvas:
+ *
+ *  - on the CROSS axis as a bend, because a node is centred on a width it does not
+ *    have (two nodes that both paint at 200 estimate 208.5 and 200);
+ *  - on the FLOW axis as an OVERLAP, because the rank after a node is placed at
+ *    `estimated height + ranksep`. An interface node in preview mode reserves the
+ *    400x250 default box until its format loads, then paints 283x400 - so the node
+ *    below it starts 46px INSIDE it, which is what an agent-built column looked like.
+ *
+ * Both are the same defect, so this replays the whole layout rather than nudging one
+ * axis: same algorithm, same config, same per-component split, real sizes. Returns only
+ * the nodes that actually moved, so a caller can emit a minimal change set (and nothing
+ * at all when the layout was already right).
+ */
+export function relayoutOnMeasured(
+  nodes: Node<BuilderNodeData>[],
+  edges: Edge[],
+  direction: WorkflowLayoutDirection,
+): Array<{ id: string; position: { x: number; y: number } }> {
+  if (nodes.length === 0) return [];
+  // A half-measured graph would mix real sizes with estimates and misplace the ranks a
+  // different way. Callers poll on `hasMeasuredDimensions` rather than reading an empty
+  // result as "already correct".
+  if (!hasMeasuredDimensions(nodes)) return [];
+
+  const laid = applyDagreLayout(nodes, edges, {
+    ...layoutConfigForDirection(direction),
+    // The whole point: this pass exists to use what the nodes measured.
+    ignoreMeasured: false,
+  });
+
+  const byId = new Map(laid.map((n) => [n.id, n.position]));
+  return nodes
+    .filter((n) => {
+      const p = byId.get(n.id);
+      return (
+        !!p &&
+        (Math.abs(p.x - n.position.x) > RELAYOUT_MIN_SHIFT_PX ||
+          Math.abs(p.y - n.position.y) > RELAYOUT_MIN_SHIFT_PX)
+      );
+    })
+    .map((n) => ({ id: n.id, position: byId.get(n.id)! }));
+}
+
+/**
+ * Lay out a single (connected) graph with Dagre and return ReactFlow-positioned
+ * nodes. Loop-back edges are skipped (cycles); While exit edges are rerouted from
+ * the last body node so the exit lands after the body chain.
+ */
 function layoutConnectedGraph(
   nodes: Node<BuilderNodeData>[],
   edges: Edge[],
@@ -525,6 +586,8 @@ export function getNodeDimensions(
       // Fallback 400x250 = the drop/import default box (classic 1280x800 contained in
       // 400x400). Once the interface's format loads, the node snaps its box to that
       // format and persists previewWidth/Height, so layout measures the real shape.
+      // That persistence is WHY the post-paint re-layout fixes an A4 page node: the
+      // first layout reserved this default while the node went on to paint 283x400.
       return {
         width: interfaceData?.previewWidth || 400,
         height: interfaceData?.previewHeight || 250,

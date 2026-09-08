@@ -47,6 +47,7 @@ const runContextRef = vi.hoisted(() => ({
 }));
 
 // ── Service / hook mocks ────────────────────────────────────────────────────
+vi.mock('@/i18n/navigation', () => ({ usePathname: () => '/app/workflow/wf-1' }));
 vi.mock('@/lib/api/orchestrator/execution.service', () => ({
   executionService: {
     scheduleExecuteNow: scheduleExecuteNowMock,

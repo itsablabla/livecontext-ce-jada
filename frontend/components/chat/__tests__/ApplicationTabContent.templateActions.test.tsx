@@ -46,6 +46,7 @@ const iframeOnActionRef = vi.hoisted(() => ({
   current: undefined as ((ref: string, data: Record<string, unknown>) => Promise<void> | void) | undefined,
 }));
 
+vi.mock('@/i18n/navigation', () => ({ usePathname: () => '/app/workflow/wf-1' }));
 vi.mock('@/lib/api/orchestrator/publication.service', () => ({
   publicationService: {
     getShowcaseRender: getShowcaseRenderMock,
@@ -183,7 +184,12 @@ function renderApp(props: {
   );
 }
 
-const INSTALLED = { publicationId: 'pub-1' };
+/**
+ * A surface bound to the caller's own install: the reset rewrites the tables that
+ * are on screen. `canReset` is explicit because an omitted flag now withholds the
+ * reset - it wipes real data, so the safe answer is the default one.
+ */
+const INSTALLED = { publicationId: 'pub-1', canReset: true };
 
 describe('ApplicationTabContent - template actions', () => {
   beforeEach(() => {
@@ -216,6 +222,16 @@ describe('ApplicationTabContent - template actions', () => {
     await act(async () => { await Promise.resolve(); });
 
     expect(queryByTestId('application-load-template-values')).toBeNull();
+    expect(queryByTestId('application-reset-data')).toBeNull();
+  });
+
+  it('withholds the reset when the surface did not say whether it is an install', async () => {
+    // Fail closed on an omitted flag: a caller that forgets it must not get a
+    // data-wiping button by default.
+    const { queryByTestId } = renderApp({ templateSource: { publicationId: 'pub-1' } });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(queryByTestId('application-load-template-values')).not.toBeNull();
     expect(queryByTestId('application-reset-data')).toBeNull();
   });
 

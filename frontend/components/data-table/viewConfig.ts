@@ -7,6 +7,21 @@ export type ViewMode = 'dataSource' | 'workflow' | 'workflowModal';
 
 export interface ViewConfig {
   mode: ViewMode;
+  /**
+   * True while drilling into a nested JSON path. Columns are then derived from
+   * the DATA itself, so a field named like a system column (`id`, `value`, ...)
+   * is real user content and must be rendered, not suppressed as a duplicate.
+   */
+  isNestedNavigation: boolean;
+  /**
+   * Does `id` name the ROW's identity in this view, or a field of the data?
+   *
+   * The single answer both the grid and the exports read, so a cell and its exported column can
+   * never disagree about which of the two a column called `id` is. True means the view owns the
+   * name (a pinned identity lane, or the checkbox lane that prints the row id inside it); false
+   * means it is ordinary content and is rendered and exported like any other column.
+   */
+  idIsRowLevel: boolean;
   showIdColumn: boolean;
   showCheckbox: boolean;
   showPriority: boolean;
@@ -36,6 +51,10 @@ export function createViewConfig(
     // have. Render only the authored columns.
     return {
       mode: 'dataSource',
+      isNestedNavigation,
+      // A snapshot builds no lanes at all, so an authored column called `id` is the publisher's own
+      // data; the synthesized row ordinal is exactly the noise this branch sets out to avoid.
+      idIsRowLevel: false,
       showIdColumn: false,
       showCheckbox: false,
       showPriority: false,
@@ -53,6 +72,10 @@ export function createViewConfig(
     // ID column is enabled when explicitly requested (modal / jsonPath sub-tables).
     return {
       mode: isModal ? 'workflowModal' : 'workflow',
+      isNestedNavigation,
+      // At root the backend emits `id` as the step's row index, and as its first column, so it is
+      // the identity there whether or not the view asked for a lane. Nested, it is item data.
+      idIsRowLevel: showIdColumn || !isNestedNavigation,
       showIdColumn: showIdColumn,
       showCheckbox: false,
       showPriority: false,
@@ -66,6 +89,10 @@ export function createViewConfig(
   // Mode DataSource
   return {
     mode: 'dataSource',
+    isNestedNavigation,
+    // At root the checkbox lane prints the row id inside it, so the name is taken. Nested, `id`
+    // belongs to the navigated item.
+    idIsRowLevel: !isNestedNavigation,
     showIdColumn: false,
     showCheckbox: true, // Always show checkbox/ID column (IDs displayed inside)
     showPriority: !isNestedNavigation,
@@ -105,6 +132,33 @@ export function getFixedColumns(config: ViewConfig): string[] {
 }
 
 /**
+ * Is `id` already shown INSIDE another lane, so a column of its own would only add an empty one?
+ *
+ * True only where the checkbox lane prints the row id inside itself (the tables page at root).
+ * Everywhere else `id` is either its own identity lane or ordinary data, and gets a column.
+ */
+export function idIsHiddenBehindCheckbox(config: ViewConfig): boolean {
+  return config.showCheckbox && config.idIsRowLevel;
+}
+
+/**
+ * The fields an export writes out of the ROW rather than out of `row.data`, i.e. the ones its base
+ * columns already carry. Everything else is data and must reach the file as its own column.
+ *
+ * Deliberately NOT the whole fixed set: `value` and `array_index` have no base column, and
+ * excluding them once exported an array of primitives with no content at all. `id` follows
+ * {@link ViewConfig.idIsRowLevel}, so the grid cell and the exported column always agree.
+ */
+export function getRowLevelExportFields(config: ViewConfig): string[] {
+  return [
+    'checkbox',
+    ...(config.idIsRowLevel ? ['id'] : []),
+    ...(config.showPriority ? ['priority'] : []),
+    ...(config.showCreatedAt ? ['created_at'] : []),
+  ];
+}
+
+/**
  * Vérifie si une colonne est fixe selon la configuration
  */
 export function isFixedColumn(field: string, config: ViewConfig): boolean {
@@ -120,7 +174,9 @@ export function isColumnVisible(field: string, config: ViewConfig): boolean {
     return true;
   }
 
-  // Pour la colonne id, vérifier spécifiquement showIdColumn
+  // Pour la colonne id, vérifier spécifiquement showIdColumn.
+  // (Only reached from the add-row form, which renders at root level only - a nested `id` is data
+  // and is decided by getAllColumns, not here.)
   if (field === 'id') {
     return config.showIdColumn;
   }

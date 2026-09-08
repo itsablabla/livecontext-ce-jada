@@ -151,9 +151,10 @@ public class RemoteMarketplaceController {
             @RequestParam(required = false) String sort,
             @RequestParam(required = false) String rating,
             @RequestParam(required = false) Integer days,
-            @RequestParam(required = false) String price) {
+            @RequestParam(required = false) String price,
+            @RequestParam(required = false) Boolean studio) {
         MarketplaceQueryFilter filter =
-                MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price);
+                MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price, studio);
         return ResponseEntity.ok(remoteMarketplaceService.fetchMarketplacePublications(page, size, filter));
     }
 
@@ -169,9 +170,10 @@ public class RemoteMarketplaceController {
             @RequestParam(required = false) String sort,
             @RequestParam(required = false) String rating,
             @RequestParam(required = false) Integer days,
-            @RequestParam(required = false) String price) {
+            @RequestParam(required = false) String price,
+            @RequestParam(required = false) Boolean studio) {
         MarketplaceQueryFilter filter =
-                MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price);
+                MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price, studio);
         return ResponseEntity.ok(remoteMarketplaceService.searchMarketplacePublications(query, filter));
     }
 

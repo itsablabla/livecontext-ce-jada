@@ -123,3 +123,71 @@ describe('NodeBottomBar runnable force-reveal', () => {
     expect(opacityOf(c)).toBe('0');
   });
 });
+
+/**
+ * A focused epoch is read-only, so the normal play is gone and FlowNode puts back a launcher
+ * as a PLAIN button (`focus-trigger-play`). Without a reveal of its own that button, and the
+ * pin/unpin sharing the row, appear only on hover - on exactly the view where the all-epochs
+ * play shows unprompted. `revealsBar` is what re-aligns the two.
+ */
+describe('NodeBottomBar reveal from a button that stands in for the play', () => {
+  const button = (over: Partial<{ key: string; revealsBar: boolean }> = {}) => ({
+    key: over.key ?? 'focus-trigger-play',
+    icon: <span />,
+    title: 'run',
+    onClick: () => {},
+    ...(over.revealsBar === undefined ? {} : { revealsBar: over.revealsBar }),
+  });
+
+  it('reveals the bar without hover, with no play button on it at all', () => {
+    const c = render(
+      <NodeBottomBar borderColor="#000" isRunning={false} hover={notHovered}
+        buttons={[button({ revealsBar: true })]} />
+    );
+    expect(opacityOf(c)).toBe('1');
+  });
+
+  it('reveals the pin/unpin sharing the row, not just the flagged button', () => {
+    // The user-visible half of the bug: pin/unpin lives in the leading slot and inherits the
+    // bar's reveal, so a hover-gated bar hides it too.
+    const c = render(
+      <NodeBottomBar borderColor="#000" isRunning={false} hover={notHovered}
+        leadingSlot={<button data-testid="pin">pin</button>}
+        buttons={[button({ revealsBar: true })]} />
+    );
+    expect(opacityOf(c)).toBe('1');
+    // Revealed AND clickable: the row is pointer-events-none, so a visible-but-dead pin is
+    // the way to get this half right and still ship a button nobody can press.
+    expect(c.getByTestId('pin').parentElement?.className).toContain('pointer-events-auto');
+  });
+
+  it('keeps an ordinary contextual button hover-gated', () => {
+    // The reveal is the "you can run this now" cue. Spending it on the agent/files/sub-workflow
+    // buttons would make the bar permanent on every node and the cue meaningless.
+    const c = render(
+      <NodeBottomBar borderColor="#000" isRunning={false} hover={notHovered}
+        buttons={[button({ key: 'agent-config' })]} />
+    );
+    expect(opacityOf(c)).toBe('0');
+  });
+
+  it('reveals when a flagged button sits beside unflagged ones', () => {
+    const c = render(
+      <NodeBottomBar borderColor="#000" isRunning={false} hover={notHovered}
+        buttons={[button({ key: 'agent-config' }), button({ revealsBar: true })]} />
+    );
+    expect(opacityOf(c)).toBe('1');
+  });
+
+  it('does NOT reveal outside run mode, exactly like the play reveal it mirrors', () => {
+    // The bar also carries the edit-only delete/duplicate. A flag honoured in edit mode would
+    // pin Trash and Copy permanently visible under every node - the reason `runnableNow` is
+    // run-mode-gated in the first place.
+    mockMode = { isRunMode: false, isPreviewOnly: false };
+    const c = render(
+      <NodeBottomBar borderColor="#000" isRunning={false} hover={notHovered}
+        buttons={[button({ revealsBar: true })]} />
+    );
+    expect(opacityOf(c)).toBe('0');
+  });
+});

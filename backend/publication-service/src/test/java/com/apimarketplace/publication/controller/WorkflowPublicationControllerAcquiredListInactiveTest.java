@@ -98,7 +98,8 @@ class WorkflowPublicationControllerAcquiredListInactiveTest {
                 "INACTIVE", "PRIVATE", "USER", "publisher-001",
                 0, 0, 1, null, 0, 0, 1, 0, 0, 0.0, 0,
                 null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, false, null);
+                null, null, null, null, null, null, null, false, null,
+                false);
     }
 
     @SuppressWarnings("unchecked")

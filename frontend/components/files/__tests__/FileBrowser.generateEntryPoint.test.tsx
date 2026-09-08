@@ -61,6 +61,12 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => searchParams,
 }));
 
+// What it TAKES to start a drag is pinned in useDragSensors' own test. Mocking the
+// hook rather than widening the @dnd-kit/core double keeps that seam in one place -
+// the double omits MouseSensor, and PrimaryMouseSensor extends it at module scope,
+// so reaching the real hook through here fails on an unrelated concern.
+vi.mock('@/lib/dnd/useDragSensors', () => ({ useDragSensors: () => [] }));
+
 vi.mock('../FileFilterBar', () => ({ FileFilterBar: () => null }));
 vi.mock('@/components/ui/PaginationBar', () => ({ PaginationBar: () => null }));
 vi.mock('@/components/ui/BulkDeleteModal', () => ({ BulkDeleteModal: () => null }));
@@ -87,15 +93,22 @@ vi.mock('@/lib/stores/current-org-store', () => ({
   useCanMutateInCurrentOrg: () => gate.canMutate,
 }));
 
-// A stand-in for the modal: this is about whether the page MOUNTS it and what
-// it does with the result, not about what the modal draws. The real one has
-// its own suite; doubling it here would test the double.
-const modalProps = vi.hoisted(() => vi.fn());
+// The locale-aware router. next-intl's navigation module imports a bare 'next/navigation' that
+// vitest cannot resolve out of its ESM build. It is stood in for so that the ASSERTION THAT NOBODY
+// TRAVELS can be made at all: generating from Files happens in place, and `nav.push` staying
+// untouched is what says so. This is the only double for it in this file: a second registration
+// would silently replace this one.
+const nav = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock('@/i18n/navigation', () => ({
+  useRouter: () => ({ push: nav.push }),
+  usePathname: () => '/app/files',
+  Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+}));
+
+// The dialog itself, stood in for: what it DRAWS has its own suite, and mounting the real one here
+// would pull a catalogue, a form per model and a file picker into a test about an entry point.
 vi.mock('@/components/chat/CreateGenerationModal', () => ({
-  CreateGenerationModal: (props: Record<string, unknown>) => {
-    modalProps(props);
-    return props.isOpen ? <div data-testid="generation-modal" /> : null;
-  },
+  CreateGenerationModal: () => <div data-testid="generation-modal" />,
 }));
 
 import { ApiError } from '@/lib/api/api-client';
@@ -125,7 +138,7 @@ function generateButton(): HTMLButtonElement | null {
 beforeEach(() => {
   gate.canMutate = true;
   refresh.mockClear();
-  modalProps.mockClear();
+  nav.push.mockClear();
   api.getModels.mockReset();
   api.getModels.mockResolvedValue(catalogue());
 });
@@ -155,51 +168,27 @@ describe('FileBrowser - starting a generation from where the files are', () => {
     expect(labels.indexOf('newFolder')).toBeLessThan(labels.indexOf('upload'));
   });
 
-  it('does not mount the modal until it is opened', () => {
-    // The dialog is closed almost always, and a static mount would pull its
-    // quote client and credit hook into every render of this page.
-    renderBrowser();
-
-    expect(screen.queryByTestId('generation-modal')).toBeNull();
-  });
-
-  it('warming the dialog on hover does not OPEN it', async () => {
-    // The button now fetches the dialog's chunk on hover and on focus, so the
-    // click is not what waits for the download. What THIS suite can check is
-    // the half that is observable: warming must stay invisible. Wiring the
-    // warm-up to the open state instead would pop a dialog under a passing
-    // pointer, and that mistake is one character away from this one.
-    //
-    // The fetch itself is not observable here: the module is mocked, so the
-    // dynamic import resolves instantly whether it was warmed or not. Asserting
-    // it would be asserting the mock.
+  it('opens nothing until it is pressed', () => {
+    // Hovering or focusing the control must not open anything over the list the reader is reading.
     renderBrowser();
 
     fireEvent.mouseEnter(screen.getByText('generate'));
     fireEvent.focus(screen.getByText('generate'));
-    await act(async () => { await Promise.resolve(); });
 
     expect(screen.queryByTestId('generation-modal')).toBeNull();
   });
 
-  it('opens it, so the endpoint behind it is reachable by a person', async () => {
+  it('opens the dialog IN PLACE, without taking the reader off the files page', async () => {
+    // The asset lands in this very list, so the reader stays in front of it. Sending them to the
+    // studio instead swapped the list for a thread and left them to navigate back for the one
+    // thing they came for - which is what this asserts against, through a router that would
+    // record any such departure.
     renderBrowser();
 
     fireEvent.click(screen.getByText('generate'));
 
-    // Awaited: the modal is lazy, so it arrives a tick later.
-    await waitFor(() => expect(screen.queryByTestId('generation-modal')).not.toBeNull());
-  });
-
-  it('refreshes the list when the asset arrives, so it is not invisible where it landed', async () => {
-    renderBrowser();
-    fireEvent.click(screen.getByText('generate'));
-    await waitFor(() => expect(modalProps).toHaveBeenCalled());
-
-    const props = modalProps.mock.calls[modalProps.mock.calls.length - 1][0];
-    expect(props.onGenerated).toBeTypeOf('function');
-    props.onGenerated({ success: true });
-    expect(refresh).toHaveBeenCalled();
+    expect(await screen.findByTestId('generation-modal')).toBeDefined();
+    expect(nav.push).not.toHaveBeenCalled();
   });
 
   it('is hidden from a read-only viewer, exactly like upload', () => {
@@ -222,10 +211,9 @@ describe('FileBrowser - starting a generation from where the files are', () => {
  * there (`components/chat/__tests__/GenerateEntryButton.test.tsx`) across all
  * four answers, on a component a test can mount twice.
  *
- * <p>What is left for this page is that it renders that control at all, and
- * shares one catalogue answer with the dialog it opens. Re-asserting the whole
- * policy through a full FileBrowser render would be the same facts twice, and
- * the copy is what drifts.
+ * <p>What is left for this page is that it renders that control at all, and asks the catalogue
+ * once. Re-asserting the whole policy through a full FileBrowser render would be the same facts
+ * twice, and the copy is what drifts.
  */
 describe('FileBrowser - the Generate action tells the truth about the surface behind it', () => {
   it('is wired to the catalogue, not merely drawn: a 404 takes it away', async () => {
@@ -239,15 +227,14 @@ describe('FileBrowser - the Generate action tells the truth about the surface be
     expect(screen.getAllByText('upload').length).toBeGreaterThan(0);
   });
 
-  it('asks the catalogue once for the page, whatever else opens on it', async () => {
-    // The dialog reads the SAME query key, so opening it must not cost a
-    // second request. (The dialog itself is stood in for here; the shared cache
-    // is pinned in the hook's own suite.)
+  it('asks the catalogue once for the page, whatever else happens on it', async () => {
+    // The dialog reads the SAME query key, so opening it must not cost this page a second request.
+    // (The shared cache itself is pinned in the hook's own suite.)
     renderBrowser();
     await waitFor(() => expect(api.getModels).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByText('generate'));
-    await waitFor(() => expect(screen.queryByTestId('generation-modal')).not.toBeNull());
+    await screen.findByTestId('generation-modal');
 
     expect(api.getModels).toHaveBeenCalledTimes(1);
   });

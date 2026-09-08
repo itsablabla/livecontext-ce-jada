@@ -8,27 +8,32 @@ import java.util.Locale;
  *
  * <p>A link maps a billed {@code (provider, model)} pair to an execution target.
  * The {@code scope} narrows WHEN that routing applies, keyed on the run's logical
- * origin ({@code AgentExecutionRequestDto.source}, surfaced at the resolve
- * chokepoint by {@code AgentRemoteExecutionService.resolveActivitySource}):
+ * origin. Each caller names its own surface as it resolves: the agent path reads
+ * {@code AgentExecutionRequestDto.source}, while the classify, guardrail and
+ * sub-agent paths pass their own {@code ACTIVITY_SOURCE} constant:
  *
  * <ul>
  *   <li>{@link #ALL} - wildcard, applies to every surface (the default and the
  *       backward-compatible behaviour: every pre-scope link is an ALL row).</li>
  *   <li>{@link #CHAT} - interactive general chat (source {@code CHAT}, alias
  *       {@code CONVERSATION}).</li>
- *   <li>{@link #WORKFLOW} - a workflow agent node.</li>
+ *   <li>{@link #WORKFLOW} - a workflow node that calls a model: an agent node, and the
+ *       classify and guardrail nodes.</li>
  *   <li>{@link #WEBHOOK} / {@link #WIDGET} / {@link #SCHEDULE} / {@link #TASK} /
  *       {@link #TASK_REVIEW} - the remaining standalone-agent surfaces.</li>
  * </ul>
  *
  * <p>Resolution is exact-surface first, then a fallback to the {@link #ALL} row,
  * so a surface-specific link overrides the wildcard for just that surface while
- * every other surface keeps the {@link #ALL} route. Guardrail, classify and
- * sub-agent runs never reach the chokepoint, so no scope can target them.
+ * every other surface keeps the {@link #ALL} route.
  *
- * <p>Two consumers can only ever match the {@link #ALL} wildcard, never a
- * surface scope: the browser agent and the {@code json-completion} path (neither
- * carries an activity source). The CE cloud relay consults NO links at all,
+ * <p>Workflow classify and guardrail nodes report {@link #WORKFLOW}: they are
+ * produced by the workflow node alone, so that scope targets them exactly.
+ *
+ * <p>Four consumers can only ever match the {@link #ALL} wildcard, never a
+ * surface scope: the browser agent, the {@code json-completion} path and avatar
+ * generation (none of which carries an activity source), plus delegated
+ * sub-agents (whose {@code SUB_AGENT} source matches no surface). The CE cloud relay consults NO links at all,
  * including {@link #ALL}: a linked CE install asked for the billed pair and must
  * get exactly that provider's real API. Note also that DISABLING an
  * exact-surface row does not park that surface on the billed model - the surface
@@ -81,7 +86,7 @@ public enum ModelExecutionLinkScope {
             ModelExecutionLinkScope scope = valueOf(normalized);
             return scope == ALL ? null : scope;
         } catch (IllegalArgumentException e) {
-            // Unknown token: deliberate for non-surface producers (e.g. SUB_AGENT),
+            // Unknown token: deliberate for non-surface producers (SUB_AGENT),
             // but also what a typo or an untagged NEW surface degrades to -
             // wildcard-only matching. Leave a trail so that degradation is diagnosable.
             LoggerHolder.LOG.debug("Activity source '{}' matches no execution-link surface; only ALL links can apply", source);

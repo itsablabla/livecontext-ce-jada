@@ -4,8 +4,22 @@ import { notFound } from 'next/navigation';
 import JsonLd from '@/components/seo/JsonLd';
 import { LandingShell } from '@/components/landing/LandingShell';
 import { IS_CE } from '@/lib/edition';
-import { fetchPublicationBySlug } from '@/lib/marketplace/publicPublications';
+import {
+  fetchPublicationBySlug,
+  fetchPublicationReviews,
+  fetchShowcaseRender,
+} from '@/lib/marketplace/publicPublications';
 import { isIndexable, marketplacePath, metaDescription } from '@/lib/marketplace/indexability';
+import { listingJsonLd } from '@/lib/marketplace/listingJsonLd';
+import { buildPublicGraph } from '@/lib/marketplace/publicPlanGraph';
+import { WorkflowNodeIcons } from '@/components/WorkflowNodeIcons';
+import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
+import { formatUtcDate } from '@/lib/utils/dateFormatters';
+import { Flag, Star } from 'lucide-react';
+import PublicAppPreview from './_components/PublicAppPreview';
+import PublicWorkflowDiagram from './_components/PublicWorkflowDiagram';
+import { NextIntlClientProvider } from 'next-intl';
+import { PREVIEW_MESSAGES } from '@/lib/marketplace/previewMessages';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
 
@@ -79,29 +93,25 @@ export default async function MarketplaceListingPage({
   // page must preserve that: one notFound() for both.
   if (!publication) notFound();
 
+  // What the listing SHOWS, both read from data the publication already carries
+  // or exposes anonymously. Neither is allowed to take the page down: a missing
+  // showcase or an unreadable plan simply drops its section.
+  const graph = buildPublicGraph(publication.planSnapshot);
+  const [showcase, reviewPage] = await Promise.all([
+    publication.hasShowcase ? fetchShowcaseRender(publication.id) : Promise.resolve(null),
+    fetchPublicationReviews(publication.id),
+  ]);
+
   const url = `${SITE_URL}${marketplacePath(slug)}`;
 
-  const softwareJsonLd: Record<string, unknown> = {
+  // Same builder as the index's ItemList: two hand-written descriptions of one
+  // entity is how structured data drifts, and nothing errors when it does.
+  const softwareJsonLd = {
     '@context': 'https://schema.org',
-    '@type': 'SoftwareApplication',
-    name: publication.title,
-    description: metaDescription(publication),
-    url,
-    applicationCategory: 'BusinessApplication',
-    operatingSystem: 'Web',
+    // The slug from the ROUTE, which is the URL this page is actually served
+    // at, rather than the row's nullable field.
+    ...listingJsonLd(publication, { siteUrl: SITE_URL, slug }),
   };
-  if (publication.publisherName) {
-    softwareJsonLd.author = { '@type': 'Person', name: publication.publisherName };
-  }
-  // Only claim a rating when one actually exists: an aggregateRating with
-  // reviewCount 0 is invalid structured data and earns a Search Console error.
-  if (publication.reviewCount > 0) {
-    softwareJsonLd.aggregateRating = {
-      '@type': 'AggregateRating',
-      ratingValue: publication.averageRating,
-      reviewCount: publication.reviewCount,
-    };
-  }
 
   const breadcrumbJsonLd = {
     '@context': 'https://schema.org',
@@ -155,6 +165,165 @@ export default async function MarketplaceListingPage({
             {publication.description}
           </p>
         )}
+
+        <NextIntlClientProvider locale="en" messages={PREVIEW_MESSAGES}>
+        {showcase && (
+          <section className="mt-10">
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">The application</h2>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              The published app, exactly as it runs. This preview is not interactive.
+            </p>
+            {/* No fixed height: the frame grows to the app's real content, so a
+                long application is shown whole rather than cropped at the
+                bottom of a box. */}
+            <div className="mt-4 overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <PublicAppPreview render={showcase} className="w-full" />
+            </div>
+          </section>
+        )}
+
+        {graph.nodes.length > 0 && (
+          <section className="mt-10">
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">The workflow</h2>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              {`What runs behind it: ${graph.nodes.length} ${graph.nodes.length === 1 ? 'step' : 'steps'}`}
+              {publication.interfaceCount > 0
+                ? `, ${publication.interfaceCount} ${publication.interfaceCount === 1 ? 'screen' : 'screens'}.`
+                : '.'}
+            </p>
+            <div className="mt-4 h-[480px] overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <PublicWorkflowDiagram graph={graph} className="h-full w-full" />
+            </div>
+            {publication.nodeIcons.length > 0 && (
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <span className="text-sm text-[var(--text-muted)]">Uses</span>
+                {/* The publication's own icon row: brand logos for the services
+                    it calls, which the plan itself does not carry per node. */}
+                <WorkflowNodeIcons
+                  nodeIcons={publication.nodeIcons}
+                  size="compact"
+                  maxDisplay={8}
+                  prioritizeMcpAndTriggers
+                />
+              </div>
+            )}
+          </section>
+        )}
+        </NextIntlClientProvider>
+
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Published by</h2>
+          <div className="mt-4 flex items-center gap-3 rounded-xl border border-[var(--border-color)] p-4">
+            <PublisherAvatar
+              userId={publication.publisherId}
+              name={publication.publisherName}
+              size={40}
+              variant="neutral"
+            />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                {publication.publisherName ?? 'Anonymous publisher'}
+              </p>
+              {/* Only linked when the publisher has a public handle: their
+                  profile is otherwise private and the URL would 404. */}
+              {publication.publisherHandle ? (
+                <Link
+                  href={`/u/${publication.publisherHandle}`}
+                  className="text-sm text-[var(--text-muted)] no-underline hover:underline"
+                >
+                  {`@${publication.publisherHandle}`}
+                </Link>
+              ) : null}
+            </div>
+            {publication.publishedAt && (
+              <span className="ml-auto shrink-0 text-sm text-[var(--text-muted)]">
+                {formatUtcDate(publication.publishedAt, { locale: 'en' })}
+              </span>
+            )}
+          </div>
+        </section>
+
+        {reviewPage.reviews.length > 0 && (
+          <section className="mt-10">
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+              {`What people say (${reviewPage.totalElements})`}
+            </h2>
+            <ul className="mt-4 space-y-4 list-none p-0">
+              {reviewPage.reviews.map((review) => (
+                <li
+                  key={review.id}
+                  className="rounded-xl border border-[var(--border-color)] p-4"
+                >
+                  <div className="flex items-center gap-2.5">
+                    {/* No user id on purpose: the public payload does not carry
+                        one, so this falls back to deterministic initials. */}
+                    <PublisherAvatar
+                      userId={null}
+                      name={review.reviewerName}
+                      size={28}
+                      variant="neutral"
+                    />
+                    <span className="text-sm font-medium text-[var(--text-primary)]">
+                      {review.reviewerName ?? 'Anonymous'}
+                    </span>
+                    {review.rating !== null && (
+                      <span
+                        className="flex items-center gap-0.5"
+                        aria-label={`${review.rating} out of 5`}
+                      >
+                        {[1, 2, 3, 4, 5].map((step) => (
+                          <Star
+                            key={step}
+                            aria-hidden
+                            className={
+                              step <= review.rating!
+                                ? 'h-3.5 w-3.5 fill-amber-400 text-amber-400'
+                                : 'h-3.5 w-3.5 text-[var(--border-color)]'
+                            }
+                          />
+                        ))}
+                      </span>
+                    )}
+                    {review.createdAt && (
+                      <span className="ml-auto text-xs text-[var(--text-muted)]">
+                        {formatUtcDate(review.createdAt, { locale: 'en' })}
+                      </span>
+                    )}
+                  </div>
+                  {review.comment && (
+                    <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-[var(--text-secondary)]">
+                      {review.comment}
+                    </p>
+                  )}
+                  {review.replyCount > 0 && (
+                    <p className="mt-2 text-xs text-[var(--text-muted)]">
+                      {`${review.replyCount} ${review.replyCount === 1 ? 'reply' : 'replies'}`}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {/* Reporting rides the EXISTING public contact endpoint rather than a new
+            one: /contact already accepts an `abuse` category and pre-fills from
+            the query string (it was built for exactly this), and its POST is
+            public and captcha-protected. So a visitor needs no account, and no
+            new anonymous write route is opened. */}
+        <p className="mt-10 border-t border-[var(--border-color)] pt-6 text-sm text-[var(--text-muted)]">
+          <Link
+            href={`/contact?category=abuse&message=${encodeURIComponent(
+              `Reporting the marketplace listing "${publication.title}" (${url}).
+
+What is wrong with it: `,
+            )}`}
+            className="inline-flex items-center gap-1.5 no-underline hover:underline"
+          >
+            <Flag className="h-3.5 w-3.5" aria-hidden />
+            Report this listing
+          </Link>
+        </p>
       </div>
     </LandingShell>
   );

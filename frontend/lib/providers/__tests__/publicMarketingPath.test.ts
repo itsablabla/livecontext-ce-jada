@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync, statSync } from 'fs';
+import path from 'path';
 import { isPublicMarketingPath } from '../publicMarketingPath';
 
 // Regression pin for the landing-SEO fix: paths returning true here are NEVER
@@ -31,6 +33,15 @@ describe('isPublicMarketingPath', () => {
     }
   });
 
+  it('never gates /status behind the auth spinner', () => {
+    // The page exists for the case where signing in is what is broken: behind
+    // the blocking auth UI it would answer an outage with a spinner, and it
+    // would server-render as spinner-only HTML.
+    for (const path of ['/status', '/en/status', '/fr/status']) {
+      expect(isPublicMarketingPath(path), path).toBe(true);
+    }
+  });
+
   it('keeps the blocking auth UI on app, auth and share surfaces', () => {
     for (const path of [
       '/app/chat',
@@ -54,5 +65,67 @@ describe('isPublicMarketingPath', () => {
     expect(isPublicMarketingPath('/aboutus')).toBe(false);
     expect(isPublicMarketingPath('/comparetool')).toBe(false);
     expect(isPublicMarketingPath('/blogger')).toBe(false);
+    expect(isPublicMarketingPath('/modelsomething')).toBe(false);
+    expect(isPublicMarketingPath('/integrationshub')).toBe(false);
+  });
+
+  it('covers the two public catalogues, which shipped uncrawlable without it', () => {
+    // Both /integrations and /models served spinner-only HTML on a production
+    // build, 49 KB and 67 KB with not one integration or model in the markup,
+    // because neither was listed. They render fine as soon as JavaScript runs,
+    // so nothing reported it.
+    expect(isPublicMarketingPath('/integrations')).toBe(true);
+    expect(isPublicMarketingPath('/integrations/stripe')).toBe(true);
+    expect(isPublicMarketingPath('/models')).toBe(true);
+    expect(isPublicMarketingPath('/fr/models')).toBe(true);
+  });
+});
+
+/**
+ * The structural guard, and the reason this bug can stop recurring.
+ *
+ * A page that renders LandingShell is by definition a public page: that is the
+ * public chrome. Every one of them must be a public marketing path, or the auth
+ * gate replaces its whole body with a spinner during SSR and only a crawler ever
+ * notices. Listing them by hand is what failed twice, so this reads the routes off
+ * the filesystem instead.
+ */
+describe('publicMarketingPathCoverage', () => {
+  const APP_DIR = path.resolve(__dirname, '../../../app');
+
+  /** Every app-router page whose source mounts the public chrome. */
+  function publicChromePages(dir: string, segments: string[] = []): string[] {
+    const found: string[] = [];
+    for (const entry of readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        found.push(...publicChromePages(full, [...segments, entry]));
+      } else if (entry === 'page.tsx' && readFileSync(full, 'utf8').includes('LandingShell')) {
+        // `[locale]` is stripped by isPublicMarketingPath itself; any other dynamic
+        // segment stands in for a real value, which is what a visitor requests.
+        const route = segments
+          .filter((s) => s !== '[locale]')
+          .map((s) => (s.startsWith('[') ? 'sample' : s))
+          .join('/');
+        found.push(`/${route}`);
+      }
+    }
+    return found;
+  }
+
+  it('finds the public pages, so an empty sweep cannot pass as success', () => {
+    // Without this, a broken scan reports "0 pages, all fine".
+    expect(publicChromePages(APP_DIR).length).toBeGreaterThan(5);
+  });
+
+  it('every page using the public chrome is a public marketing path', () => {
+    for (const route of publicChromePages(APP_DIR)) {
+      expect(
+        isPublicMarketingPath(route),
+        `${route} renders the public chrome but is not a public marketing path: `
+          + 'its body will be replaced by the auth spinner in the server-rendered HTML. '
+          + 'Add its prefix to PUBLIC_MARKETING_PREFIXES.',
+      ).toBe(true);
+    }
   });
 });

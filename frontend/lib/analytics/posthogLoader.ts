@@ -15,8 +15,11 @@
 export interface PosthogClient {
   init: (token: string, config: Record<string, unknown>) => void;
   capture: (event: string, props?: Record<string, unknown>) => void;
-  identify: (id: string, props?: Record<string, unknown>) => void;
+  identify: (id: string, props?: Record<string, unknown>, propsOnce?: Record<string, unknown>) => void;
   register: (props: Record<string, unknown>) => void;
+  register_once?: (props: Record<string, unknown>) => void;
+  unregister?: (key: string) => void;
+  get_property?: (key: string) => unknown;
   reset: () => void;
   opt_in_capturing: () => void;
   opt_out_capturing: () => void;
@@ -24,8 +27,27 @@ export interface PosthogClient {
 }
 
 /**
- * Returns the (stubbed) `window.posthog`. Idempotent: a second call returns the
- * same instance. SSR-safe: returns null on the server.
+ * Returns whatever `window.posthog` is RIGHT NOW: the queue stub before
+ * `array.js` has loaded, the real SDK instance afterwards. SSR-safe (null on
+ * the server).
+ *
+ * Callers must never cache the stub returned by {@link loadPosthog}: once
+ * `array.js` runs, PostHog's `init_from_snippet` replays the queued calls and
+ * then REPLACES `window.posthog` with the materialised instance. Anything
+ * pushed onto the old stub after that point is orphaned (never flushed). Every
+ * capture / identify / register call therefore has to go through this getter.
+ */
+export function currentPosthog(): PosthogClient | null {
+  if (typeof window === 'undefined') return null;
+  const ph = (window as unknown as { posthog?: PosthogClient }).posthog;
+  return ph && typeof ph.capture === 'function' ? ph : null;
+}
+
+/**
+ * Installs the queue stub on `window.posthog` (if absent) and returns it.
+ * Idempotent: a second call returns the same instance. SSR-safe: returns null
+ * on the server. Use only to call `init()`; afterwards resolve the client via
+ * {@link currentPosthog} (see its doc for why).
  */
 export function loadPosthog(apiHost: string): PosthogClient | null {
   if (typeof window === 'undefined' || typeof document === 'undefined') return null;

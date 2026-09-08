@@ -24,12 +24,13 @@ public class AgentStorageUsageService {
     }
 
     /**
-     * Get storage usage for AGENTS and SKILLS categories.
+     * Get storage usage for the AGENTS, SKILLS and MEMORIES categories.
      */
     public Map<String, StorageUsageDto> getStorageUsage(String tenantId) {
         StorageUsageDto agents = queryAgentsUsage(tenantId);
         StorageUsageDto skills = querySkillsUsage(tenantId);
-        return Map.of("AGENTS", agents, "SKILLS", skills);
+        StorageUsageDto memories = queryMemoriesUsage(tenantId);
+        return Map.of("AGENTS", agents, "SKILLS", skills, "MEMORIES", memories);
     }
 
     private StorageUsageDto queryAgentsUsage(String tenantId) {
@@ -81,6 +82,32 @@ public class AgentStorageUsageService {
             return result != null ? result : StorageUsageDto.zero();
         } catch (Exception e) {
             log.warn("Failed to query skills storage for tenant {}: {}", tenantId, e.getMessage());
+            return StorageUsageDto.zero();
+        }
+    }
+
+    /**
+     * Long-term memory bytes. Counted with skills under CONFIGURATION by the
+     * reconciler: both are small authored text that an account accumulates
+     * deliberately, and splitting them into their own quota line would give a
+     * user two numbers to reason about for one behaviour.
+     */
+    private StorageUsageDto queryMemoriesUsage(String tenantId) {
+        try {
+            String sql = """
+                SELECT COALESCE(SUM(
+                           COALESCE(octet_length(m.content), 0) +
+                           COALESCE(octet_length(m.summary), 0) +
+                           COALESCE(octet_length(m.title), 0)
+                       ), 0),
+                       COUNT(*)
+                FROM agent_memories m
+                WHERE m.tenant_id = ?
+                """;
+            StorageUsageDto result = jdbcTemplate.queryForObject(sql, STORAGE_USAGE_MAPPER, tenantId);
+            return result != null ? result : StorageUsageDto.zero();
+        } catch (Exception e) {
+            log.warn("Failed to query memories storage for tenant {}: {}", tenantId, e.getMessage());
             return StorageUsageDto.zero();
         }
     }

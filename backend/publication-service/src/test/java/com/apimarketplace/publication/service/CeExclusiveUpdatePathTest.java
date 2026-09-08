@@ -115,7 +115,8 @@ class CeExclusiveUpdatePathTest {
                 "RAG Assistant", "desc",
                 null, null, null, 0,
                 PublicationVisibility.PRIVATE, DisplayMode.WORKFLOW,
-                null, false, false, Map.of());
+                null, false, false, Map.of(),
+                null);
     }
 
     @Test

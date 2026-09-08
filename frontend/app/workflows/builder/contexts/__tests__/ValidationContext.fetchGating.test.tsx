@@ -27,9 +27,17 @@ const getFeatureCapabilities = vi.fn(async () => ({
   webSearch: true,
 }));
 const getAllCredentials = vi.fn(async () => []);
+// The plan gate is a third tenant query on this provider and is bound by the
+// same contract: nothing may be fetched while there is nothing to validate.
+const getPlanFeatures = vi.fn(async () => ({ requirements: {}, planCode: 'FREE', selectablePlans: [] }));
 
 vi.mock('@/lib/providers/smart-providers', () => ({
   useAuth: () => ({ isLoading: false, isAuthenticated: true }),
+  useOptionalAuth: () => ({ isLoading: false, isAuthenticated: true }),
+}));
+
+vi.mock('@/lib/api/services/plan-features.service', () => ({
+  planFeaturesService: { getForCaller: () => getPlanFeatures() },
 }));
 
 vi.mock('@/lib/api/orchestrator/workflow.service', () => ({
@@ -84,6 +92,7 @@ describe('ValidationContext tenant-fetch gating (empty canvas)', () => {
   beforeEach(() => {
     getFeatureCapabilities.mockClear();
     getAllCredentials.mockClear();
+    getPlanFeatures.mockClear();
   });
 
   it('regression: nodes=[] fires NO capabilities and NO credentials fetch (snapshot preview contract)', async () => {
@@ -93,7 +102,9 @@ describe('ValidationContext tenant-fetch gating (empty canvas)', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(getFeatureCapabilities).not.toHaveBeenCalled();
+    expect(getPlanFeatures).not.toHaveBeenCalled();
     expect(getAllCredentials).not.toHaveBeenCalled();
+    expect(getPlanFeatures).not.toHaveBeenCalled();
   });
 
   it('fetches capabilities and credentials once nodes are present (builder warnings still work)', async () => {
@@ -102,6 +113,7 @@ describe('ValidationContext tenant-fetch gating (empty canvas)', () => {
     await waitFor(() => {
       expect(getFeatureCapabilities).toHaveBeenCalled();
       expect(getAllCredentials).toHaveBeenCalled();
+      expect(getPlanFeatures).toHaveBeenCalled();
     });
   });
 
@@ -118,6 +130,7 @@ describe('ValidationContext tenant-fetch gating (empty canvas)', () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(getFeatureCapabilities).not.toHaveBeenCalled();
+    expect(getPlanFeatures).not.toHaveBeenCalled();
 
     rerender(
       <QueryClientProvider client={queryClient}>
@@ -129,6 +142,7 @@ describe('ValidationContext tenant-fetch gating (empty canvas)', () => {
     await waitFor(() => {
       expect(getFeatureCapabilities).toHaveBeenCalled();
       expect(getAllCredentials).toHaveBeenCalled();
+      expect(getPlanFeatures).toHaveBeenCalled();
     });
   });
 });

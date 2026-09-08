@@ -24,7 +24,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
-vi.mock('@/components/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light' }) }));
+// Both accessors: NodeIcon reads the theme through `useThemeSafely`, which
+// calls `useOptionalTheme`, because it also renders on the public marketplace
+// pages that have no ThemeProvider above them.
+vi.mock('@/components/ThemeProvider', () => ({
+  useTheme: () => ({ theme: 'light' }),
+  useOptionalTheme: () => ({ theme: 'light' }),
+}));
 vi.mock('@/contexts/WorkflowModeContext', () => ({ useWorkflowMode: () => ({ mode: 'edit' }) }));
 vi.mock('@/hooks/useAuthedObjectUrl', () => ({ useAuthedObjectUrl: () => ({ url: null, error: false }) }));
 vi.mock('@/components/agents', () => ({ AvatarDisplay: () => <div data-testid="avatar" /> }));

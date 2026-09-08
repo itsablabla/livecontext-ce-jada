@@ -4,12 +4,14 @@ import * as React from 'react';
 import type { Node, Edge } from 'reactflow';
 import type { BuilderNodeData } from '../types';
 import {
+  applyAwaitingSignalToNodes,
   updateNodesFromBatchSteps,
   updateDecisionNodesFromPredecessors,
   type BatchStepData,
   type BatchEdgeData,
 } from '../services/statusUpdater';
 import {
+  applyAwaitingSourceToEdges,
   updateEdgesFromBatch,
   updateLoopInternalEdges,
 } from '../services/edgeStatusService';
@@ -108,7 +110,13 @@ export function useRunStateProcessing({
     // Update nodes from batch steps using functional setter to always read
     // the latest positions (avoids stale ref overwriting drag positions).
     setNodes((currentNodes: Node<BuilderNodeData>[]) => {
-      const updatedNodes = updateNodesFromBatchSteps(currentNodes, batchSteps);
+      // The step stream cannot say "waiting": a yielded node's last step row is still
+      // the RUNNING one. The run snapshot names those nodes separately, so the override
+      // is applied on top of the step paint rather than inside it.
+      const updatedNodes = applyAwaitingSignalToNodes(
+        updateNodesFromBatchSteps(currentNodes, batchSteps),
+        runState?.awaitingSignalSteps as Iterable<string> | undefined,
+      );
       const hasChanges = nodesHaveChanged(currentNodes, updatedNodes);
 
       if (hasChanges) {
@@ -137,7 +145,26 @@ export function useRunStateProcessing({
       }
       return currentNodes;
     });
-  }, [runState?.batchSteps, workflowLoaded, nodesReady, setNodes, nodesRef, workflowId, effectiveRunId, isViewingHistoricalEpoch]);
+
+    // A node parked on a signal has to reach its outgoing edges too, and only the
+    // NODE carries that state (the edge protocol has no waiting lifecycle - see
+    // applyAwaitingSourceToEdges). Driven off the step effect, not the edge effect:
+    // entering and leaving a wait is a step event, and often arrives with no edge
+    // update at all.
+    setEdges((currentEdges: Edge[]) => {
+      const updatedEdges = applyAwaitingSourceToEdges(
+        currentEdges,
+        nodesRef.current,
+        runState?.awaitingSignalSteps as Iterable<string> | undefined,
+      );
+      if (updatedEdges === currentEdges) return currentEdges;
+      edgesRef.current = updatedEdges;
+      return updatedEdges;
+    });
+    // `awaitingSignalSteps` is a dep in its own right: entering or leaving a wait can
+    // arrive on a snapshot that carries no step change at all, and without it the
+    // canvas would keep the pre-wait paint until the next unrelated step event.
+  }, [runState?.batchSteps, runState?.awaitingSignalSteps, workflowLoaded, nodesReady, setNodes, setEdges, nodesRef, edgesRef, workflowId, effectiveRunId, isViewingHistoricalEpoch]);
 
   // Process batchEdges from context and update ReactFlow edges
   React.useEffect(() => {
@@ -166,6 +193,15 @@ export function useRunStateProcessing({
     setEdges((currentEdges: Edge[]) => {
       let updatedEdges = updateEdgesFromBatch(currentEdges, batchEdges, nodesRef.current);
       updatedEdges = updateLoopInternalEdges(updatedEdges, batchEdges, nodesRef.current);
+      // LAST, and deliberately so: the batch carries an all-zero entry for the edge
+      // leaving a parked node, which `updateEdgesFromBatch` writes as `pending`. Applied
+      // before those two, the waiting colour was overwritten on the very next edge
+      // snapshot and never survived a single frame.
+      updatedEdges = applyAwaitingSourceToEdges(
+        updatedEdges,
+        nodesRef.current,
+        runState?.awaitingSignalSteps as Iterable<string> | undefined,
+      );
       const hasEdgeChanges = edgesHaveChanged(currentEdges, updatedEdges);
 
       if (hasEdgeChanges) {
@@ -188,7 +224,7 @@ export function useRunStateProcessing({
       }
       return currentNodes;
     });
-  }, [runState?.batchEdges, workflowLoaded, nodesReady, setNodes, setEdges, nodesRef, edgesRef, isViewingHistoricalEpoch]);
+  }, [runState?.batchEdges, runState?.awaitingSignalSteps, workflowLoaded, nodesReady, setNodes, setEdges, nodesRef, edgesRef, isViewingHistoricalEpoch]);
 
   // Process decisionEvaluations from context and update decision nodes
   React.useEffect(() => {

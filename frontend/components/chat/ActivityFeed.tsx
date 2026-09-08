@@ -8,6 +8,7 @@ import { Check, StopCircle, AlertCircle, PauseCircle, ChevronDown, ChevronRight,
 import { AvatarDisplay } from '@/components/agents';
 import { GroupedToolCard } from './GroupedToolCard';
 import { TasksPreviewBlock } from './TasksPreviewBlock';
+import { AskUserAnsweredBlock, parseAskUserQuestions } from './AskUserAnsweredBlock';
 import DiffView from './DiffView';
 import GitStatusView from './GitStatusView';
 import MarkdownRender from '@/components/MarkdownRender';
@@ -600,6 +601,11 @@ function TimelineItem({ activity, showLine, isStreaming = false }: TimelineItemP
           tasksData ? (
             <div className="mt-2">
               <TasksPreviewBlock tasksData={tasksData} />
+            </div>
+          ) : activity.toolName === 'ask_user' && !isLoadingResult && !isError && !loadError
+              && parseAskUserQuestions(activity.arguments).length > 0 ? (
+            <div className="mt-2">
+              <AskUserAnsweredBlock argumentsJson={activity.arguments} resultJson={displayContent} />
             </div>
           ) : activity.diff ? (
             <div className="mt-2">

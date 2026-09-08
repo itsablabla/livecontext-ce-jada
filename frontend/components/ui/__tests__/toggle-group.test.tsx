@@ -25,6 +25,80 @@ const OPTIONS = [
 afterEach(cleanup);
 
 describe('ToggleGroup', () => {
+  /**
+   * Hover on the PILL variant.
+   *
+   * <p>The app's `bg-theme-*` / `text-theme-*` classes are hand-written CSS in
+   * `@layer components` (globals.css), so Tailwind v4 does not own them: it emits
+   * `.bg-theme-primary`, but never a variant of it and never an opacity modifier. The pill's
+   * inactive state asked for `hover:text-theme-primary hover:bg-theme-primary/10`, so NEITHER
+   * reached the stylesheet and the control was inert under the pointer - which is how the
+   * chat/studio switch above the composer came to have no hover at all. Compiling globals.css
+   * with the repo's own Tailwind confirms both readings: `hover:bg-theme-primary/10` is absent
+   * from the output, `hover:bg-[var(--bg-secondary)]` is present.
+   *
+   * <p>The assertions are on class NAMES rather than on computed colours because that is where
+   * the defect lives: jsdom applies no stylesheet, so a computed-style assertion would read the
+   * same empty value before and after the fix and could never fail. The rule being pinned is
+   * "hover is written in a form Tailwind generates", and only the shape of the class carries it.
+   */
+  const themeVariantClass = /(?:hover|focus|focus-visible|active|group-hover|disabled|dark):(?:bg|text|border|placeholder)-theme-/;
+
+  it('gives the pill variant a hover ground that Tailwind actually generates', () => {
+    render(
+      <ToggleGroup variant="pill" value="user" onValueChange={() => {}} options={OPTIONS} />,
+    );
+
+    const inactive = screen.getByText('Platform').closest('button')!;
+
+    // An arbitrary value: the one form a variant can be prefixed to here.
+    expect(inactive.className).toContain('hover:bg-[var(--bg-secondary)]');
+    expect(inactive.className).toContain('hover:text-[var(--text-primary)]');
+  });
+
+  it('never writes the pill hover as a variant of a hand-written theme class', () => {
+    // The regression proper. Rewriting the hover as `hover:bg-theme-secondary` looks tidier and
+    // matches the rest of the file, and it silently produces no CSS: the reviewer sees a hover
+    // in the source, the reader gets none, and nothing fails.
+    render(
+      <ToggleGroup variant="pill" value="user" onValueChange={() => {}} options={OPTIONS} />,
+    );
+
+    const inactive = screen.getByText('Platform').closest('button')!;
+
+    expect(inactive.className).not.toMatch(themeVariantClass);
+  });
+
+  it('leaves the SELECTED pill option without a hover ground', () => {
+    // Clicking the option already in force does nothing (onValueChange early-returns on the
+    // current value), so a ground lighting up under the pointer would advertise an action that
+    // cannot happen. This is a decision, so it is pinned rather than left to the next reader.
+    const onValueChange = vi.fn();
+    render(
+      <ToggleGroup variant="pill" value="user" onValueChange={onValueChange} options={OPTIONS} />,
+    );
+
+    const active = screen.getByText('My credential').closest('button')!;
+
+    expect(active.className).not.toContain('hover:bg-');
+    fireEvent.click(active);
+    expect(onValueChange).toHaveBeenCalledWith('user');
+  });
+
+  it('keeps the grid variant hover in the generatable form it already used', () => {
+    // The grid variant never had the bug: it wrote its hover as an arbitrary value from the
+    // start. Harmonising it onto the `*-theme-*` spelling of its neighbours would break it in
+    // exactly the way the pill was broken, with no visible diff in review.
+    render(
+      <ToggleGroup variant="grid" value="user" onValueChange={() => {}} options={OPTIONS} />,
+    );
+
+    const inactive = screen.getByText('Platform').closest('button')!;
+
+    expect(inactive.className).toContain('hover:text-[var(--text-primary)]');
+    expect(inactive.className).not.toMatch(themeVariantClass);
+  });
+
   it('announces itself as a named radio group when a caller names it', () => {
     render(
       <ToggleGroup ariaLabel="Credential source" value="user" onValueChange={() => {}} options={OPTIONS} />,

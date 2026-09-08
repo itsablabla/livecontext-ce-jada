@@ -14,7 +14,7 @@ import java.util.Map;
  * Node specification for Media (audio/video processing).
  *
  * <p>Output shape depends on the operation: {@code mux_audio}/{@code mix}/{@code
- * extract_audio}/{@code concat}/{@code overlay} emit {@code file} +
+ * extract_audio}/{@code concat}/{@code overlay}/{@code subtitles} emit {@code file} +
  * {@code duration_seconds}; {@code frame} emits {@code file} (an image) +
  * {@code timestamp_seconds} with a null {@code duration_seconds}; {@code probe} emits
  * the FLAT metadata fields ({@code duration_seconds}, {@code size_bytes},
@@ -34,12 +34,13 @@ public class MediaNodeSpec implements NodeSpec {
             .category("core")
             .variablePrefix("core")
             .description("Processes audio/video files: probe metadata, mux audio onto video, mix tracks, "
-                + "extract audio, concat videos, extract a still frame, overlay an image (watermark)")
+                + "extract audio, concat videos, extract a still frame, overlay an image (watermark), "
+                + "burn timed captions (subtitles)")
             .outputs(List.of(
                 OutputFieldDef.builder()
                     .key("file")
                     .type("object")
-                    .description("Canonical FileRef of the produced media (mux_audio/concat/overlay: mp4; "
+                    .description("Canonical FileRef of the produced media (mux_audio/concat/overlay/subtitles: mp4; "
                         + "mix: mp4 with video else mp3/wav/aac; extract_audio: mp3/wav/aac; frame: "
                         + "image/jpeg or image/png). Null for probe. Reference via "
                         + "{{core:label.output.file}} and map the WHOLE object into downstream file params.")
@@ -49,8 +50,8 @@ public class MediaNodeSpec implements NodeSpec {
                     .key("duration_seconds")
                     .type("number")
                     .description("Duration in seconds: the produced file's duration for mux_audio/mix/"
-                        + "extract_audio/concat/overlay, the probed file's duration for probe. Null for "
-                        + "frame (a still image has no duration).")
+                        + "extract_audio/concat/overlay/subtitles, the probed file's duration for probe. Null "
+                        + "for frame (a still image has no duration).")
                     .build(),
                 OutputFieldDef.builder()
                     .key("timestamp_seconds")
@@ -97,7 +98,8 @@ public class MediaNodeSpec implements NodeSpec {
             ))
             .keywords(List.of("media", "audio", "video", "mux", "mix", "duck", "extract", "probe",
                 "ffmpeg", "soundtrack", "music", "voiceover", "concat", "stitch", "trim", "crossfade",
-                "frame", "thumbnail", "cover", "overlay", "watermark", "logo"))
+                "frame", "thumbnail", "cover", "overlay", "watermark", "logo",
+                "subtitles", "captions", "caption", "burn-in", "srt", "tiktok"))
             .build();
     }
 

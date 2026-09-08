@@ -371,4 +371,36 @@ class ApiEntityTest {
             assertNull(entity.getVersion());
         }
     }
+
+    @Nested
+    @DisplayName("errorPolicy column mapping")
+    class ErrorPolicyMapping {
+
+        /**
+         * The column NAME and the jsonb wrapper are the two ways this field can be wired wrong,
+         * and both fail the same way: the policy saves without complaint and comes back null, so
+         * every rule an author wrote is inert with nothing pointing at the cause. The persistence
+         * tests that would catch it run on H2, which cannot accept a PGobject at all.
+         */
+        @Test
+        @DisplayName("maps to catalog.apis.error_policy and round-trips as a jsonb string")
+        void mapsToTheJsonbColumn() throws Exception {
+            java.lang.reflect.Field field = ApiEntity.class.getDeclaredField("errorPolicy");
+            org.springframework.data.relational.core.mapping.Column column =
+                    field.getAnnotation(org.springframework.data.relational.core.mapping.Column.class);
+
+            assertNotNull(column, "errorPolicy must be mapped, or Spring Data derives 'error_policy' "
+                    + "by convention today and stops the day the convention changes");
+            assertEquals("error_policy", column.value());
+            assertEquals(com.apimarketplace.catalog.config.JsonbString.class, field.getType(),
+                    "a plain String on a jsonb column is rejected by Postgres as 42804");
+
+            ApiEntity entity = new ApiEntity();
+            entity.setErrorPolicy("[{\"match\":{\"status\":429},\"action\":\"user_error\"}]");
+            assertTrue(entity.getErrorPolicy().contains("429"));
+
+            entity.setErrorPolicy(null);
+            assertNull(entity.getErrorPolicy(), "null must stay null, not become the string 'null'");
+        }
+    }
 }

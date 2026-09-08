@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { setLandingIntent, track } from '@/lib/analytics/analytics';
 import {
   BarChart3,
   Briefcase,
@@ -60,11 +61,24 @@ export default function PersonaTabs({ personas }: { personas: Persona[] }) {
 
   if (!active) return null;
 
+  // The one place a persona gets selected by the visitor (the initial default
+  // is not a choice, so it is not tracked). The key is a bounded slug, never
+  // the localized label.
+  const selectPersona = (key: string, method: 'click' | 'keyboard') => {
+    setActiveKey(key);
+    track('landing_persona_selected', {
+      persona_key: key,
+      persona_index: personas.findIndex((p) => p.key === key),
+      method,
+    });
+    setLandingIntent('landing_persona', key);
+  };
+
   // Full ARIA tabs pattern: roving tabindex + arrow-key navigation, and the
   // panel wired to its tab via aria-controls/aria-labelledby.
   const focusAndSelect = (index: number) => {
     const next = personas[(index + personas.length) % personas.length];
-    setActiveKey(next.key);
+    selectPersona(next.key, 'keyboard');
     tabRefs.current.get(next.key)?.focus();
   };
 
@@ -103,7 +117,7 @@ export default function PersonaTabs({ personas }: { personas: Persona[] }) {
               aria-controls={`persona-panel-${persona.key}`}
               tabIndex={isActive ? 0 : -1}
               className={`persona-tab${isActive ? ' active' : ''}`}
-              onClick={() => setActiveKey(persona.key)}
+              onClick={() => selectPersona(persona.key, 'click')}
             >
               <Icon className="w-4 h-4" aria-hidden="true" />
               {persona.label}

@@ -191,15 +191,25 @@ class ApiCatalogBundleSqlIntegrationTest {
         UUID paramId = UUID.randomUUID();
         Map<String, Object> tool = toolPayload(toolId, "send", "/v1/send",
                 List.of(paramPayload(paramId, "channel")));
-        List<Map<String, Object>> apis = List.of(apiPayload(apiId, "Slack", List.of(tool)));
+        Map<String, Object> firstApi = apiPayload(apiId, "Slack", List.of(tool));
+        firstApi.put("errorPolicy",
+                "[{\"match\":{\"status\":429},\"action\":\"user_error\",\"message\":\"First.\"}]");
+        List<Map<String, Object>> apis = List.of(firstApi);
 
         assertThat(mergeService.merge(apis, List.of()).upsertedApis()).isEqualTo(1);
+        // The INSERT branch: an install seeing this API for the first time must receive the rules
+        // with it, not only when a later bundle updates the row.
+        assertThat(jdbc.queryForObject(
+                "SELECT error_policy::text FROM catalog.apis WHERE id = ?", String.class, apiId))
+                .contains("First.");
 
         // Change one field on each level + replace the parameter.
         Map<String, Object> changedTool = toolPayload(toolId, "send", "/v2/send",
                 List.of(paramPayload(paramId, "channel_id")));
         Map<String, Object> changedApi = apiPayload(apiId, "Slack", List.of(changedTool));
         changedApi.put("description", "updated description");
+        changedApi.put("errorPolicy",
+                "[{\"match\":{\"status\":429},\"action\":\"user_error\",\"message\":\"Slow down.\"}]");
         List<Map<String, Object>> changed = List.of(changedApi);
 
         ApiCatalogMergeService.MergeResult second = mergeService.merge(changed, List.of());
@@ -210,6 +220,12 @@ class ApiCatalogBundleSqlIntegrationTest {
         assertThat(jdbc.queryForObject(
                 "SELECT description FROM catalog.apis WHERE id = ?", String.class, apiId))
                 .isEqualTo("updated description");
+        // The UPDATE branch of the upsert: without its SET clause an install would keep a stale
+        // or removed policy forever after the cloud changed it, and the INSERT-only round-trip
+        // test would not notice.
+        assertThat(jdbc.queryForObject(
+                "SELECT error_policy::text FROM catalog.apis WHERE id = ?", String.class, apiId))
+                .contains("Slow down.");
         assertThat(count("catalog.api_tools")).isEqualTo(1);
         assertThat(jdbc.queryForObject(
                 "SELECT endpoint FROM catalog.api_tools WHERE id = ?", String.class, toolId))
@@ -409,6 +425,12 @@ class ApiCatalogBundleSqlIntegrationTest {
         assertThat(api.categorySlug()).isEqualTo("communication");
         assertThat(api.subcategoryName()).isEqualTo("Email");
         assertThat(api.rateLimits()).contains("\"plan\""); // jsonb read back as text
+        // Without this the column reaches the cloud and stops there: the snapshot would carry
+        // null, so would the signed bundle, and every self-hosted install would fall back to the
+        // built-in retry with none of the declared rules.
+        assertThat(api.errorPolicy())
+                .as("errorPolicy must survive the snapshot read into the bundle")
+                .contains("spam_risk");
 
         assertThat(api.tools()).hasSize(1); // deprecated tool excluded
         ApiCatalogBundlePayload.ToolRow tool = api.tools().get(0);
@@ -450,9 +472,11 @@ class ApiCatalogBundleSqlIntegrationTest {
         jdbc.update("""
                 INSERT INTO catalog.apis (id, created_by, api_name, api_slug, description,
                     category_id, subcategory_id, base_url, auth_type, status, is_public,
-                    is_active, source, platform_credential_name, icon_slug, rate_limits)
+                    is_active, source, platform_credential_name, icon_slug, rate_limits,
+                    error_policy)
                 VALUES (?, 'SYSTEM', ?, ?, 'desc of ' || ?, ?, ?, 'https://api.example', 'apiKey',
-                    'APPROVED', true, true, ?, ?, ?, '{"plan":"free"}'::jsonb)
+                    'APPROVED', true, true, ?, ?, ?, '{"plan":"free"}'::jsonb,
+                    '[{"match":{"bodyContains":"spam_risk"},"action":"user_error","message":"Slow down."}]'::jsonb)
                 """, id, name, name.toLowerCase(), name, cat, sub, source,
                 platformCredentialName, name.toLowerCase() + "-icon");
     }

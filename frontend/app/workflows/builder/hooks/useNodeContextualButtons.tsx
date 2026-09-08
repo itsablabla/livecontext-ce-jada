@@ -9,6 +9,7 @@ import { openFilesPanel, type FilePanelTarget } from '@/lib/sidePanel/openFilesP
 import type { BuilderNodeData } from '@/app/workflows/builder/types';
 import type { TriggerButtonVariant } from '../components/NodePlayButton';
 import { openWorkflowBuilderTab, requestOpenRelatedWorkflow } from '@/lib/sidePanel/openWorkflowBuilderTab';
+import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 
 /**
  * Centralized derivation of the node-type flags that drive the contextual
@@ -93,8 +94,8 @@ export function deriveNodeContextFlags(data: BuilderNodeData, nodeClassId?: stri
     data.kind === 'compression' ||
     data.kind === 'sftp' ||
     // media outputs a FileRef `file` for every operation except probe: mux_audio/
-    // mix/extract_audio/concat/overlay produce audio or video, frame an image
-    // (probe outputs none - the FileRef walker simply finds nothing to display).
+    // mix/extract_audio/concat/overlay/subtitles produce audio or video, frame an
+    // image (probe outputs none - the FileRef walker finds nothing to display).
     data.kind === 'media';
   const isInterfaceNode = nodeId === 'interface' || nodeId.startsWith('interface-');
 
@@ -172,6 +173,11 @@ export function useNodeContextualButtons({
   currentFile = null,
 }: UseNodeContextualButtonsParams): NodeContextualButton[] {
   const sidePanel = useSidePanelSafe();
+  // Which workflow this button belongs to, so a run-mode sub-workflow request is
+  // answered by the view hosting THIS canvas rather than by every mounted one.
+  // The hook is used outside a provider too (the run-info popover), where this is
+  // undefined - and an unaddressed request still reaches every listener.
+  const { workflowId: hostWorkflowId } = useWorkflowMode();
   const buttons: NodeContextualButton[] = [];
 
   // Agent buttons - open the agent side panel on its config or conversation tab.
@@ -247,7 +253,7 @@ export function useNodeContextualButtons({
         // Run mode goes through the view, which resolves the target's PINNED RUN first; edit mode
         // opens its builder straight away. Both shapes live in one place now.
         if (isRunMode) {
-          requestOpenRelatedWorkflow(referencedWorkflowId, referencedWorkflowName, nodeUiId);
+          requestOpenRelatedWorkflow(referencedWorkflowId, referencedWorkflowName, nodeUiId, hostWorkflowId ?? undefined);
         } else {
           openWorkflowBuilderTab(sidePanel, { workflowId: referencedWorkflowId, workflowName: referencedWorkflowName });
         }

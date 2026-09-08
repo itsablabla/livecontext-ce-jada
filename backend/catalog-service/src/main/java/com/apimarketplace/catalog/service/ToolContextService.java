@@ -66,6 +66,12 @@ public class ToolContextService {
         private String endpoint;
         private String toolDescriptionFull;
         private String iconSlug; // Icon slug for UI display
+        // Slugs of the tool and of the API owning it. Carried here because the
+        // per-plan availability gate is keyed by slug (tool:<slug> / api:<slug>)
+        // and both rows are already loaded below - re-reading them per execution
+        // would be a query for data we are holding.
+        private String toolSlug;
+        private String apiSlug;
         private Set<String> allowedParameterNames; // Parameter names defined for this tool
         private List<ParamMeta> parameters; // Ordered name+description list for cursor heuristic resolution
         // Typed-execution refactor (V52): raw JSON strings, parsed on demand by OutputProjector / ToolExecutionOrchestrator.
@@ -173,6 +179,22 @@ public class ToolContextService {
             this.parameters = parameters;
         }
 
+        public String getToolSlug() {
+            return toolSlug;
+        }
+
+        public void setToolSlug(String toolSlug) {
+            this.toolSlug = toolSlug;
+        }
+
+        public String getApiSlug() {
+            return apiSlug;
+        }
+
+        public void setApiSlug(String apiSlug) {
+            this.apiSlug = apiSlug;
+        }
+
         public String getIconSlug() {
             return iconSlug;
         }
@@ -253,6 +275,7 @@ public class ToolContextService {
             context.setExecutionSpecJson(apiTool.getExecutionSpec());
             context.setOutputSchemaJson(apiTool.getOutputSchema());
             context.setExecutionMode(apiTool.getExecutionMode());
+            context.setToolSlug(apiTool.getToolSlug());
 
             // Load iconSlug from API entity
             if (apiTool.getApiId() != null) {
@@ -260,6 +283,7 @@ public class ToolContextService {
                     api -> {
                         String iconSlug = api.getIconSlug();
                         context.setIconSlug(iconSlug != null ? iconSlug : "mcp");
+                        context.setApiSlug(api.getApiSlug());
                     },
                     () -> context.setIconSlug("mcp")
                 );

@@ -17,6 +17,14 @@ import { render, cleanup, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { StorageExplorerEntry } from '@/lib/api/storage-api';
 
+// next-intl's navigation module cannot resolve 'next/navigation' under vitest, and this page
+// renders controls that reach for it. Stood in for here because this suite is not about where any
+// of them go (the Generate control is pinned in the generate-entry-point suite).
+vi.mock('@/i18n/navigation', () => ({
+  useRouter: () => ({ push: () => undefined, replace: () => undefined, prefetch: () => undefined }),
+  usePathname: () => '/app',
+  Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+}));
 vi.mock('next-intl', () => ({
   useTranslations: () => (key: string) => key,
 }));
@@ -84,9 +92,6 @@ vi.mock('@/lib/stores/current-org-store', () => ({
   useCanMutateInCurrentOrg: () => true,
 }));
 
-vi.mock('@/components/chat/CreateGenerationModal', () => ({
-  CreateGenerationModal: () => null,
-}));
 
 import { FileBrowser } from '../FileBrowser';
 

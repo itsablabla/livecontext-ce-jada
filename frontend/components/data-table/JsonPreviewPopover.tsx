@@ -76,7 +76,12 @@ export function PinnedJsonPopover({
   // Determine width based on number of items
   // 1 item: max-w-md (approx 28rem/448px)
   // 2+ items: wider to accommodate side-by-side
-  const containerWidth = items.length > 1 ? 'max-w-4xl w-[800px]' : 'max-w-md w-96';
+  // The viewport cap is part of the width, not an afterthought: the pinned card
+  // is 800px wide and is dragged around the screen, so on anything narrower it
+  // has to give way rather than hang off the edge.
+  const containerWidth = items.length > 1
+    ? 'w-[800px] max-w-[calc(100vw-1rem)]'
+    : 'w-96 max-w-[calc(100vw-1rem)]';
 
   // Formater les données JSON pour l'affichage
   const formatJsonData = useCallback((data: any): string => {
@@ -423,7 +428,7 @@ export function JsonPreviewPopover({
       data-json-preview="true"
     >
       <div
-        className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border border-gray-200/50 dark:border-gray-700/50 rounded-[24px] p-4 max-w-md max-h-96 flex flex-col relative select-text"
+        className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border border-gray-200/50 dark:border-gray-700/50 rounded-[24px] p-4 max-w-[min(28rem,calc(100vw-1rem))] max-h-96 flex flex-col relative select-text"
         style={{ pointerEvents: 'auto' }}
       >
         {/* Header fixe */}

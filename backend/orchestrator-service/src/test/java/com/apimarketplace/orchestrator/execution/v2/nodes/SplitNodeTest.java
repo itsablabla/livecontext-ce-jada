@@ -154,6 +154,45 @@ class SplitNodeTest {
         }
 
         @Test
+        @DisplayName("Reports its configuration under the plan's key names, matching SplitNodeExecutor (the two producers must not describe one node differently)")
+        @SuppressWarnings("unchecked")
+        void shouldReportResolvedParamsUnderPlanKeyNames() {
+            Map<String, Object> triggerData = Map.of("items", List.of("a", "b", "c"), "mock", true);
+            ExecutionContext mockContext = ExecutionContext.create(
+                "run-1", "workflow-run-1", "tenant-1", "item-1", 0, triggerData, mockPlan
+            );
+
+            SplitNode node = new SplitNode(
+                "core:split",
+                "{{items}}",
+                10,
+                "stop-on-error",
+                new ArrayList<>(),
+                mockTemplateEngine
+            );
+
+            Map<String, Object> params =
+                (Map<String, Object>) node.execute(mockContext).output().get("resolved_params");
+
+            assertNotNull(params, "the split must report its configuration");
+            assertEquals(10, params.get("maxItems"));
+            assertEquals("stop-on-error", params.get("splitStrategy"));
+            // `list_expression` was a third name for the same setting, on top of
+            // the executor's `source_expression` and the form's `list`.
+            assertFalse(params.containsKey("list_expression"));
+            assertTrue(params.containsKey("list"));
+
+            // The claim this test makes, asserted rather than described: the two
+            // producers of a split's parameters use the same key SET. Their values
+            // differ by design (this one reports the RESOLVED list, the executor the
+            // raw expression), which is why only the keys are compared.
+            assertEquals(
+                java.util.Set.of("list", "maxItems", "splitStrategy", "itemCount"),
+                params.keySet(),
+                "SplitNode and SplitNodeExecutor must describe one node with one vocabulary");
+        }
+
+        @Test
         @DisplayName("Should include node_type in output")
         void shouldIncludeNodeTypeInOutput() {
             Map<String, Object> triggerData = Map.of("items", List.of("a", "b", "c"), "mock", true);

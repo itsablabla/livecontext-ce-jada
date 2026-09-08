@@ -11,6 +11,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -39,7 +43,7 @@ class ApiCatalogBundlePayloadTest {
                 null, "Communication", "communication", "Email", "email",
                 "oauth2", null, null, "public", true, true, false,
                 "free", "APPROVED", "1.0.0", name.toLowerCase(), name.toLowerCase() + "_cred",
-                null, null, null, "{\"per_minute\":60}", tools);
+                null, null, null, "{\"per_minute\":60}", null, tools);
     }
 
     private static ToolRow tool(UUID id, String slug,
@@ -78,6 +82,44 @@ class ApiCatalogBundlePayloadTest {
 
         assertThat(payload).contains("generationSpec");
         assertThat(payload).contains("seedance-2.0");
+    }
+
+    @Test
+    @DisplayName("the error policy is part of the payload, or a bundle-fed install gets none of "
+            + "the rules its APIs declare")
+    void errorPolicyIsCarriedInThePayload() {
+        // Same reasoning as the descriptor above, and the same silent failure: the emit line is
+        // the ONLY thing that puts this column into the bundle. Dropped, the merge writes NULL on
+        // every self-hosted install and the round-trip byte comparison still matches, because both
+        // sides are then equally empty.
+        String policy = "[{\"match\":{\"bodyContains\":\"spam_risk\"},"
+                + "\"action\":\"user_error\",\"message\":\"Slow down.\"}]";
+        ApiRow withPolicy = new ApiRow(UUID.randomUUID(), "TikTok", "tiktok", "desc", "https://api.example",
+                null, "Social", "social", "Video", "video",
+                "oauth2", null, null, "public", true, true, false,
+                "free", "APPROVED", "1.0.0", "tiktok", "tiktok_cred",
+                null, null, null, "{\"per_minute\":60}", policy, List.of());
+
+        String payload = new String(ApiCatalogBundlePayload.canonicalBytes(
+                7L, 1, "cloud", SNAPSHOT_AT, List.of(withPolicy), sampleTemplates()),
+                StandardCharsets.UTF_8);
+
+        assertThat(payload).contains("errorPolicy");
+        assertThat(payload).contains("spam_risk");
+    }
+
+    @Test
+    @DisplayName("an API without one adds no key, so the canonical bytes of every other API "
+            + "are unchanged")
+    void absentErrorPolicyAddsNothingToThePayload() {
+        // putIfNotNull is what keeps the bundle bytes identical for the ~970 APIs that declare
+        // no policy: an empty key on each of them would change every hash for nothing.
+        String payload = new String(ApiCatalogBundlePayload.canonicalBytes(
+                7L, 1, "cloud", SNAPSHOT_AT,
+                List.of(api(UUID.randomUUID(), "OpenWeather", List.of())), sampleTemplates()),
+                StandardCharsets.UTF_8);
+
+        assertThat(payload).doesNotContain("errorPolicy");
     }
 
     @Test
@@ -133,7 +175,7 @@ class ApiCatalogBundlePayloadTest {
                     a.subcategorySlug(), a.authType(), a.authHeaderName(), a.authHeaderValue(),
                     a.visibility(), a.isPublic(), a.isActive(), a.isLocal(), a.pricingModel(),
                     a.status(), a.version(), a.iconSlug(), a.platformCredentialName(), a.iconUrl(),
-                    a.apiVersion(), a.documentation(), a.rateLimits(), shuffledTools));
+                    a.apiVersion(), a.documentation(), a.rateLimits(), a.errorPolicy(), shuffledTools));
         }
         Collections.shuffle(shuffledApis, new Random(42));
         List<CredentialTemplateRow> shuffledTemplates = new ArrayList<>(sampleTemplates());
@@ -151,7 +193,7 @@ class ApiCatalogBundlePayloadTest {
         UUID apiId = UUID.fromString("00000000-0000-0000-0000-000000000001");
         ApiRow bare = new ApiRow(apiId, "Bare", null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, List.of());
+                null, null, null, null, List.of());
 
         byte[] bytes = ApiCatalogBundlePayload.canonicalBytes(1L, 1, "cloud", SNAPSHOT_AT,
                 List.of(bare), List.of());
@@ -305,6 +347,217 @@ class ApiCatalogBundlePayloadTest {
         assertThat(row.has("modelId")).isFalse();
         assertThat(row.get("integrationName").asText()).isEqualTo("elevenlabs");
         assertThat(row.get("priceUnit").asText()).isEqualTo("character");
+    }
+
+    /**
+     * Digest of the canonical bytes of {@link #goldenSnapshot()}, recorded from
+     * the implementation that built the whole payload as one {@code Map} tree and
+     * called {@code writeValueAsBytes}. Streaming replaced that because the tree
+     * form exhausted the catalog pod's heap, and this hash is the proof the
+     * replacement did not move a single byte.
+     */
+    private static final String GOLDEN_SHA256 =
+            "20a3e52b6edcf256f9c55a22186ab6e602958dd70df4819da590e69235f61e00";
+
+    private static List<ApiCatalogBundlePayload.GenerationPriceRow> goldenPrices() {
+        return List.of(
+                price("seedance", "33333333-3333-3333-3333-333333333333",
+                        "seedance-2.0", "second", "60"),
+                price("elevenlabs", "44444444-4444-4444-4444-444444444444",
+                        null, "character", "2"));
+    }
+
+    private static byte[] goldenSnapshot() {
+        return ApiCatalogBundlePayload.canonicalBytes(
+                7L, 1, "cloud", SNAPSHOT_AT, sampleApis(), sampleTemplates(), goldenPrices());
+    }
+
+    private static String sha256(byte[] bytes) throws Exception {
+        StringBuilder hex = new StringBuilder();
+        for (byte b : java.security.MessageDigest.getInstance("SHA-256").digest(bytes)) {
+            hex.append(String.format("%02x", b));
+        }
+        return hex.toString();
+    }
+
+    @Test
+    @DisplayName("the canonical bytes still hash to the value the TREE implementation produced - "
+            + "streaming must not move one byte, or every published bundle stops verifying")
+    void goldenCanonicalHashIsUnchangedByStreaming() throws Exception {
+        // Recorded BEFORE the streaming rewrite. CE verifies an Ed25519 signature
+        // over these bytes, so a canonicalisation change is not a refactor: it
+        // silently invalidates bundles already in the fleet's hands. Any edit that
+        // reaches this hash has to be a deliberate, versioned format change.
+        assertThat(sha256(goldenSnapshot())).isEqualTo(GOLDEN_SHA256);
+    }
+
+    @Test
+    @DisplayName("writeCanonical streams exactly the bytes canonicalBytes returns, and reports "
+            + "their count")
+    void writeCanonicalMatchesTheByteArrayForm() {
+        // The production build never calls canonicalBytes - it streams - so the
+        // two forms agreeing is what lets every other test here speak for it.
+        ByteArrayOutputStream streamed = new ByteArrayOutputStream();
+        long reported = ApiCatalogBundlePayload.writeCanonical(streamed, 7L, 1, "cloud",
+                SNAPSHOT_AT, sampleApis(), sampleTemplates(), goldenPrices());
+
+        assertThat(streamed.toByteArray()).isEqualTo(goldenSnapshot());
+        assertThat(reported).isEqualTo(goldenSnapshot().length);
+    }
+
+    @Test
+    @DisplayName("writeCanonical leaves the caller's stream OPEN, so a gzip wrapper can still be "
+            + "given its trailer")
+    void writeCanonicalDoesNotCloseTheCallersStream() throws Exception {
+        // Jackson closes its target by default. Left enabled, the generator would close the
+        // GZIPOutputStream the build wraps around it, and nothing after this call could write to
+        // it. Today's composition survives that by luck - DeflaterOutputStream.close() is guarded
+        // by a `closed` flag, so the caller's close is a harmless no-op - which is exactly why the
+        // contract needs its own test: it holds for the ONE caller that exists, and the next
+        // caller to write anything after the payload (a wrapper's trailer, a second document)
+        // would find the stream shut, with the byte-level symptom appearing only in production.
+        class CloseSpy extends java.io.ByteArrayOutputStream {
+            boolean closed;
+
+            @Override
+            public void close() throws IOException {
+                closed = true;
+                super.close();
+            }
+        }
+        CloseSpy spy = new CloseSpy();
+
+        ApiCatalogBundlePayload.writeCanonical(spy, 7L, 1, "cloud", SNAPSHOT_AT,
+                sampleApis(), sampleTemplates(), List.of());
+
+        assertThat(spy.closed).isFalse();
+        // And still writable: the gzip trailer is written after this returns.
+        spy.write('!');
+    }
+
+    @Test
+    @DisplayName("streaming straight into gzip gunzips back to the canonical bytes - the shape the "
+            + "build actually ships")
+    void streamedGzipRoundTripsToTheCanonicalBytes() throws Exception {
+        // This is the exact composition attemptBuild uses. It is asserted here
+        // because the signature covers the GZIP bytes: if the composition lost the
+        // tail of the payload, the bundle would still be signed, still verify, and
+        // deliver a truncated catalog.
+        ByteArrayOutputStream gzBuffer = new ByteArrayOutputStream();
+        long reported;
+        try (java.util.zip.GZIPOutputStream gz = new java.util.zip.GZIPOutputStream(gzBuffer)) {
+            reported = ApiCatalogBundlePayload.writeCanonical(gz, 7L, 1, "cloud", SNAPSHOT_AT,
+                    sampleApis(), sampleTemplates(), goldenPrices());
+        }
+
+        byte[] recovered = ApiCatalogBundlePayload.gunzip(gzBuffer.toByteArray());
+        assertThat(recovered).isEqualTo(goldenSnapshot());
+        assertThat(reported).isEqualTo(recovered.length);
+    }
+
+    @Test
+    @DisplayName("writeCanonical hands the payload over INCREMENTALLY - no single write carries the "
+            + "whole thing, which is the entire point of the method")
+    void writeCanonicalDoesNotMaterialiseThePayload() {
+        // The property this method exists for, and the one nothing else here can see: an
+        // implementation that builds the payload into a byte[] and hands it over in one write is
+        // byte-identical, satisfies the golden hash, satisfies the round trip, and satisfies the
+        // callsite rule - while restoring the OutOfMemoryError the change was made to end. The
+        // callsite rule guards WHICH method the build calls; only this guards what that method does.
+        //
+        // The fixture has to exceed one generator buffer (8000 bytes) or a streaming implementation
+        // would legitimately write once too.
+        List<ApiRow> many = new ArrayList<>();
+        for (int i = 0; i < 80; i++) {
+            many.add(api(UUID.fromString(String.format("00000000-0000-0000-0000-%012d", i)),
+                    "Api" + i, List.of(tool(
+                            UUID.fromString(String.format("11111111-0000-0000-0000-%012d", i)),
+                            "endpoint-" + i, List.of(), List.of(), List.of()))));
+        }
+
+        final List<Integer> writes = new ArrayList<>();
+        OutputStream recorder = new OutputStream() {
+            @Override public void write(int b) { writes.add(1); }
+            @Override public void write(byte[] b, int off, int len) { writes.add(len); }
+        };
+
+        long total = ApiCatalogBundlePayload.writeCanonical(
+                recorder, 7L, 1, "cloud", SNAPSHOT_AT, many, sampleTemplates(), List.of());
+
+        assertThat(total).isGreaterThan(8000L);
+        assertThat(writes).as("a single write means the payload was materialised first").hasSizeGreaterThan(1);
+        assertThat(writes.stream().mapToInt(Integer::intValue).max().orElse(0))
+                .as("no single write may carry the whole payload")
+                .isLessThan((int) total);
+        // And the pieces still add up to the reported size, so incremental does not mean lossy.
+        assertThat(writes.stream().mapToLong(Integer::longValue).sum()).isEqualTo(total);
+    }
+
+    @Test
+    @DisplayName("a stream that fails mid-payload raises UncheckedIOException instead of returning "
+            + "a short count that would be signed as a complete catalog")
+    void writeCanonicalPropagatesAStreamFailure() {
+        // The disaster this prevents: swallow the IOException and the caller gets a valid gzip of a
+        // TRUNCATED JSON, signs it, CE verifies it happily, and the install applies an amputated
+        // catalog. Nothing on either side reports anything.
+        OutputStream failing = new OutputStream() {
+            private int written;
+
+            @Override public void write(int b) throws IOException {
+                write(new byte[]{(byte) b}, 0, 1);
+            }
+
+            @Override public void write(byte[] b, int off, int len) throws IOException {
+                written += len;
+                if (written > 4000) throw new IOException("disk went away");
+            }
+        };
+
+        List<ApiRow> many = new ArrayList<>();
+        for (int i = 0; i < 80; i++) {
+            many.add(api(UUID.fromString(String.format("00000000-0000-0000-0000-%012d", i)),
+                    "Api" + i, List.of()));
+        }
+
+        assertThatThrownBy(() -> ApiCatalogBundlePayload.writeCanonical(
+                failing, 7L, 1, "cloud", SNAPSHOT_AT, many, sampleTemplates(), List.of()))
+                .isInstanceOf(UncheckedIOException.class)
+                .hasMessageContaining("canonical API catalog payload")
+                .hasRootCauseMessage("disk went away");
+    }
+
+    @Test
+    @DisplayName("the byte counter counts single-byte writes too, or a reported size could be short")
+    void theCounterCountsBothWriteForms() throws Exception {
+        // Jackson's UTF-8 generator only ever calls the array form, so this branch cannot be
+        // reached through writeCanonical - and deleting it changed no test at all. It is kept
+        // because FilterOutputStream's inherited single-byte write forwards WITHOUT counting, so
+        // dropping the override would silently under-report for any future caller. Tested directly,
+        // since that is the only way this can fail visibly.
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        Class<?> counterClass = Class.forName(
+                "com.apimarketplace.catalog.bundle.ApiCatalogBundlePayload$CountingOutputStream");
+        var ctor = counterClass.getDeclaredConstructor(OutputStream.class);
+        ctor.setAccessible(true);
+        OutputStream counter = (OutputStream) ctor.newInstance(sink);
+        var written = counterClass.getDeclaredMethod("written");
+        written.setAccessible(true);
+
+        counter.write('a');
+        counter.write(new byte[]{'b', 'c'}, 0, 2);
+        counter.write('d');
+
+        assertThat(written.invoke(counter)).isEqualTo(4L);
+        assertThat(sink.toString(StandardCharsets.UTF_8)).isEqualTo("abcd");
+    }
+
+    @Test
+    @DisplayName("writeCanonical rejects a null stream rather than counting bytes into nothing")
+    void writeCanonicalRejectsANullStream() {
+        assertThatThrownBy(() -> ApiCatalogBundlePayload.writeCanonical(
+                null, 7L, 1, "cloud", SNAPSHOT_AT, sampleApis(), sampleTemplates(), List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("output stream");
     }
 
     private static List<ApiRow> sampleApis() {

@@ -164,6 +164,13 @@ public class ReusableTriggerService {
     @Autowired(required = false)
     private SnapshotService snapshotService;
 
+    /**
+     * Product-analytics emitter (PostHog). Optional so hand-built test instances
+     * and analytics-less deployments are untouched; a null field emits nothing.
+     */
+    @Autowired(required = false)
+    private com.apimarketplace.orchestrator.services.analytics.WorkflowAnalyticsEmitter workflowAnalyticsEmitter;
+
     @Autowired(required = false)
     private com.apimarketplace.orchestrator.services.streaming.redis.WorkflowRedisPublisher workflowRedisPublisher;
 
@@ -851,34 +858,28 @@ public class ReusableTriggerService {
                         "Trigger '" + triggerId + "' no longer exists in the workflow plan");
             }
 
-            // ─── Budget gate: refuse to open a NEW epoch once the run's accumulated
-            // cost has reached the workflow budget. The in-flight epoch (if any)
+            // ─── Budget gate: refuse to open a NEW epoch once the workflow has
+            // spent its cap FOR THE CURRENT PERIOD. The in-flight epoch (if any)
             // finishes; only this next epoch is blocked, and the run stays reusable
             // (resetRunOnFailure → WAITING_TRIGGER). Agent executions are the only
-            // cost source, fed live by RunCostService. A fresh run has spent=0 so
-            // the FIRST fire always passes; only later epochs get blocked. Budget
-            // null/≤0 = unlimited. Read the LIVE cost (not run.getCostCredits(),
-            // which may lag behind concurrent agent-cost increments).
+            // cost source, fed live by RunCostService.
+            //
+            // V474: the comparison used to be against the RUN's lifetime cost,
+            // which on a pinned workflow (one production run accumulating epochs
+            // forever) turned the cap into a death sentence - the workflow fired
+            // until the cap was reached and then stopped for good. It is now the
+            // period spend, which rolls over on its own, so a blocked workflow
+            // resumes by itself next period. Cap null/≤0 = unlimited, and an
+            // editor run never feeds the period counter at all.
+            //
+            // Read it LIVE through the projection: the workflow entity's period
+            // columns are DB-managed and its in-memory copy lags behind the
+            // native increments issued by concurrent agent settles.
             if (workflow != null && workflow.getBudgetCredits() != null) {
-                java.math.BigDecimal spent = runRepository
-                        .findCostCreditsByRunIdPublic(runId)
-                        .orElse(java.math.BigDecimal.ZERO);
-                if (isBudgetExceeded(spent, workflow.getBudgetCredits())) {
-                    logger.warn("[ReusableTrigger] Budget reached for runId={}: spent={} >= budget={} credits. "
-                            + "Refusing to open a new epoch (in-flight epoch, if any, still finishes).",
-                            runId, spent, workflow.getBudgetCredits());
-                    if (workflowEventPublisher != null) {
-                        try {
-                            workflowEventPublisher.emitRunBudgetBlocked(runId, spent, workflow.getBudgetCredits());
-                        } catch (Exception ex) {
-                            logger.warn("[ReusableTrigger] Failed to emit budget-blocked toast for runId={}: {}",
-                                    runId, ex.getMessage());
-                        }
-                    }
+                String budgetRefusal = refuseFireIfBudgetReached(runId, workflow);
+                if (budgetRefusal != null) {
                     resetRunOnFailure(run, runId, triggerId);
-                    return TriggerExecutionResult.failure(runId, triggerId, triggerType,
-                            "Workflow budget reached (" + spent + "/" + workflow.getBudgetCredits()
-                            + " credits); no new epoch started.");
+                    return TriggerExecutionResult.failure(runId, triggerId, triggerType, budgetRefusal);
                 }
             }
 
@@ -995,6 +996,9 @@ public class ReusableTriggerService {
             }
             logger.info("[ReusableTrigger] Epoch {} for runId={}, mode={}, refire={} (epochBefore={})",
                 newEpoch, runId, mode, refire, epochBeforeFire);
+            if (workflowAnalyticsEmitter != null) {
+                workflowAnalyticsEmitter.epochStarted(run, triggerType, newEpoch, refire, mode);
+            }
 
             // 4. Create execution context from DB state (always fresh, no in-memory cache)
             WorkflowExecution execution = new WorkflowExecution(runId, plan, Map.of());
@@ -1078,22 +1082,84 @@ public class ReusableTriggerService {
     }
 
     /**
-     * Whether a run's accumulated cost has reached the workflow budget, so no new
-     * epoch may open. A null or non-positive budget means "no budget" (unlimited)
-     * and never blocks. The comparison is {@code >=}: reaching the budget exactly
-     * blocks the next epoch (the epoch that pushed the total to the cap still ran).
-     * A fresh run has {@code spent == 0} and therefore always passes its first fire.
+     * The epoch gate: may this fire open a NEW epoch, given the workflow's
+     * spending cap?
      *
-     * <p>Package-private + static so the gate's decision is unit-testable without
-     * standing up the full trigger pipeline.
+     * <p>Returns the refusal message when the cap is reached, or {@code null} to
+     * let the fire through. The in-flight epoch (if any) always finishes; only
+     * the NEXT one is refused, and the run stays reusable, so a blocked workflow
+     * resumes by itself once the period rolls over.
+     *
+     * <p>V474: the comparison used to be against the RUN's lifetime cost, which
+     * on a pinned workflow (one production run accumulating epochs forever)
+     * turned the cap into a death sentence: the workflow fired until the cap was
+     * reached and then stopped for good, silently. It is now the period spend.
+     *
+     * <p>Read LIVE through the projection rather than from the workflow entity:
+     * the period columns are DB-managed, so the in-memory copy lags behind the
+     * native increments that concurrent agent settles are issuing.
+     *
+     * <p>Extracted from {@code executeTriggerInternal} so this decision, and the
+     * two things it emits, can actually be tested. Inline, the only test this
+     * gate had exercised a two-line numeric comparison and asserted nothing
+     * about WHICH run is refused, or about whether anybody is told.
      */
-    static boolean isBudgetExceeded(java.math.BigDecimal spent, java.math.BigDecimal budget) {
-        if (budget == null || budget.signum() <= 0) {
-            return false;
+    String refuseFireIfBudgetReached(String runId,
+                                     com.apimarketplace.orchestrator.domain.WorkflowEntity workflow) {
+        com.apimarketplace.orchestrator.services.credit.WorkflowBudgetState budgetState =
+                runRepository.findBudgetStateByRunIdPublic(runId).orElse(null);
+        if (budgetState == null) {
+            return null;
         }
-        java.math.BigDecimal actualSpent = spent != null ? spent : java.math.BigDecimal.ZERO;
-        return actualSpent.compareTo(budget) >= 0;
+        java.time.Instant budgetNow = java.time.Instant.now();
+        // blocksAt() carries the WHOLE rule (governed run AND over cap), shared
+        // with the pre-flight guard in AgentNode so the two enforcement points
+        // cannot drift apart.
+        if (!budgetState.blocksAt(budgetNow)) {
+            return null;
+        }
+        java.math.BigDecimal spent = budgetState.effectiveSpent(budgetNow);
+        String mode = com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                .normaliseMode(budgetState.periodMode());
+        logger.warn("[ReusableTrigger] Period budget reached for runId={}: spent={} >= cap={} credits "
+                + "(mode={}). Refusing to open a new epoch (in-flight epoch, if any, still finishes).",
+                runId, spent, workflow.getBudgetCredits(), mode);
+        if (workflowEventPublisher != null) {
+            try {
+                workflowEventPublisher.emitRunBudgetBlocked(runId, spent, workflow.getBudgetCredits(), mode);
+            } catch (Exception ex) {
+                logger.warn("[ReusableTrigger] Failed to emit budget-blocked toast for runId={}: {}",
+                        runId, ex.getMessage());
+            }
+        }
+        // The toast above only reaches whoever has this run open. A capped
+        // workflow that stops firing at 3am needs something durable, so raise
+        // the notification too: the emitter dedups on (workflow, period), making
+        // this one row per period no matter how many fires the cap refuses. It
+        // also covers the case the settle hook cannot see - a user LOWERING the
+        // cap below what is already spent crosses nothing, so nothing would ever
+        // be announced.
+        if (eventPublisher != null) {
+            try {
+                eventPublisher.publishEvent(new com.apimarketplace.orchestrator.services.events
+                        .WorkflowBudgetReachedEvent(
+                        runId,
+                        workflow.getId(),
+                        spent,
+                        workflow.getBudgetCredits(),
+                        mode,
+                        com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                                .periodStart(budgetState.periodMode(), budgetNow),
+                        budgetNow));
+            } catch (Exception ex) {
+                logger.warn("[ReusableTrigger] Failed to publish budget-reached notification "
+                        + "for runId={}: {}", runId, ex.getMessage());
+            }
+        }
+        return "Workflow budget reached for this period (" + spent + "/"
+                + workflow.getBudgetCredits() + " credits); no new epoch started.";
     }
+
 
     /**
      * Reset a run back to WAITING_TRIGGER after a failure in executeTriggerInternal.

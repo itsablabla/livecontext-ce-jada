@@ -19,6 +19,7 @@ import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import { DataSourcePanelContent } from '@/components/app/DataSourcePanelContent';
 import { panelDragHandleClass } from '@/components/ui/panel-drag-handle';
+import { NodePlanNotice } from './NodePlanNotice';
 
 /**
  * A "secondary" node action. Rendered as an inline icon button on wide panels
@@ -310,7 +311,7 @@ export function InspectorPanelHeader({
 
       {/* Title section */}
       <div className="flex-1 min-w-0">
-        <div className="mb-1 h-5">
+        <div className="mb-1 h-5 flex items-center gap-1.5">
           {(data as any).toolData?.toolName ? (
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500 truncate">
               {(data as any).toolData.toolName.replace(/_/g, ' ')}
@@ -322,6 +323,9 @@ export function InspectorPanelHeader({
               {displayKind}
             </p>
           )}
+          {/* Beside the node's type, not under its name: a fact about the node,
+              at the weight of a marker. */}
+          <NodePlanNotice nodeId={node.id} />
         </div>
         {isRunMode ? (
           <div

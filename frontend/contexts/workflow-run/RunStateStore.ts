@@ -99,6 +99,16 @@ export interface RunState {
   costByEpoch: Record<string, number>;
   /** Workflow cost budget in credits, or null when none is set. */
   budgetCredits: number | null;
+  /** What this workflow's governed runs have spent in the current budget
+   *  period, in credits. This, NOT `costCredits`, is the figure the cap is
+   *  compared against: a pinned workflow keeps one run for months, so its
+   *  lifetime cost passes the cap long before the period spend does. Null for
+   *  an editor run, which never counts against the cap. */
+  periodSpentCredits: number | null;
+  /** monthly | weekly | cumulative - names the period `periodSpentCredits` covers. */
+  budgetPeriodMode: string | null;
+  /** When the allowance starts again (ISO-8601 UTC), null when it never does. */
+  budgetPeriodResetsAt: string | null;
 
   // Step tracking (authoritative from API)
   readySteps: Set<string>;
@@ -158,6 +168,12 @@ export interface InitializeFromApiPayload {
   rawState?: any;
   currentEpoch?: number;
   epochTimestamps?: RunState['epochTimestamps'];
+  /**
+   * Epochs of this run still open. Also carried by the WS snapshot; read here too so a
+   * client that has only done the REST load does not read "nothing is executing" from an
+   * empty list - which is the state a targeted epoch replay is refused on.
+   */
+  activeEpochs?: number[];
   totalDurationMs?: number;
   /** Total accumulated run cost across all epochs, in credits (1 credit = $0.001). */
   costCredits?: number | null;
@@ -165,6 +181,11 @@ export interface InitializeFromApiPayload {
   costByEpoch?: Record<string, number> | null;
   /** Workflow cost budget in credits, or null when none is set. */
   budgetCredits?: number | null;
+  /** Production spend in the current budget period, in credits (null for an editor run). */
+  periodSpentCredits?: number | null;
+  /** monthly | weekly | cumulative. */
+  budgetPeriodMode?: string | null;
+  budgetPeriodResetsAt?: string | null;
   /** Backend monotonic sequence (StateSnapshot.seq) - used by manager for partial-apply gating. */
   seq?: number;
 }
@@ -265,6 +286,9 @@ function createDefaultState(): RunState {
     costCredits: null,
     costByEpoch: {},
     budgetCredits: null,
+    periodSpentCredits: null,
+    budgetPeriodMode: null,
+    budgetPeriodResetsAt: null,
     readySteps: new Set(),
     epochReadySteps: {},
     activeEpochs: [],
@@ -668,16 +692,22 @@ export class RunStateStore {
    * event so the panel can paint the over-budget state without a refetch. Both
    * in credits. `budgetCredits` is only overwritten when the event carries one
    * (a null budget on the wire means "no budget", which we honor).
+   *
+   * `periodSpentCredits` follows the same rule and is the figure the cap is
+   * compared against; the event sends null for an editor run, which is a
+   * meaningful value ("this run does not count against the cap"), not a gap.
    */
   setRunCost(
     costCredits: number | null | undefined,
     budgetCredits?: number | null,
     epoch?: number,
     epochCostCredits?: number | null,
+    periodSpentCredits?: number | null,
   ): void {
     const changes: Partial<RunState> = {};
     if (typeof costCredits === 'number') changes.costCredits = costCredits;
     if (budgetCredits !== undefined) changes.budgetCredits = budgetCredits;
+    if (periodSpentCredits !== undefined) changes.periodSpentCredits = periodSpentCredits;
     if (typeof epoch === 'number' && typeof epochCostCredits === 'number') {
       changes.costByEpoch = { ...this.state.costByEpoch, [String(epoch)]: epochCostCredits };
     }
@@ -956,13 +986,21 @@ export class RunStateStore {
       completedAt: data.completedAt || null,
       durationMs: data.durationMs || null,
       totalDurationMs: data.totalDurationMs ?? null,
-      currentEpoch: data.currentEpoch ?? 0,
+      // Only when the payload carries it, for the same reason `activeEpochs` is conditional on
+      // the tracking path: a body without the field means "this payload does not say", not
+      // "epoch 0". Coalescing it to 0 is what let a client parked on epoch 0 of a later-epoch
+      // run read that epoch as the live one - the epoch identity comparison in
+      // useNodeExecutionStatus keys off exactly this field.
+      ...(typeof data.currentEpoch === 'number' ? { currentEpoch: data.currentEpoch } : {}),
       epochTimestamps: data.epochTimestamps ?? [],
       // Seed run cost + workflow budget from the /state payload (rawState is the
       // full response). Live deltas arrive later via the runCost WS event.
       costCredits: data.costCredits ?? data.rawState?.costCredits ?? null,
       costByEpoch: data.costByEpoch ?? data.rawState?.costByEpoch ?? {},
       budgetCredits: data.budgetCredits ?? data.rawState?.budgetCredits ?? null,
+      periodSpentCredits: data.periodSpentCredits ?? data.rawState?.periodSpentCredits ?? null,
+      budgetPeriodMode: data.budgetPeriodMode ?? data.rawState?.budgetPeriodMode ?? null,
+      budgetPeriodResetsAt: data.budgetPeriodResetsAt ?? data.rawState?.budgetPeriodResetsAt ?? null,
       rawRunState: data.rawState || null,
       isLoading: false,
       error: null,
@@ -1164,6 +1202,15 @@ export class RunStateStore {
     this.update({
       runStatus,
       totalNodes: nodes.length,
+      // Open epochs ride the TRACKING write, not the metadata one: they describe what the run
+      // is doing right now, so they belong behind the same seq guard as the step sets (written
+      // from applyMetadata, which always runs, a stale REST body could clobber a fresher set)
+      // and in the same emit, so no subscriber ever sees them move without them.
+      //
+      // Only when the payload carries the field: an older backend, and the public showcase
+      // payload, omit it - defaulting to [] there would erase what the snapshot established
+      // and make the client read "nothing is executing" when something is.
+      ...(data.activeEpochs ? { activeEpochs: data.activeEpochs } : {}),
       readySteps: TERMINAL_STATUSES.has(runStatus) ? new Set() : new Set(data.readySteps || []),
       completedSteps: new Set(completedStepIds),
       failedSteps: new Set(failedStepIds),
@@ -1292,6 +1339,14 @@ export class RunStateStore {
     });
 
     this.update({
+      // FOLLOWS the epoch the rerun executed in, even when that is an OLDER one than the run
+      // had reached - a replay of an older fire reports that older number, and this pointer
+      // mirrors `DagState.currentEpoch`, which `reopenEpoch` moves backward for exactly that
+      // reason ("Unlike openEpoch(int) this can move currentEpoch BACKWARD"). The run really
+      // is executing in the replayed epoch now, so treating it as the live one is correct and
+      // is what the next snapshot would say anyway. Do not "guard" this with a max: the two
+      // other writers of the field (setEpochData, applyMetadata) take the wire value straight,
+      // so a floor here would disagree with them for one render and lose.
       currentEpoch: epoch,
       runStatus: resolvedStatus,
       readySteps: new Set(newReadySteps),

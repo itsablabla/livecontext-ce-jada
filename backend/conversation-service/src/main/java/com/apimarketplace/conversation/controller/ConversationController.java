@@ -14,6 +14,8 @@ import com.apimarketplace.conversation.service.PendingActionResumeService;
 import com.apimarketplace.conversation.service.ConversationSharingService;
 import com.apimarketplace.conversation.service.approval.ServiceApprovalService;
 import com.apimarketplace.conversation.service.approval.ToolApprovalGateResolver;
+import com.apimarketplace.conversation.service.approval.UserQuestionAnswerService;
+import com.apimarketplace.agent.tools.ask.UserQuestionValidator;
 import com.apimarketplace.conversation.service.approval.ToolAuthorizationApprovalService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,6 +49,7 @@ public class ConversationController {
     private final ToolAuthorizationApprovalService toolAuthorizationApprovalService;
     private final ConversationSharingService conversationSharingService;
     private final ToolApprovalGateResolver toolApprovalGateResolver;
+    private final UserQuestionAnswerService userQuestionAnswerService;
 
     public ConversationController(ConversationCommandService conversationCommandService,
                                   ConversationQueryService conversationQueryService,
@@ -56,7 +59,8 @@ public class ConversationController {
                                   ServiceApprovalService serviceApprovalService,
                                   ToolAuthorizationApprovalService toolAuthorizationApprovalService,
                                   ConversationSharingService conversationSharingService,
-                                  ToolApprovalGateResolver toolApprovalGateResolver) {
+                                  ToolApprovalGateResolver toolApprovalGateResolver,
+                                  UserQuestionAnswerService userQuestionAnswerService) {
         this.conversationCommandService = conversationCommandService;
         this.conversationQueryService = conversationQueryService;
         this.messageService = messageService;
@@ -66,6 +70,7 @@ public class ConversationController {
         this.toolAuthorizationApprovalService = toolAuthorizationApprovalService;
         this.conversationSharingService = conversationSharingService;
         this.toolApprovalGateResolver = toolApprovalGateResolver;
+        this.userQuestionAnswerService = userQuestionAnswerService;
     }
     
     /**
@@ -93,6 +98,7 @@ public class ConversationController {
             conversationDto.setTitle(createConversationDto.getTitle());
             conversationDto.setModel(createConversationDto.getModel());
             conversationDto.setProvider(createConversationDto.getProvider());
+            conversationDto.setKind(createConversationDto.getKind());
             conversationDto.setWorkflowId(createConversationDto.getWorkflowId());
             conversationDto.setAgentId(createConversationDto.getAgentId());
             conversationDto.setParentConversationId(createConversationDto.getParentConversationId());
@@ -276,24 +282,35 @@ public class ConversationController {
      * User ID is provided by the gateway via X-User-ID header
      */
     @GetMapping
-    public ResponseEntity<PagedResponseDto<ConversationDto>> getConversationsByUser(
+    public ResponseEntity<?> getConversationsByUser(
             @RequestHeader(value = "X-User-ID") String userId,
             @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "10") int size,
-            @RequestParam(value = "includeInactive", defaultValue = "false") boolean includeInactive) {
+            @RequestParam(value = "includeInactive", defaultValue = "false") boolean includeInactive,
+            // Narrows the listing to one kind (chat / studio) IN THE QUERY. Omit for every kind.
+            // An unknown value is a 400 rather than an ignored parameter: silently listing
+            // everything would answer a question nobody asked, and silently listing nothing would
+            // read as "you have none".
+            @RequestParam(value = "kind", required = false) String kind) {
         try {
-            logger.info("📋 [GET] Getting conversations for user: {} (org: {}), page: {}, size: {}",
-                    userId, organizationId, page, size);
+            logger.info("📋 [GET] Getting conversations for user: {} (org: {}), page: {}, size: {}, kind: {}",
+                    userId, organizationId, page, size, kind);
             // PR21 - strict-isolation: org workspace lists all team chats; personal
             // workspace lists only owner's chats that are NOT tagged with any org.
             // This closes the sidebar-leak bug class on the conversation surface.
             Page<ConversationDto> conversations = conversationQueryService.getConversationsByUserId(
-                    userId, organizationId, page, size, includeInactive);
+                    userId, organizationId, page, size, includeInactive, kind);
             PagedResponseDto<ConversationDto> response = new PagedResponseDto<>(conversations);
             logger.info("✅ [GET] Found {} conversations for user: {} (org: {})",
                     response.getNumberOfElements(), userId, organizationId);
             return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException e) {
+            logger.warn("Rejected conversation listing for user {}: {}", userId, e.getMessage());
+            // With a body, like every other refusal on this controller. A bodyless 400 tells the
+            // caller only that something was wrong with a request carrying several parameters, and
+            // two different causes reach here - an unknown `kind` and a missing organization header.
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             logger.error("❌ [GET] Error getting conversations for user: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
@@ -932,6 +949,75 @@ public class ConversationController {
             "approved", approved,
             "parkedCallReleased", released
         ));
+    }
+
+    // ==================== ASK USER (question cards) ====================
+
+    /**
+     * Record the person's answer to a question card raised by the {@code ask_user} tool.
+     * Body: {@code { "toolCallId": "...", "gateKey": "<toolCallId>:ask", "answers": [{header, selected[], freeText}] }}.
+     *
+     * <p>{@code parkedCallReleased} tells the frontend whether the agent was still holding
+     * the call: true means the turn continues in place with the answers as the tool result;
+     * false means the frontend must send the answers as the person's next message.
+     */
+    @PostMapping("/{conversationId}/ask-user/answer")
+    public ResponseEntity<Map<String, Object>> answerUserQuestion(
+            @PathVariable("conversationId") String conversationId,
+            @RequestBody Map<String, Object> request,
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
+        if (userId == null || userId.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (conversationQueryService.getConversationById(conversationId, userId, organizationId).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        String toolCallId = gateKeyOf(request, "toolCallId");
+        if (toolCallId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "toolCallId is required"));
+        }
+        try {
+            var outcome = userQuestionAnswerService.answer(conversationId, toolCallId,
+                    gateKeyOf(request, "gateKey"), request.get("answers"));
+            return ResponseEntity.ok(Map.of(
+                "conversationId", conversationId,
+                "toolCallId", toolCallId,
+                "parkedCallReleased", outcome.parkedCallReleased(),
+                "answerCount", outcome.answers().size()
+            ));
+        } catch (UserQuestionValidator.InvalidQuestionsException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** The person chose not to answer a question card. Body: {@code { "toolCallId", "gateKey" }}. */
+    @PostMapping("/{conversationId}/ask-user/dismiss")
+    public ResponseEntity<Map<String, Object>> dismissUserQuestion(
+            @PathVariable("conversationId") String conversationId,
+            @RequestBody Map<String, Object> request,
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
+        if (userId == null || userId.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (conversationQueryService.getConversationById(conversationId, userId, organizationId).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        String toolCallId = gateKeyOf(request, "toolCallId");
+        if (toolCallId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "toolCallId is required"));
+        }
+        try {
+            boolean released = userQuestionAnswerService.dismiss(conversationId, toolCallId, gateKeyOf(request, "gateKey"));
+            return ResponseEntity.ok(Map.of(
+                "conversationId", conversationId,
+                "toolCallId", toolCallId,
+                "parkedCallReleased", released
+            ));
+        } catch (UserQuestionValidator.InvalidQuestionsException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 
     /**

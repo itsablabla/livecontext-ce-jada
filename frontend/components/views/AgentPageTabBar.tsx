@@ -1,11 +1,11 @@
 'use client';
 
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Bot, Network, Zap, BarChart3 } from 'lucide-react';
+import { Bot, Network, Zap, BarChart3, Brain, Settings } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { samePageUrl, showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
 
-export type AgentPageTab = 'agents' | 'skills' | 'fleet' | 'metrics';
+export type AgentPageTab = 'agents' | 'skills' | 'memory' | 'fleet' | 'metrics' | 'settings';
 
 interface AgentPageTabBarProps {
   activeTab: AgentPageTab;
@@ -13,7 +13,7 @@ interface AgentPageTabBarProps {
 }
 
 /**
- * Shared tab bar for the Agent area (Agents / Skills / Fleet / Metrics).
+ * Shared tab bar for the Agent area (Agents / Skills / Memory / Fleet / Metrics / Settings).
  * The task board lives only in the aggregated Board menu (/app/board → Tasks tab),
  * so there is no longer a "Board" tab here.
  */
@@ -58,6 +58,10 @@ export function AgentPageTabBar({ activeTab, onLocalTabChange }: AgentPageTabBar
         <Zap className="h-3.5 w-3.5" />
         {t('tabSkills')}
       </button>
+      <button type="button" onClick={() => goToAgentView('memory')} className={tabClass('memory')}>
+        <Brain className="h-3.5 w-3.5" />
+        {t('tabMemory')}
+      </button>
       <button type="button" onClick={() => goToAgentView('fleet')} className={tabClass('fleet')}>
         <Network className="h-3.5 w-3.5" />
         {t('tabFleet')}
@@ -65,6 +69,10 @@ export function AgentPageTabBar({ activeTab, onLocalTabChange }: AgentPageTabBar
       <button type="button" onClick={() => goToAgentView('metrics')} className={tabClass('metrics')}>
         <BarChart3 className="h-3.5 w-3.5" />
         {t('tabMetrics')}
+      </button>
+      <button type="button" onClick={() => goToAgentView('settings')} className={tabClass('settings')}>
+        <Settings className="h-3.5 w-3.5" />
+        {t('tabSettings')}
       </button>
     </div>
   );

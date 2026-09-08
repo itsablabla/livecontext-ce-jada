@@ -237,7 +237,7 @@ public class WorkflowPublicationService {
             DisplayMode displayMode) {
         return publishWorkflow(workflowId, tenantId, null, title, description,
                 showcaseInterfaceId, showcaseRunId, categoryId, creditsPerUse,
-                visibility, requestedPlanVersion, displayMode, null, false, Map.of());
+                visibility, requestedPlanVersion, displayMode, null, false, Map.of(), null);
     }
 
     /**
@@ -266,7 +266,8 @@ public class WorkflowPublicationService {
             DisplayMode displayMode,
             Integer showcaseEpoch,
             boolean viaScreeningWizard,
-            Map<String, String> imageReplacements) {
+            Map<String, String> imageReplacements,
+            Boolean studio) {
 
         // Validate workflow exists and belongs to tenant (via orchestrator)
         Map<String, Object> workflowData = orchestratorClient.getWorkflowForPublication(workflowId, tenantId, organizationId);
@@ -438,6 +439,12 @@ public class WorkflowPublicationService {
         PublicationSlugAssigner.assignIfMissing(publication, publicationRepository);
         publication.setVisibility(effectiveVisibility);
         publication.setDisplayMode(effectiveDisplayMode);
+        // The studio axis. Null means "no opinion": on a REPUBLISH this row already exists, so
+        // leaving the column alone is what stops a re-share silently taking an application off the
+        // studio shelf. A brand-new row keeps the column default (false) under the same rule.
+        if (studio != null) {
+            publication.setStudio(studio);
+        }
         if (effectiveVisibility == PublicationVisibility.PRIVATE) {
             publication.setStatus(PublicationStatus.ACTIVE);
         } else {
@@ -622,7 +629,7 @@ public class WorkflowPublicationService {
             DisplayMode displayMode) {
         return updatePublicationInfo(publicationId, tenantId, null, title, description,
                 showcaseInterfaceId, showcaseRunId, categoryId, creditsPerUse,
-                visibility, displayMode, null, false, false, Map.of());
+                visibility, displayMode, null, false, false, Map.of(), null);
     }
 
     /**
@@ -656,7 +663,8 @@ public class WorkflowPublicationService {
             Integer showcaseEpoch,
             boolean clearShowcaseEpoch,
             boolean viaScreeningWizard,
-            Map<String, String> imageReplacements) {
+            Map<String, String> imageReplacements,
+            Boolean studio) {
 
         WorkflowPublicationEntity publication = publicationRepository.findById(publicationId)
                 .orElseThrow(() -> new IllegalArgumentException("Publication not found: " + publicationId));
@@ -770,6 +778,23 @@ public class WorkflowPublicationService {
         publication.setCreditsPerUse(creditsToWrite != null ? creditsToWrite : 0);
         publication.setVisibility(visibility != null ? visibility : publication.getVisibility());
         publication.setDisplayMode(effectiveDisplayMode);
+        // The studio axis, and it is an AXIS rather than a category: a publication carries exactly
+        // one category, so modelled as one, a video studio would have had to stop being a Content
+        // app to become a studio one.
+        //
+        // Absent from the request means "no opinion" and leaves the stored value alone - the same
+        // contract categoryId follows. That is what stops a client predating the axis, or an edit
+        // form that does not render the control, from silently taking an application off the studio
+        // shelf on an unrelated title change.
+        //
+        // publishWorkflow writes the column under this same guard, and that is what makes a
+        // re-share of an existing row leave the axis alone instead of resetting it. Both sites are
+        // pinned by WorkflowPublicationServiceStudioAxisTest, which asserts the absent case on each
+        // - collapsing either guard to setStudio(Boolean.TRUE.equals(studio)) reads as equivalent
+        // and silently takes every application published by an older client off the studio shelf.
+        if (studio != null) {
+            publication.setStudio(studio);
+        }
 
         // Every re-share re-enters moderation. Mirrors publishWorkflow(): a
         // PUBLIC/UNLISTED update returns to PENDING_REVIEW (reviewer state
@@ -1159,7 +1184,7 @@ public class WorkflowPublicationService {
         // Runs before every other check so the user gets the real reason rather
         // than a downstream quota / visibility error.
         if (ceExclusiveGuard != null) {
-            ceExclusiveGuard.check(publication);
+            ceExclusiveGuard.check(publication, tenantId);
         }
 
         if (acquisitionHelper != null) {

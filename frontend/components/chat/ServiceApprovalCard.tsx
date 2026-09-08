@@ -11,6 +11,7 @@ import { CredentialWizard, type CredentialWizardRequirement } from '@/components
 import { useCredentialCheck } from '@/hooks/useCredentialCheck';
 import { useToast } from '@/components/Toast';
 import ToastContainer from '@/components/ToastContainer';
+import { track } from '@/lib/analytics/analytics';
 import type { ServiceApprovalInfo, PendingServiceApproval } from '@/contexts/StreamingContext';
 import { normalizeIconSlug } from '@/lib/credentials/iconSlug';
 
@@ -172,6 +173,11 @@ export function ServiceApprovalCard({
 
     // All credentials are already configured, proceed with approval
     await approveServices();
+    track('chat_service_approval_resolved', {
+      decision: 'approved',
+      service_count: pendingApproval.services.length,
+      needs_credentials_count: servicesNeedingCredentials.length,
+    });
   };
 
   const handleWizardComplete = async (completedIconSlugs: string[]) => {
@@ -186,6 +192,11 @@ export function ServiceApprovalCard({
 
     if (allConfigured) {
       await approveServices();
+      track('chat_service_approval_resolved', {
+        decision: 'wizard_completed',
+        service_count: pendingApproval.services.length,
+        needs_credentials_count: servicesNeedingCredentials.length,
+      });
     }
     // If not all configured, the card remains visible for the user to try again
   };
@@ -202,6 +213,11 @@ export function ServiceApprovalCard({
     if (onDenied) {
       onDenied(serviceNames);
     }
+    track('chat_service_approval_resolved', {
+      decision: 'denied',
+      service_count: pendingApproval.services.length,
+      needs_credentials_count: servicesNeedingCredentials.length,
+    });
   };
 
   const handleImageError = (serviceType: string) => {

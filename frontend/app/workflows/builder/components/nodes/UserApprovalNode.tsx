@@ -25,6 +25,7 @@ import type { PendingSignal } from '@/lib/websocket/ws-types';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { getTargetHandleGeometry, getBranchHandleGeometry, getBranchRowFlow, getSideAttachment } from './handleGeometry';
+import { NodeActivityShimmer } from './NodeActivityShimmer';
 /**
  * One-line preview of a pending signal's split-item context (e.g. the
  * `current_item` the approval refers to). Prefers the first non-empty string
@@ -72,7 +73,7 @@ export function UserApprovalNode({ data, selected, id }: NodeProps<BuilderNodeDa
   const nodeClass = React.useMemo(() => findNodeClassById(data.id || ''), [data.id]);
   const nodeFamily = nodeClass?.family;
 
-  const executionStatus = useNodeExecutionStatus(id, { label: data.label, kind: 'approval' });
+  const executionStatus = useNodeExecutionStatus(id, { label: data.label, kind: 'approval', status: data.status });
 
   const { hasNodeErrors: checkNodeErrors } = useValidation();
   const hasError = checkNodeErrors(id);
@@ -208,28 +209,7 @@ export function UserApprovalNode({ data, selected, id }: NodeProps<BuilderNodeDa
       }}
       tabIndex={0}
     >
-      {/* Shimmer scan effect for running state (blue, same as other nodes) */}
-      {effectiveStatus === 'running' && (
-        <div
-          className="absolute inset-0 pointer-events-none rounded-[26px]"
-          style={{
-            background: 'linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.15) 50%, transparent 100%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer-scan 2.5s ease-in-out infinite',
-          }}
-        />
-      )}
-      {/* Shimmer scan effect for awaiting approval (amber) */}
-      {effectiveStatus === 'awaiting_signal' && (
-        <div
-          className="absolute inset-0 pointer-events-none rounded-[26px]"
-          style={{
-            background: 'linear-gradient(90deg, transparent 0%, rgba(245, 158, 11, 0.15) 50%, transparent 100%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer-scan 2.5s ease-in-out infinite',
-          }}
-        />
-      )}
+      <NodeActivityShimmer status={effectiveStatus} className="rounded-[26px]" />
 
       <NodeHeader
         visuals={{ ...visuals, iconBg: '#fef3c7' }} // Amber theme for approval

@@ -13,7 +13,7 @@ npm install @radix-ui/react-toggle @radix-ui/react-checkbox @radix-ui/react-radi
 ## Composants disponibles
 
 ### Boutons
-- **Button** - Bouton avec différentes variantes (default, secondary, outline, ghost, contrast, destructive, link) et tailles (sm, default, lg, icon)
+- **Button** - Bouton avec différentes variantes (default, secondary, outline, ghost, ghostGray, destructive, link, readonly) et tailles (sm, default, lg, icon). `default` est **le** remplissage plein : la table de variantes n'en propose pas un second (la variante `contrast`, qui codait le noir/blanc en dur, a été supprimée - `--accent-primary` est déjà quasi noir en clair et quasi blanc en sombre). Voir la section ci-dessous.
 
 ### Formulaires
 - **Input** - Champ de saisie texte
@@ -42,6 +42,42 @@ npm install @radix-ui/react-toggle @radix-ui/react-checkbox @radix-ui/react-radi
 - **Card** - Conteneur avec Header, Content, Footer, Description
 - **Tabs** - Onglets (TabsList, TabsTrigger, TabsContent)
 - **Table** - Tableau avec Header, Body, Footer, Row, Cell
+
+## Un seul remplissage plein - source de vérité
+
+Le bouton plein de l'application, c'est `Button` en variante `default`, et rien d'autre.
+`--accent-primary` vaut déjà `#0b0d16` en thème clair et `#edecea` en sombre : un noir ou un
+blanc écrit en dur donne le MÊME bouton, en dehors des tokens du thème.
+
+| Ce qu'on veut | Ce qu'on écrit |
+|---------------|----------------|
+| Le bouton plein | `<Button>` (variante `default`) |
+| Un remplissage accent ailleurs (pastille, compteur, case cochée) | `bg-[var(--accent-primary)] text-[var(--accent-foreground)]` |
+| Son survol | `hover:bg-[var(--accent-hover)]` |
+
+**Interdit, et vérifié par `__tests__/solidButtonFill.test.ts` :**
+- une variante de `buttonVariants` qui code un remplissage quasi noir ou quasi blanc en dur
+  (`bg-black`, `bg-white`, les nuances 700 à 950 et 50 à 200 de slate/gray/neutral/zinc/stone, et
+  tout `bg-[#…]` dont les canaux sont extrêmes - une couleur sémantique comme le rouge
+  `bg-[#dc5c5c]` de `destructive` reste légitime) ;
+- un contrôle (`<Button>`, `<button>`, `<a>`, `<Link>`, ou tout élément avec un `onClick` ou un
+  `role="button"/"link"`) qui peint lui-même le remplissage inversé `bg-foncé … dark:bg-clair`,
+  que ce soit dans sa balise ou via une constante / fonction de classes qu'il utilise ;
+- `text-white` ou `text-black` posé sur `bg-[var(--accent-primary)]` : en sombre l'accent EST
+  quasi blanc, donc c'est du blanc sur blanc. La couleur de texte du remplissage est
+  `--accent-foreground`, jamais un littéral.
+
+Une ligne de filtres se construit avec des `Button` (`default` quand l'option est choisie,
+`outline` sinon), pas avec une pilule maison : voir `GenerationHistoryList` et la page
+Applications.
+
+**Ce que la règle ne dit PAS.** Elle porte sur les **contrôles**, pas sur toute la page. Il
+reste délibérément des surfaces non interactives en noir/blanc en dur (barres de progression,
+bulles d'étape de `StepIndicator`, `SelectionActionBar`, badges « Most popular ») : ce sont des
+décors et des étiquettes, pas des boutons, et le test ne les touche pas. Elle ne dit pas non plus
+qu'il n'y a qu'un seul bouton plein **par écran** : une modale peut en aligner deux (p.ex.
+« Compare plans » au-dessus du bouton de paiement dans `UpgradeModal`), ce qui est une décision
+produit, pas une question de tokens.
 
 ## Échelle de rayons (square-rounded) - source de vérité
 

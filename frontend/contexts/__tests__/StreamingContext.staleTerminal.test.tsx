@@ -448,6 +448,7 @@ describe('isStaleTerminal - reducer-level safety net', () => {
     toolActivities: [],
     pendingServiceApprovals: [],
     pendingToolAuthorizations: [],
+    pendingAskUserQuestions: [],
   });
 
   it('is stale when both ids are known and differ', () => {

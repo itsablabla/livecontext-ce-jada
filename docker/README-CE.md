@@ -279,6 +279,25 @@ Both are read at startup, so restart the backend after changing them. With the
 check off, nothing at all leaves your install on this path, and every feature
 keeps working.
 
+## What's new panel
+
+After an upgrade, a one-time panel describes the newest change in the version
+you are running, illustrated with an image or a short clip. It ships **inside
+the image**: no feed is polled and no request leaves your install, so it works
+the same on an air-gapped box as on a connected one. Each user sees it once,
+older entries are never replayed, and it stays reachable afterwards from the
+"What's new" entry in the profile menu.
+
+To remove it entirely, in `docker/.env.ce`:
+
+```bash
+CHANGELOG_ENABLED=false
+```
+
+Read at startup, so restart the backend after changing it. With it off there is
+no panel, no profile-menu entry and no unread dot, and nothing is recorded about
+who has seen what.
+
 One caveat if you maintain your own compose file rather than using the one in
 this repo: Compose only passes a variable to the container if the service's
 `environment:` block names it. The bundled compose forwards both of these; a

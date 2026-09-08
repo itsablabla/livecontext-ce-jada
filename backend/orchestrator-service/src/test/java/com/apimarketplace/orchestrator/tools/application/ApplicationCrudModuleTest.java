@@ -195,6 +195,67 @@ class ApplicationCrudModuleTest {
     }
 
     @Nested
+    @DisplayName("search - the studio axis reaches the agent")
+    class StudioAxisAnnotation {
+
+        /** Same envelope-shape reader as the CE-exclusive suite above. */
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> firstItem(ToolExecutionResult result) {
+            Map<String, Object> data = (Map<String, Object>) result.data();
+            return data.values().stream()
+                    .filter(java.util.List.class::isInstance)
+                    .map(v -> (java.util.List<Map<String, Object>>) v)
+                    .filter(list -> !list.isEmpty())
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("no items in envelope: " + data))
+                    .get(0);
+        }
+
+        private void stubSearchWith(Object studioValue) {
+            Map<String, Object> pub = new HashMap<>();
+            pub.put("id", APP_PUB_ID.toString());
+            pub.put("title", "Clip Studio");
+            if (studioValue != null) pub.put("studio", studioValue);
+            when(publicationClient.getMarketplacePublications(anyInt(), anyInt()))
+                    .thenReturn(Map.of("content", java.util.List.of(pub), "totalElements", 1));
+        }
+
+        @Test
+        @DisplayName("a studio app says so, so the agent can verify what it published")
+        void studioAppIsAnnotated() {
+            // The agent can SET this axis on create. A value it can write and never read back is one
+            // it cannot check, so it would have to trust that the publish did what it asked.
+            stubSearchWith(true);
+
+            ToolExecutionResult result = module.execute("search", Map.of(), TENANT_ID, contextWithOrg()).orElseThrow();
+
+            assertThat(firstItem(result)).containsEntry("studio", true);
+        }
+
+        @Test
+        @DisplayName("an ordinary app carries no key at all - absent IS the answer")
+        void ordinaryAppIsNotAnnotated() {
+            // Deliberately absent rather than false, the same economy ce_exclusive follows: a key
+            // per item costs a line in every page of a 50-app listing to say nothing.
+            stubSearchWith(false);
+
+            assertThat(firstItem(module.execute("search", Map.of(), TENANT_ID, contextWithOrg()).orElseThrow()))
+                    .doesNotContainKey("studio");
+        }
+
+        @Test
+        @DisplayName("an app from a build that predates the axis is treated as ordinary, not as unknown")
+        void missingKeyIsNotAnnotated() {
+            // A self-hosted install proxies a cloud catalogue that may be a different version. A
+            // missing key must read as "not a studio app", never as a truthy object.
+            stubSearchWith(null);
+
+            assertThat(firstItem(module.execute("search", Map.of(), TENANT_ID, contextWithOrg()).orElseThrow()))
+                    .doesNotContainKey("studio");
+        }
+    }
+
+    @Nested
     @DisplayName("acquire - propagates org context (round-2 regression)")
     class AcquireOrgPropagation {
 
@@ -299,6 +360,30 @@ class ApplicationCrudModuleTest {
             assertThat(result.success()).isFalse();
             assertThat(result.errorCode()).isEqualTo(ToolErrorCode.PERMISSION_DENIED);
             assertThat(result.error()).contains("self-hosted");
+        }
+
+        @Test
+        @DisplayName("A PLAN refusal is PERMISSION_DENIED too, but tells the agent an upgrade lifts it")
+        void planRefusalNamesThePlanAndIsNotTerminal() {
+            // Same error code as the CE case above and deliberately a different message: the CE
+            // refusal is documented to the agent as terminal, so reporting this one through it
+            // would make the agent tell the user to give up on an install one upgrade away.
+            when(publicationClient.acquirePublication(eq(APP_PUB_ID), eq(TENANT_ID), eq(CALLER_ORG_ID)))
+                    .thenThrow(new com.apimarketplace.publication.client.PublicationPlanUpgradeException(
+                            "This app uses vector search (embedding columns), which is available "
+                                    + "from the PRO plan.", "PRO", java.util.List.of("VECTOR_SEARCH")));
+
+            ToolExecutionResult result = module.execute("acquire",
+                    Map.of("application_id", APP_PUB_ID.toString()),
+                    TENANT_ID, contextWithOrg()).orElseThrow();
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.errorCode()).isEqualTo(ToolErrorCode.PERMISSION_DENIED);
+            assertThat(result.error())
+                    .contains("PRO")
+                    // The agent cannot buy a plan; it must hand the decision back.
+                    .contains("cannot change the plan yourself")
+                    .doesNotContain("self-hosted");
         }
 
         @Test
@@ -801,6 +886,61 @@ class ApplicationCrudModuleTest {
             ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
             verify(publicationClient).publishWorkflow(captor.capture(), eq(TENANT_ID), eq(CALLER_ORG_ID));
             assertThat(captor.getValue()).doesNotContainKey("showcaseEpoch");
+        }
+
+        /** Everything a successful create needs stubbed, minus the parameters under test. */
+        private ArgumentCaptor<Map<String, Object>> createAndCapture(Map<String, Object> params) {
+            WorkflowEntity wf = stubWorkflowWithInterface();
+            when(wf.getName()).thenReturn("Clip Studio");
+            when(wf.getDescription()).thenReturn("desc");
+            WorkflowRunEntity run = mock(WorkflowRunEntity.class);
+            when(run.getStatus()).thenReturn(RunStatus.COMPLETED);
+            when(run.isStepByStepMode()).thenReturn(false);
+            when(run.getRunIdPublic()).thenReturn("run-public-1");
+            when(workflowRunRepository.findByWorkflowIdOrderByStartedAtDescPageable(eq(workflowId), any()))
+                    .thenReturn(new PageImpl<>(List.of(run)));
+            when(publicationClient.publishWorkflow(any(), eq(TENANT_ID), eq(CALLER_ORG_ID)))
+                    .thenReturn(Map.of("id", createdPubId.toString()));
+
+            module.execute("create", params, TENANT_ID, createCtxMutableCreds()).orElseThrow();
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+            verify(publicationClient).publishWorkflow(captor.capture(), eq(TENANT_ID), eq(CALLER_ORG_ID));
+            return captor;
+        }
+
+        @Test
+        @DisplayName("studio=true is forwarded, or an agent can ask for the shelf and never reach it")
+        void studioTrueIsForwarded() {
+            // The agent can name this axis and reads it back on get/search/my. Without the
+            // forwarding it would ask for the Studio shelf, get a 200, and read back an application
+            // that is not on it - with nothing failing anywhere to say why.
+            Map<String, Object> params = new HashMap<>();
+            params.put("workflow_id", workflowId.toString());
+            params.put("studio", true);
+
+            assertThat(createAndCapture(params).getValue()).containsEntry("studio", true);
+        }
+
+        @Test
+        @DisplayName("studio=false is forwarded too - unticking is an instruction, not a silence")
+        void studioFalseIsForwarded() {
+            Map<String, Object> params = new HashMap<>();
+            params.put("workflow_id", workflowId.toString());
+            params.put("studio", false);
+
+            assertThat(createAndCapture(params).getValue()).containsEntry("studio", false);
+        }
+
+        @Test
+        @DisplayName("An omitted axis is NOT put in the publish Map, so a re-publish leaves the shelf alone")
+        void omittedStudioIsNotForwarded() {
+            // Absent has to stay absent the whole way down: publication-service reads a missing key
+            // as "no opinion". Sending a default false here would take an application off the
+            // studio shelf every time an agent re-published it without mentioning the axis.
+            assertThat(createAndCapture(new HashMap<>(Map.of("workflow_id", workflowId.toString()))).getValue())
+                    .doesNotContainKey("studio");
         }
 
         @Test

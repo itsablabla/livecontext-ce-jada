@@ -111,7 +111,36 @@ public class ApiCatalogBundleApplier {
             // publishes nothing when nothing changed) and is what eventually
             // prices that integration without waiting for the cloud to cut a new
             // bundle it has no reason to cut.
-            priceApplier.apply(parsePricesQuietly(verifiedGzipBytes, bundle.version()), bundle.version());
+            // ONE gunzip + parse for both answers. Reading the payload twice
+            // here would double the transient cost of the very path every
+            // install takes while it captures its prices for the first time.
+            ParsedPrices parsed = parsePricesQuietly(verifiedGzipBytes, bundle.version());
+            priceApplier.apply(parsed.prices(), bundle.version());
+            // Self-healing for an install that applied this bundle BEFORE the
+            // prices column existed: its row has none stored, so it cannot go
+            // conditional yet. Capturing them here lets the very next tick send
+            // a validator and stop transferring the payload.
+            //
+            // Only on a READABLE payload: "the bundle declares no prices" and
+            // "the re-read failed" both yield no prices, and recording the
+            // second as a capture would freeze a transient failure into a
+            // permanent "this version says nothing", after which the install
+            // goes conditional and never re-offers them again.
+            if (existing.get().getGenerationPrices() == null && parsed.readable()) {
+                try {
+                    existing.get().setGenerationPrices(
+                            writePricesQuietly(parsed.prices() == null ? List.of() : parsed.prices(),
+                                    bundle.version()));
+                    bundleRepo.save(existing.get());
+                } catch (Exception e) {
+                    // Best effort: this is an optimisation for the NEXT tick, so
+                    // it must never turn a healthy already-applied tick into a
+                    // failure. The worst case is one more full fetch.
+                    log.warn("API catalog bundle v{}: could not capture prices for the conditional path "
+                            + "({}: {}) - the next tick will fetch in full", bundle.version(),
+                            e.getClass().getSimpleName(), e.getMessage());
+                }
+            }
             writeSuccessStatus(bundle.version(), now());
             return ApplyResult.alreadyApplied(bundle.version());
         }
@@ -214,6 +243,17 @@ public class ApiCatalogBundleApplier {
                     return e;
                 });
                 entity.setSourceUrl(sourceUrl);
+                // Keep the prices this version carried so a later tick can
+                // re-offer them without the payload (the 304 path).
+                //
+                // ALWAYS write, even for a bundle that carries none: an empty
+                // array records "captured, this bundle says nothing", which is a
+                // different statement from NULL ("never captured"). Collapsing
+                // the two would leave a price-less bundle NULL forever, so the
+                // install could never go conditional and would keep downloading
+                // the whole payload every 15 minutes with nothing to show for it.
+                entity.setGenerationPrices(writePricesQuietly(
+                        priceMaps == null ? List.of() : priceMaps, bundle.version()));
                 bundleRepo.deactivateAll();
                 entity.setActive(true);
                 entity.setActivatedAt(now);
@@ -264,7 +304,7 @@ public class ApiCatalogBundleApplier {
     }
 
     /**
-     * Stamp the sync-status row with an APPLY_PARTIAL outcome: error detail +
+     * Re-offer stamp helper. Stamp the sync-status row with an APPLY_PARTIAL outcome: error detail +
      * consecutive-failure bump so operators see amber, not green. The
      * last-applied marker is NOT advanced - this version did not fully land.
      */
@@ -281,6 +321,67 @@ public class ApiCatalogBundleApplier {
     }
 
     /** Stamp the sync-status row with an OK outcome for {@code version}. */
+    /**
+     * Re-offer the prices the active bundle carried, read from the row rather
+     * than from a payload.
+     *
+     * <p>This is the 304 path: the cloud confirmed our bundle is still the
+     * active one, so there is no catalog work to do, but the price re-offer
+     * still has to happen - it is what eventually prices an integration whose
+     * provider key the operator pasted weeks after the bundle landed. Without
+     * it, making the poll cheap would silently delete that behaviour.
+     *
+     * <p>Never throws: a pricing hiccup must not turn an up-to-date install into
+     * a failing one. Writes the same OK status an {@code ALREADY_APPLIED} does,
+     * so the operator UI sees a healthy sync with no new status value to render.
+     */
+    public void reofferStoredPrices() {
+        // Read through the payload-free projection, ordered exactly like the one
+        // that produced the validator: the two must agree on which row is the
+        // active one, and this runs every 15 minutes on every install.
+        Optional<ApiCatalogBundleRepository.ActiveBundlePrices> active =
+                bundleRepo.findActivePrices().stream().findFirst();
+        if (active.isEmpty()) {
+            log.debug("API catalog bundle: nothing active, no prices to re-offer");
+            return;
+        }
+        ApiCatalogBundleRepository.ActiveBundlePrices row = active.get();
+        try {
+            List<Map<String, Object>> prices = readPricesQuietly(row.getGenerationPrices(), row.getVersion());
+            // Null is "this bundle says nothing about prices" - the applier
+            // treats that as a no-op, never as "unprice everything".
+            priceApplier.apply(prices, row.getVersion());
+        } catch (Exception e) {
+            log.warn("API catalog bundle v{}: stored prices could not be re-offered ({}: {}) - "
+                    + "pricing left unchanged", row.getVersion(), e.getClass().getSimpleName(), e.getMessage());
+        }
+        writeSuccessStatus(row.getVersion(), now());
+    }
+
+    /** Serialise the prices for storage; null on failure, never throws. */
+    private String writePricesQuietly(List<Map<String, Object>> priceMaps, long version) {
+        try {
+            return objectMapper.writeValueAsString(priceMaps);
+        } catch (Exception e) {
+            log.warn("API catalog bundle v{}: generation prices could not be stored ({}: {}) - "
+                    + "the next 304 tick will have nothing to re-offer", version,
+                    e.getClass().getSimpleName(), e.getMessage());
+            return null;
+        }
+    }
+
+    /** Read back stored prices; null when absent or unreadable, never throws. */
+    private List<Map<String, Object>> readPricesQuietly(String stored, long version) {
+        if (stored == null || stored.isBlank()) return null;
+        try {
+            return listOfMaps(objectMapper.readValue(stored, Object.class));
+        } catch (Exception e) {
+            log.warn("API catalog bundle v{}: stored generation prices are unreadable ({}: {}) - "
+                    + "pricing left unchanged", version, e.getClass().getSimpleName(), e.getMessage());
+            return null;
+        }
+    }
+
     private void writeSuccessStatus(long version, Instant now) {
         ApiCatalogBundleSyncStatusEntity status = syncStatusRepo
                 .findById(ApiCatalogBundleSyncStatusEntity.SINGLETON_ID)
@@ -304,16 +405,28 @@ public class ApiCatalogBundleApplier {
      * at stake is a price refresh, so a parse problem must not turn a green
      * ALREADY_APPLIED into a red one.
      */
-    private List<Map<String, Object>> parsePricesQuietly(byte[] verifiedGzipBytes, long version) {
+    /**
+     * The prices a payload declares, and whether the payload could be read at
+     * all. The two are returned together because collapsing them loses the
+     * difference between "declares none" and "could not be read", and because
+     * answering them separately would mean gunzipping the payload twice.
+     */
+    private record ParsedPrices(boolean readable, List<Map<String, Object>> prices) {
+        static ParsedPrices unreadable() {
+            return new ParsedPrices(false, null);
+        }
+    }
+
+    private ParsedPrices parsePricesQuietly(byte[] verifiedGzipBytes, long version) {
         try {
             byte[] raw = ApiCatalogBundlePayload.gunzip(verifiedGzipBytes);
             Map<String, Object> root = objectMapper.readValue(raw, JSON_MAP);
-            return listOfMaps(root.get("generationPrices"));
+            return new ParsedPrices(true, listOfMaps(root.get("generationPrices")));
         } catch (Exception e) {
             log.warn("API catalog bundle v{} is already applied but its payload could not be re-read "
-                    + "for prices ({}: {}) - pricing left unchanged",
-                    version, e.getClass().getSimpleName(), e.getMessage());
-            return null;
+                    + "for prices ({}: {}) - pricing left unchanged", version,
+                    e.getClass().getSimpleName(), e.getMessage());
+            return ParsedPrices.unreadable();
         }
     }
 

@@ -20,6 +20,7 @@ import { showsNodeRunActions } from './shared';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { getSourceHandleGeometry, getTargetHandleGeometry } from './handleGeometry';
+import { NodeActivityShimmer } from './NodeActivityShimmer';
 export function SplitNode({ data, selected }: NodeProps<BuilderNodeData>) {
   // Handle sides follow the canvas reading direction. Safe variant: nodes also
   // render on provider-less surfaces (marketplace preview, snapshots).
@@ -40,12 +41,18 @@ export function SplitNode({ data, selected }: NodeProps<BuilderNodeData>) {
   const nodeFamily = nodeClass?.family;
 
   // Step-by-step execution status for the split node itself
-  const stepByStepStatus = useNodeExecutionStatus(data.id, { label: data.label, kind: 'split' });
+  const stepByStepStatus = useNodeExecutionStatus(data.id, { label: data.label, kind: 'split', status: data.status });
 
   // Determine effective status: use step-by-step context as source of truth in step-by-step mode
   const effectiveStatus = React.useMemo((): DerivedNodeStatus | undefined => {
     if (viewingEpoch != null) return (data as any).status;
     if (stepByStepStatus.isStepByStepMode) {
+      // A node parked on a signal is NOT running, but it stays in `runningSteps`:
+      // yielding never rewrites the RUNNING step row, so the two sets overlap and
+      // whichever is tested first wins. Awaiting is the newer, more specific fact,
+      // so it goes first - otherwise the waiting state is unreachable and the node
+      // reads blue "running" while its own badge shows an amber pause chip.
+      if (stepByStepStatus.isAwaitingSignal) return 'awaiting_signal';
       if (stepByStepStatus.isRunning) return 'running';
       if (stepByStepStatus.isFailed) return 'failed';
       if (stepByStepStatus.isSkipped) return 'skipped';
@@ -86,17 +93,7 @@ export function SplitNode({ data, selected }: NodeProps<BuilderNodeData>) {
       }}
       tabIndex={0}
     >
-      {/* Shimmer scan effect for running state - show in all modes */}
-      {effectiveStatus === 'running' && (
-        <div
-          className="absolute inset-0 pointer-events-none rounded-[26px] z-[5]"
-          style={{
-            background: 'linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.15) 50%, transparent 100%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer-scan 2.5s ease-in-out infinite',
-          }}
-        />
-      )}
+      <NodeActivityShimmer status={effectiveStatus} className="rounded-[26px] z-[5]" />
 
       <NodeHeader
         visuals={visuals}

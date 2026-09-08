@@ -18,7 +18,7 @@ import { usePopoverPosition } from '../../../../hooks/ui/usePopoverPosition';
  */
 export const FieldInfoTooltip = ({ description }: { description: string }) => {
   const [isOpen, setIsOpen] = React.useState(false);
-  const { buttonRef, popoverPosition } = usePopoverPosition(isOpen, 200);
+  const { buttonRef, popoverStyle } = usePopoverPosition(isOpen, 208);
 
   return (
     <div className="relative inline-flex">
@@ -40,8 +40,8 @@ export const FieldInfoTooltip = ({ description }: { description: string }) => {
             onClick={() => setIsOpen(false)}
           />
           <div
-            className="fixed z-[9999] w-52 p-2.5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-lg"
-            style={{ top: popoverPosition.top, left: popoverPosition.left }}
+            className="fixed z-[9999] p-2.5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-lg"
+            style={popoverStyle}
           >
             <div className="flex items-start justify-between gap-2">
               <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed flex-1">

@@ -289,18 +289,21 @@ public class WorkflowEventPublisher {
     /**
      * Emit the run's fresh accumulated cost after an agent execution settled.
      * All figures in credits (1 credit = $0.001); {@code budgetCredits} is null
-     * when the workflow has no budget.
+     * when the workflow has no cap, {@code periodSpentCredits} is null for an
+     * editor run, which never counts against it.
      */
     public void emitRunCost(String runId,
                             int epoch,
                             java.math.BigDecimal epochCostCredits,
                             java.math.BigDecimal totalCostCredits,
+                            java.math.BigDecimal periodSpentCredits,
                             java.math.BigDecimal budgetCredits) {
         RunCostEvent event = new RunCostEvent(
             runId,
             epoch,
             epochCostCredits,
             totalCostCredits,
+            periodSpentCredits,
             budgetCredits,
             now()
         );
@@ -313,11 +316,13 @@ public class WorkflowEventPublisher {
      */
     public void emitRunBudgetBlocked(String runId,
                                      java.math.BigDecimal spentCredits,
-                                     java.math.BigDecimal budgetCredits) {
+                                     java.math.BigDecimal budgetCredits,
+                                     String periodMode) {
         RunBudgetBlockedEvent event = new RunBudgetBlockedEvent(
             runId,
             spentCredits,
             budgetCredits,
+            periodMode,
             now()
         );
         publish(event);

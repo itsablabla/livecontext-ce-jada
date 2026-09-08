@@ -282,9 +282,21 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
       onToggleAgentConfigPanel?.();
     }
   };
+  /**
+   * How a quiet icon button on this bar hovers.
+   *
+   * <p>`ghost` hovers by INVERTING - a near-black ground with a pale glyph - which is the
+   * app's legacy behaviour and is right for the places that opted into it deliberately. On
+   * a header row it reads as a pressed state: the reported complaint was the bell "turning
+   * black", and fixing the bell alone left the two buttons either side of it doing exactly
+   * what was complained about. The variant is left alone (dozens of call sites expect the
+   * dark hover); this row overrides it, all of it.
+   */
+  const QUIET_ICON_HOVER =
+    'hover:bg-surface-hover hover:text-[var(--text-primary)]';
   const dockButtonClass = (pressed: boolean) => `w-8 h-8 ${pressed
-    ? 'bg-black text-white hover:bg-black dark:bg-white dark:text-black dark:hover:bg-white'
-    : 'text-black dark:text-white'}`;
+    ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)] hover:bg-[var(--accent-hover)] hover:text-[var(--accent-foreground)]'
+    : `text-[var(--text-primary)] ${QUIET_ICON_HOVER}`}`;
   const t = useTranslations();
   const { isOpen: isActivityOpen, toggle: toggleActivity } = useConversationActivity();
 
@@ -976,9 +988,10 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
               size="icon"
               aria-pressed={isActivityOpen}
               title={t('conversationActivity.toggle')}
+              // Inactive, this is a quiet icon button and hovers like one (QUIET_ICON_HOVER).
               className={`w-8 h-8 ${isActivityOpen
-                ? 'bg-black text-white hover:bg-black dark:bg-white dark:text-black dark:hover:bg-white'
-                : 'text-black dark:text-white'}`}
+                ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)] hover:bg-[var(--accent-hover)] hover:text-[var(--accent-foreground)]'
+                : `text-[var(--text-primary)] ${QUIET_ICON_HOVER}`}`}
             >
               <List className="w-4 h-4" />
             </Button>
@@ -1026,7 +1039,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
             onClick={onSidebarToggle}
             variant="ghost"
             size="icon"
-            className="w-8 h-8"
+            className={`w-8 h-8 ${QUIET_ICON_HOVER}`}
             title={t('sidebar.expandSidebar')}
           >
             <PanelLeft className="w-4 h-4" />
@@ -1286,9 +1299,10 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
               size="icon"
               aria-pressed={isActivityOpen}
               title={t('conversationActivity.toggle')}
+              // Inactive, this is a quiet icon button and hovers like one (QUIET_ICON_HOVER).
               className={`w-8 h-8 ${isActivityOpen
-                ? 'bg-black text-white hover:bg-black dark:bg-white dark:text-black dark:hover:bg-white'
-                : 'text-black dark:text-white'}`}
+                ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)] hover:bg-[var(--accent-hover)] hover:text-[var(--accent-foreground)]'
+                : `text-[var(--text-primary)] ${QUIET_ICON_HOVER}`}`}
             >
               <List className="w-4 h-4" />
             </Button>
@@ -1302,7 +1316,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
               variant="ghost"
               size="icon"
               title={t('sidePanel.addTab')}
-              className="w-8 h-8 text-black dark:text-white"
+              className={`w-8 h-8 text-black dark:text-white ${QUIET_ICON_HOVER}`}
             >
               <SidePanelToggleIcon className="w-4 h-4" />
             </Button>

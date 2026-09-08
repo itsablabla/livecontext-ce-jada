@@ -91,7 +91,10 @@ RUN if [ "$NEXT_PUBLIC_APP_EDITION" = "ce" ]; then \
       && rm -f public/landing/videos/builder-built-by-chat.webm; \
     fi
 
-RUN npm run build
+# Next's production build outgrew V8's default heap on the 8 GB build node
+# (2026-09-02: "Reached heap limit Allocation failed" on three main builds in a
+# row). Give the build step its own ceiling; the runtime stage is untouched.
+RUN NODE_OPTIONS="--max-old-space-size=6144" npm run build
 
 # ---- Runtime stage ----
 FROM ${NODE_IMAGE}

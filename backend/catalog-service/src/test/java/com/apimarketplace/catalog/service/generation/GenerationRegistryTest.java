@@ -288,6 +288,12 @@ class GenerationRegistryTest {
             return p;
         }
 
+        private ApiToolParameterEntity nestedParam(String name, String bodyPath, String allowedValuesJson) {
+            ApiToolParameterEntity p = param(name, allowedValuesJson);
+            p.setExtras("{\"bodyPath\":\"" + bodyPath + "\"}");
+            return p;
+        }
+
         /** A descriptor whose `voice` writes to the endpoint parameter `model`. */
         private static final String MAPPED_VOICE_SPEC = """
                 {"kind":"voice","assetPath":"$binary",
@@ -316,11 +322,12 @@ class GenerationRegistryTest {
         }
 
         @Test
-        @DisplayName("regression: a nested write path is never matched against a parameter name")
-        void ignoresNonScalarBindingPaths() {
-            // `content[0].text` addresses a place INSIDE a body; the row that owns
-            // it is stored under a different name. Matching by string would attach
-            // one parameter's list to another, which is worse than no list.
+        @DisplayName("regression: a nested write path no row owns and none claims inherits nothing")
+        void ignoresUnownedNestedBindingPaths() {
+            // `content[0].text` addresses a place INSIDE a body. When no row is
+            // named for it and no row claims it as its bodyPath, nothing here
+            // knows which parameter fills it, and a neighbour's list is worse
+            // than no list.
             UUID apiId = givenApi("acme", "Acme");
             String spec = """
                     {"kind":"image","assetPath":"$binary",
@@ -331,12 +338,258 @@ class GenerationRegistryTest {
             ApiToolEntity t = tool(apiId, "generate", spec);
             when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
             when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(
-                    param("content[0].text", "[\"nope\"]"),
-                    param("config.style", "[\"nope\"]")));
+                    param("text", "[\"nope\"]"),
+                    param("style", "[\"nope\"]")));
 
             GenerationRegistry.GenerationModel m = registry.resolve("acme-1").orElseThrow();
 
             assertThat(m.catalogAllowed()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a row NAMED for the nested place it fills is that place, and its list is offered")
+        void aNestedNameIsTheWritePath() {
+            // The corpus's ordinary encoding of a nested field: AudioCraft names
+            // its parameters input.prompt and input.output_format, and the
+            // descriptor writes exactly those. Refusing to match them left the
+            // bug this whole matching exists to fix in place for every seed
+            // written that way.
+            UUID apiId = givenApi("acme", "Acme");
+            String spec = """
+                    {"kind":"music","assetPath":"$binary",
+                     "paramMap":{"prompt":"input.prompt","style":"input.style"},
+                     "models":[{"id":"acme-n","capabilities":["prompt","style"],
+                                "price":{"unit":"call","baseCredits":1}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "generate", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(
+                    param("input.style", "[\"calm\",\"driving\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("acme-n").orElseThrow();
+
+            assertThat(m.catalogAllowed()).containsEntry("style", List.of("calm", "driving"));
+        }
+
+        @Test
+        @DisplayName("a nested write path inherits from the parameter that CLAIMS it as its bodyPath")
+        void inheritsThroughBodyPath() {
+            // The exception to the rule above, and the only match on a nested
+            // path that is not a coincidence: the row itself declares that this
+            // is where its value lands, so it is the same field by construction.
+            // Without it, every descriptor that writes a nested body (the shape
+            // most video providers want) lost its lists.
+            UUID apiId = givenApi("heygen", "HeyGen");
+            String spec = """
+                    {"kind":"video","assetPath":"video_url",
+                     "paramMap":{"prompt":"video_inputs[0].voice.input_text",
+                                 "style":"video_inputs[0].character.avatar_style"},
+                     "models":[{"id":"heygen-avatar","capabilities":["prompt","style"],
+                                "price":{"unit":"character","unitCredits":2}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "create_video", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(
+                    nestedParam("avatar_style", "video_inputs[0].character.avatar_style",
+                            "[\"normal\",\"circle\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("heygen-avatar").orElseThrow();
+
+            assertThat(m.catalogAllowed()).containsEntry("style", List.of("normal", "circle"));
+            // The prompt's path is claimed by nobody, so it stays free text.
+            assertThat(m.catalogAllowed()).doesNotContainKey("prompt");
+        }
+
+        @Test
+        @DisplayName("a FLAT path is matched by name only, never by another row's bodyPath claim")
+        void flatPathsAreMatchedByNameAlone() {
+            // 'length_ms' claiming bodyPath 'duration' would otherwise offer
+            // MILLISECONDS under a unified parameter that means seconds, which
+            // is the same class of mistake the nested rule exists to prevent.
+            UUID apiId = givenApi("acme", "Acme");
+            String spec = """
+                    {"kind":"video","assetPath":"url",
+                     "paramMap":{"prompt":"prompt","duration_seconds":"duration"},
+                     "models":[{"id":"acme-v","capabilities":["prompt","duration_seconds"],
+                                "price":{"unit":"second","unitCredits":2},
+                                "constraints":{"prompt":{"maxLength":100}}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "generate", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(
+                    nestedParam("length_ms", "duration", "[\"1000\",\"2000\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("acme-v").orElseThrow();
+
+            assertThat(m.catalogAllowed()).doesNotContainKey("duration_seconds");
+        }
+
+        @Test
+        @DisplayName("a parameter's own name beats another row's claim on it")
+        void nameWinsOverAForeignBodyPathClaim() {
+            UUID apiId = givenApi("acme", "Acme");
+            String spec = """
+                    {"kind":"image","assetPath":"$binary",
+                     "paramMap":{"prompt":"prompt","style":"style"},
+                     "models":[{"id":"acme-i","capabilities":["prompt","style"],
+                                "price":{"unit":"call","baseCredits":1}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "generate", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(
+                    nestedParam("legacy_style", "style", "[\"wrong\"]"),
+                    param("style", "[\"vivid\",\"natural\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("acme-i").orElseThrow();
+
+            assertThat(m.catalogAllowed()).containsEntry("style", List.of("vivid", "natural"));
+        }
+
+        @Test
+        @DisplayName("two rows claiming one body path offer no list rather than the wrong one")
+        void conflictingBodyPathClaimsOfferNothing() {
+            // Nothing says which row owns the field, and a field showing another
+            // parameter's values is worse than a field showing none.
+            UUID apiId = givenApi("acme", "Acme");
+            String spec = """
+                    {"kind":"image","assetPath":"$binary",
+                     "paramMap":{"prompt":"prompt","style":"config.style"},
+                     "models":[{"id":"acme-c","capabilities":["prompt","style"],
+                                "price":{"unit":"call","baseCredits":1}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "generate", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(
+                    nestedParam("style_a", "config.style", "[\"a\"]"),
+                    nestedParam("style_b", "config.style", "[\"b\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("acme-c").orElseThrow();
+
+            assertThat(m.catalogAllowed()).doesNotContainKey("style");
+        }
+
+        @Test
+        @DisplayName("a THIRD row claiming a contested body path does not undo the refusal")
+        void aThirdClaimantDoesNotUndoTheConflict() {
+            // The conflict has to be remembered apart from the map: a third row
+            // writing its own list over the marked entry would make two rows'
+            // disagreement disappear, and the field would show whichever list
+            // the database happened to return last.
+            UUID apiId = givenApi("acme", "Acme");
+            String spec = """
+                    {"kind":"image","assetPath":"$binary",
+                     "paramMap":{"prompt":"prompt","style":"config.style"},
+                     "models":[{"id":"acme-c3","capabilities":["prompt","style"],
+                                "price":{"unit":"call","baseCredits":1}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "generate", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(
+                    nestedParam("style_a", "config.style", "[\"c\"]"),
+                    nestedParam("style_b", "config.style", "[\"a\"]"),
+                    nestedParam("style_c", "config.style", "[\"a\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("acme-c3").orElseThrow();
+
+            assertThat(m.catalogAllowed()).doesNotContainKey("style");
+        }
+
+        @Test
+        @DisplayName("a SCALED binding inherits nothing even when a row claims its body path")
+        void aScaledNestedBindingStillInheritsNothing() {
+            // music_length_ms is milliseconds; the unified name says seconds.
+            // Offering the field's own values would suggest 30000 for half a
+            // minute. The bail-out predates the bodyPath index and has to
+            // survive it.
+            UUID apiId = givenApi("acme", "Acme");
+            String spec = """
+                    {"kind":"music","assetPath":"$binary",
+                     "paramMap":{"prompt":"prompt",
+                                 "duration_seconds":{"path":"config.length_ms","scale":1000}},
+                     "models":[{"id":"acme-m2","capabilities":["prompt","duration_seconds"],
+                                "price":{"unit":"second","unitCredits":1},
+                                "constraints":{"prompt":{"maxLength":100}}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "compose", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(
+                    nestedParam("length_ms", "config.length_ms", "[\"10000\",\"30000\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("acme-m2").orElseThrow();
+
+            assertThat(m.catalogAllowed()).doesNotContainKey("duration_seconds");
+        }
+
+        @Test
+        @DisplayName("two rows claiming one path own nothing, even when their lists agree")
+        void duplicateClaimsOwnNothing() {
+            UUID apiId = givenApi("acme", "Acme");
+            String spec = """
+                    {"kind":"image","assetPath":"$binary",
+                     "paramMap":{"prompt":"prompt","style":"config.style"},
+                     "models":[{"id":"acme-same","capabilities":["prompt","style"],
+                                "price":{"unit":"call","baseCredits":1}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "generate", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(
+                    nestedParam("style_a", "config.style", "[\"a\"]"),
+                    nestedParam("style_b", "config.style", "[\"a\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("acme-same").orElseThrow();
+
+            // Agreeing today is not the same as being the owner: the seed still
+            // says two rows fill one field, and which of them is authoritative
+            // is a question the platform must not answer by guessing.
+            assertThat(m.catalogAllowed()).doesNotContainKey("style");
+        }
+
+        @Test
+        @DisplayName("a claimant with NO list of its own still contests the field")
+        void aListlessClaimantStillContests() {
+            // The row with no list is usually the field's real owner: an opaque
+            // provider id, fetched rather than enumerated. Skipping it here let
+            // the neighbour's list be offered under the owner's name.
+            UUID apiId = givenApi("acme", "Acme");
+            String spec = """
+                    {"kind":"image","assetPath":"$binary",
+                     "paramMap":{"prompt":"prompt","style":"config.style"},
+                     "models":[{"id":"acme-listless","capabilities":["prompt","style"],
+                                "price":{"unit":"call","baseCredits":1}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "generate", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            ApiToolParameterEntity owner = new ApiToolParameterEntity();
+            owner.setName("style_owner");
+            owner.setExtras("{\"bodyPath\":\"config.style\"}");
+            when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(
+                    owner,
+                    nestedParam("style_other", "config.style", "[\"wrong\"]")));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("acme-listless").orElseThrow();
+
+            assertThat(m.catalogAllowed()).doesNotContainKey("style");
+        }
+
+        @Test
+        @DisplayName("malformed extras cost a dropdown, not the model listing")
+        void malformedExtrasAreSurvivable() {
+            UUID apiId = givenApi("acme", "Acme");
+            String spec = """
+                    {"kind":"image","assetPath":"$binary",
+                     "paramMap":{"prompt":"prompt","style":"style"},
+                     "models":[{"id":"acme-m","capabilities":["prompt","style"],
+                                "price":{"unit":"call","baseCredits":1}}]}
+                    """;
+            ApiToolEntity t = tool(apiId, "generate", spec);
+            when(toolRepo.findGenerationEndpoints()).thenReturn(List.of(t));
+            ApiToolParameterEntity broken = param("style", "[\"vivid\"]");
+            broken.setExtras("not json at all");
+            when(paramRepo.findByApiToolId(t.getId())).thenReturn(List.of(broken));
+
+            GenerationRegistry.GenerationModel m = registry.resolve("acme-m").orElseThrow();
+
+            assertThat(m.catalogAllowed()).containsEntry("style", List.of("vivid"));
         }
 
         @Test

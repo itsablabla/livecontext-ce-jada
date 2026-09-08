@@ -68,19 +68,22 @@ public class MonolithFileController {
     private final OrgAccessGuard orgAccessGuard;
     private final com.apimarketplace.common.storage.signing.ShowcaseUrlSigner showcaseUrlSigner;
     private final com.apimarketplace.storage.util.MimeTypeRegistry mimeTypeRegistry;
+    private final com.apimarketplace.storage.service.file.StorageStreamingMetrics streamingMetrics;
 
     public MonolithFileController(FileStorageService fileStorageService,
                                   PublicFileUrlBuilder publicFileUrlBuilder,
                                   StorageService storageService,
                                   OrgAccessGuard orgAccessGuard,
                                   com.apimarketplace.common.storage.signing.ShowcaseUrlSigner showcaseUrlSigner,
-                                  com.apimarketplace.storage.util.MimeTypeRegistry mimeTypeRegistry) {
+                                  com.apimarketplace.storage.util.MimeTypeRegistry mimeTypeRegistry,
+                                  com.apimarketplace.storage.service.file.StorageStreamingMetrics streamingMetrics) {
         this.fileStorageService = fileStorageService;
         this.publicFileUrlBuilder = publicFileUrlBuilder;
         this.storageService = storageService;
         this.orgAccessGuard = orgAccessGuard;
         this.showcaseUrlSigner = showcaseUrlSigner;
         this.mimeTypeRegistry = mimeTypeRegistry;
+        this.streamingMetrics = streamingMetrics;
     }
 
     /**
@@ -111,11 +114,12 @@ public class MonolithFileController {
                 String mimeType = mimeTypeRegistry.resolve(fileName);
                 String contentDisposition = ContentDispositions.of(
                         "attachment".equalsIgnoreCase(disposition) ? "attachment" : "inline", fileName);
-                org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody body = out -> {
-                    try (com.apimarketplace.storage.service.file.DownloadStream s = ds) {
-                        s.stream().transferTo(out);
-                    }
-                };
+                // Same rule as the cloud mount of this endpoint: a client that
+                // walks away is not a fault, but an S3 read failure still must
+                // not be served as a truncated 200.
+                org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody body = out ->
+                        com.apimarketplace.storage.service.file.ClientStreamCopier.copy(
+                                ds, out, ds.contentLength(), streamingMetrics, "showcase key=" + key);
                 ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
                         .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition)
                         .header(HttpHeaders.CACHE_CONTROL, "private, max-age=900")

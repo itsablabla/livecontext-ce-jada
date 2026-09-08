@@ -7,6 +7,7 @@ import type { Node, XYPosition } from 'reactflow';
 import type { BuilderNodeData, GuardrailType } from '../../types';
 import { normalizeLabel } from '../../utils/labelNormalizer';
 import { parsePosition, inputToParamExpressions, NODE_SPACING, INITIAL_POSITION } from './nodeCreationHelpers';
+import { extractGenerateDataFromPlanParams } from '../../utils/generateParams';
 
 /**
  * Maps backend/agent guardrail rule types to frontend GuardrailType values.
@@ -63,7 +64,7 @@ function defaultConfigForType(type: GuardrailType, existing?: Record<string, any
 
 interface AgentFromPlan {
   label: string;
-  type?: 'agent' | 'guardrail' | 'classify' | 'browser_agent';
+  type?: 'agent' | 'guardrail' | 'classify' | 'browser_agent' | 'generate';
   position?: { x?: number | string; y?: number | string };
   // Agent entity reference (for type='agent' only)
   agentConfigId?: string;
@@ -125,6 +126,46 @@ function createAgentNode(
 
   // Determine node type based on agent type
   const agentType = agent.type || 'agent';
+
+  // Generate shares the AI family's key (`agent:<label>`) and nothing else: no
+  // LLM, no tools, no entity, no ports. Built here and returned early rather
+  // than falling through the shared shape below, which would stamp it with a
+  // reasoning kind and an `ai-agent-` data id and leave the inspector rendering
+  // the agent form for it. Its whole configuration is the params map.
+  if (agentType === 'generate') {
+    const generateNodeId = agent.graphNodeId
+      || `generate-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const { generateModel, generateCredentialSource, selectedCredentialId, generateParams } =
+      extractGenerateDataFromPlanParams(agent.params);
+    return {
+      node: {
+        id: generateNodeId,
+        type: 'flowNode',
+        position: agentPosition,
+        positionAbsolute: useSavedPosition ? agentPosition : undefined,
+        data: {
+          id: `generate-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          label: agent.label || 'Generate',
+          kind: 'generate',
+          agentType,
+          ...(generateModel !== undefined ? { generateModel } : {}),
+          ...(generateCredentialSource !== undefined ? { generateCredentialSource } : {}),
+          // The key this node runs on, under the name the inspector's picker
+          // reads. Absent means the account's default, which is also what the
+          // run does, so the two never disagree.
+          ...(selectedCredentialId !== undefined ? { selectedCredentialId } : {}),
+          generateParams,
+          paramExpressions: inputToParamExpressions(agent.params),
+        } as unknown as BuilderNodeData,
+      },
+      mappings: {
+        label: agent.label,
+        normalizedLabel: normalizeLabel(agent.label),
+      },
+      incrementY: !useSavedPosition,
+    };
+  }
+
   let nodeType = 'flowNode';
   const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
   let dataId = `ai-agent-${uniqueSuffix}`;

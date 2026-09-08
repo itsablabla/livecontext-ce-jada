@@ -277,5 +277,37 @@ class FileRefScannerTest {
             assertThat(FileRefScanner.collectRefs(Map.of("status", "ok"))).isEmpty();
             assertThat(FileRefScanner.collectRefs(null)).isEmpty();
         }
+
+        /**
+         * The scanner is unchanged; what changed is what reaches it. A table read hands back media
+         * cells as file OBJECTS now, and this pins the consequence of that: an object IS collected
+         * where the equivalent JSON text is not, because a string is a scalar and this walker never
+         * descends into one. It is what lets a published workflow's showcase preview and serve the
+         * images of a table it reads, which {@code ShowcaseFileRefRewriter} could not do while the
+         * cell was text. Not a regression test - it passes either way - but the record of a
+         * decision that is otherwise invisible.
+         */
+        @Test
+        @DisplayName("an object-shaped media cell is collected where the same cell as text is not")
+        void findsAMediaCellInATableRow() {
+            Map<String, Object> hydratedCell = new HashMap<>();
+            hydratedCell.put("_type", "file");
+            hydratedCell.put("path", "tenant-1/general/cover.png");
+            // A UUID, the only id shape a hydrated cell can carry: the normaliser drops any other.
+            hydratedCell.put("id", "c7963596-ab99-46af-9cb5-fccb64461702");
+            hydratedCell.put("name", "cover.png");
+            Map<String, Object> tableOutput = Map.of("items", List.of(
+                Map.of("title", "Set: miniature city", "cover", hydratedCell)));
+
+            assertThat(FileRefScanner.collectRefs(tableOutput))
+                .singleElement()
+                .satisfies(ref -> assertThat(ref).containsEntry("path", "tenant-1/general/cover.png"));
+
+            // The shape the same cell had before: a scalar the walker cannot see into.
+            Map<String, Object> textOutput = Map.of("items", List.of(
+                Map.of("title", "Set: miniature city",
+                    "cover", "{\"_type\":\"file\",\"path\":\"tenant-1/general/cover.png\"}")));
+            assertThat(FileRefScanner.collectRefs(textOutput)).isEmpty();
+        }
     }
 }

@@ -359,4 +359,69 @@ class LoopNodeFailureTest {
                 "reason is termination-only (written by BackEdgeHandler), never on first entry");
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // resolved_params - what the inspector's Params column reads back
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("resolved_params reporting")
+    class ResolvedParamsTests {
+
+        @Test
+        @DisplayName("execute reports loopCondition and maxIterations under the plan's key names")
+        void executeReportsLoopConfigurationUnderPlanKeyNames() {
+            LoopNode loopNode = LoopNode.builder()
+                    .nodeId("core:my_loop")
+                    .loopCondition("{{counter < 5}}")
+                    .maxIterations(7)
+                    .templateEngine(mockTemplateEngine)
+                    .build();
+            loopNode.setTemplateAdapter(adapterResolvingTo("0 < 5"));
+            when(mockTemplateEngine.evaluateConditionWithDetailsWithMap(eq("{{counter < 5}}"), anyMap()))
+                    .thenReturn(new TemplateEngine.ConditionEvaluationResult("{{counter < 5}}", "0 < 5", true, null));
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> params =
+                    (Map<String, Object>) loopNode.execute(context).output().get("resolved_params");
+
+            assertEquals("0 < 5", params.get("loopCondition"),
+                    "loopCondition carries the RESOLVED condition, so the reader sees the values it ran on");
+            assertEquals(7, params.get("maxIterations"));
+            // No `strategy` key: WorkflowPlanParser fabricates "continue-anyway"
+            // for every loop whatever the plan holds, the builder never writes one,
+            // and nothing in the engine reads it. Reporting it would tell every
+            // reader they chose a setting they cannot even set - and in split
+            // vocabulary at that.
+            assertFalse(params.containsKey("strategy"));
+        }
+
+        @Test
+        @DisplayName("execute reports a loop with no condition as \"(none)\" rather than omitting it")
+        void executeReportsAbsentConditionExplicitly() {
+            LoopNode loopNode = buildLoop(null, 5);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> params =
+                    (Map<String, Object>) loopNode.execute(context).output().get("resolved_params");
+
+            // "repeat N times" is a real configuration, and an absent condition is
+            // part of it: blanking the row would read as "this loop was not set up".
+            assertEquals("(none)", params.get("loopCondition"));
+            assertEquals(5, params.get("maxIterations"));
+        }
+    }
+
+    /**
+     * A template adapter that resolves every string to {@code value}.
+     *
+     * <p>Without one, {@code BaseNode.resolveTemplateString} returns the template
+     * verbatim, and a test asserting on resolved_params would pin the RAW expression
+     * while the product shows the resolved one.
+     */
+    private com.apimarketplace.orchestrator.execution.v2.template.V2TemplateAdapter adapterResolvingTo(String value) {
+        var adapter = mock(com.apimarketplace.orchestrator.execution.v2.template.V2TemplateAdapter.class);
+        when(adapter.resolveTemplates(any(), any())).thenReturn(Map.of("__v__", value));
+        return adapter;
+    }
 }

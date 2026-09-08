@@ -76,6 +76,13 @@ public class StepCompletionOrchestrator {
     @Value("${workflow.node-billing.enabled:true}")
     private boolean nodeBillingEnabled = true;
 
+    /**
+     * Product-analytics emitter (PostHog). Optional so hand-built test instances
+     * and analytics-less deployments are untouched; a null field emits nothing.
+     */
+    @Autowired(required = false)
+    private com.apimarketplace.orchestrator.services.analytics.WorkflowAnalyticsEmitter workflowAnalyticsEmitter;
+
     @Autowired
     public StepCompletionOrchestrator(
             WorkflowPersistenceService persistenceService,
@@ -175,6 +182,12 @@ public class StepCompletionOrchestrator {
             logger.info("[StepCompletion] Non-final attempt: runId={}, nodeId={}, item={}, iter={}, status={}, epoch={}, triggerId={}, persistRow={}",
                 ctx.runId(), ctx.nodeId(), ctx.itemIndex(), ctx.iteration(),
                 ctx.result().status(), ctx.epoch(), triggerId, persistRow);
+        }
+
+        // Product analytics: a TERMINAL failure is the "which node kinds break" signal.
+        // Non-final attempts are retries, not outcomes, so they are not counted.
+        if (kind == CompletionKind.TERMINAL && workflowAnalyticsEmitter != null) {
+            workflowAnalyticsEmitter.nodeFailed(ctx);
         }
 
         // 1. Enrich result with iteration context - same enrichment for both dispositions

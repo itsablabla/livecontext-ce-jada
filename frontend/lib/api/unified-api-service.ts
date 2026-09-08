@@ -21,6 +21,7 @@ import { ChatApiService } from './services/chat-api.service';
 import { DeveloperApiService } from './services/developer-api.service';
 import { ToolsApiService } from './services/tools-api.service';
 import { UserApiService } from './services/user-api.service';
+import { quotaApi } from './services/quota-api.service';
 
 // Re-export types for backward compatibility
 export type { ToolRuntimeMetadata } from '@/types/runtimeMetadata';
@@ -190,6 +191,8 @@ export class UnifiedApiService {
   getInvoices = () => this.billingService.getInvoices();
   // V250 - PAYG one-time top-up
   getPaygTiers = () => this.billingService.getPaygTiers();
+  /** Multiplier + cost profiles behind the model pickers' credit estimate. */
+  getModelCostBasis = () => quotaApi.getEstimateBasis();
   createPaygCheckout = (tier: 'small' | 'medium' | 'large') => this.billingService.createPaygCheckout(tier);
 
   // ==================== Chat API Methods ====================

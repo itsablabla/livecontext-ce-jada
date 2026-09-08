@@ -1028,6 +1028,45 @@ class SwitchNodeTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // resolved_params - what the inspector's Params column reads back
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("resolved_params reporting")
+    class ResolvedParamsTests {
+
+        @Test
+        @DisplayName("Should report the switch configuration under the plan's key names")
+        void shouldReportSwitchConfigurationUnderPlanKeyNames() {
+            when(mockTemplateEngine.resolveWithMap(any(), any()))
+                .thenReturn("active");
+
+            SwitchNode node = SwitchNode.builder()
+                .nodeId("core:switch")
+                .switchExpression("{{status}}")
+                .addCase("active", "Active")
+                .addCase("archived", "Archived")
+                .addDefault("Default")
+                .templateEngine(mockTemplateEngine)
+                .build();
+            node.setTemplateAdapter(adapterResolvingTo("active"));
+
+            NodeExecutionResult result = node.execute(context);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+            // The builder form and the plan call these switchExpression / switchCases.
+            // Reporting `expression` or `case_count` instead would reach the Params
+            // column as an unlabelled raw key AND be flagged as a missing parameter.
+            assertEquals("active", params.get("switchExpression"),
+                "switchExpression carries the RESOLVED expression, under the plan's name");
+            assertEquals(3, params.get("switchCases"),
+                "switchCases counts every case including the default branch");
+            assertEquals("active", params.get("resolved_value"));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Helper methods
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1038,5 +1077,19 @@ class SwitchNodeTest {
                 return NodeExecutionResult.success(nodeId, Map.of());
             }
         };
+    }
+
+    /**
+     * A template adapter that resolves every string to {@code value}.
+     *
+     * <p>Without one, {@code BaseNode.resolveTemplateString} returns the template
+     * verbatim, and a test asserting on resolved_params would pin the RAW expression
+     * while the product shows the resolved one.
+     */
+    private com.apimarketplace.orchestrator.execution.v2.template.V2TemplateAdapter adapterResolvingTo(String value) {
+        var adapter = org.mockito.Mockito.mock(
+            com.apimarketplace.orchestrator.execution.v2.template.V2TemplateAdapter.class);
+        when(adapter.resolveTemplates(any(), any())).thenReturn(Map.of("__v__", value));
+        return adapter;
     }
 }

@@ -16,6 +16,7 @@ import com.apimarketplace.conversation.service.approval.ToolApprovalGateResolver
 import com.apimarketplace.conversation.service.approval.ToolAuthorizationApprovalService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -28,9 +29,14 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.util.Map;
 import java.util.Optional;
 
+import org.mockito.ArgumentCaptor;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -427,5 +433,117 @@ class ConversationControllerTest {
                 "toolCalls", "[]"
         );
         return objectMapper.writeValueAsString(payload);
+    }
+
+    @Test
+    @DisplayName("GET /api/conversations refuses an unknown kind with 400, rather than listing everything")
+    void listRefusesUnknownKind() throws Exception {
+        // The service throws for a kind nobody can satisfy. What is pinned HERE is the mapping: a
+        // controller that let it fall through to the generic catch would answer 500, and one that
+        // swallowed it would answer 200 with the whole list - a filter that quietly asks a different
+        // question than the reader did.
+        //
+        // Deliberately a unit test even though an e2e covers it: the e2e suite runs in no CI job, so
+        // it is evidence today rather than a guard tomorrow.
+        when(conversationQueryService.getConversationsByUserId(
+                eq("user-1"), eq("org-1"), eq(0), eq(10), eq(false), eq("generate")))
+                .thenThrow(new IllegalArgumentException("Unknown conversation kind 'generate'"));
+
+        mockMvc.perform(get("/api/conversations")
+                        .param("kind", "generate")
+                        .header("X-User-ID", "user-1")
+                        .header("X-Organization-ID", "org-1"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("GET /api/conversations passes the kind through to the query, not to a post-filter")
+    void listPassesKindToTheQuery() throws Exception {
+        // The parameter has to reach the service, which is the only layer that can push it into SQL.
+        // A controller that read it and narrowed the returned page would answer "the studio
+        // conversations among the most recent", which is empty for anyone whose recent activity is
+        // chat and looks exactly like having none.
+        when(conversationQueryService.getConversationsByUserId(
+                any(), any(), anyInt(), anyInt(), anyBoolean(), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(java.util.List.of()));
+
+        mockMvc.perform(get("/api/conversations")
+                        .param("kind", "studio")
+                        .header("X-User-ID", "user-1")
+                        .header("X-Organization-ID", "org-1"))
+                .andExpect(status().isOk());
+
+        verify(conversationQueryService).getConversationsByUserId(
+                eq("user-1"), eq("org-1"), eq(0), eq(10), eq(false), eq("studio"));
+    }
+    @Test
+    @DisplayName("GET /api/conversations answers 400 with a REASON when the org header is missing")
+    void listRefusesMissingOrgHeaderWithABody() throws Exception {
+        // The second cause that reaches the same catch, and a status change worth pinning: this
+        // used to fall through to the generic handler and answer a bodyless 500, which tells a
+        // caller that the server broke rather than that their request was incomplete.
+        //
+        // The body matters as much as the code. Two different causes land here - an unknown `kind`
+        // and a missing organization header - and a bare 400 on a request carrying several
+        // parameters leaves the caller guessing which one it was.
+        when(conversationQueryService.getConversationsByUserId(
+                eq("user-1"), isNull(), anyInt(), anyInt(), anyBoolean(), any()))
+                .thenThrow(new IllegalArgumentException("Organization id is required"));
+
+        mockMvc.perform(get("/api/conversations")
+                        .header("X-User-ID", "user-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Organization id is required"));
+    }
+    @Test
+    @DisplayName("POST /api/conversations carries the requested kind into the conversation it creates")
+    void createCarriesTheKind() throws Exception {
+        // The kind is fixed at CREATION and immutable afterwards, so this one line is the only
+        // chance a conversation gets to be a studio one. Drop it and every studio thread is stored
+        // as a chat: it never appears under the sidebar's Studio filter, the sidebar routes it to
+        // the chat surface, and the generation envelopes it holds are fed to a chat model as
+        // context. Nothing fails - the request is 201, the thread opens, the rows are all valid.
+        //
+        // A unit test rather than only an e2e for the same reason the listing tests give: no CI job
+        // runs the Playwright suite, so an e2e is evidence today and not a guard tomorrow.
+        ConversationDto created = new ConversationDto();
+        created.setId("conv-studio");
+        created.setUserId("user-1");
+        when(conversationCommandService.createConversation(any())).thenReturn(created);
+
+        CreateConversationDto payload = new CreateConversationDto("title", "seedance-2", "seedance");
+        payload.setKind("studio");
+
+        mockMvc.perform(post("/api/conversations")
+                        .header("X-User-ID", "user-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(payload)))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<ConversationDto> captor = ArgumentCaptor.forClass(ConversationDto.class);
+        verify(conversationCommandService).createConversation(captor.capture());
+        assertThat(captor.getValue().getKind()).isEqualTo("studio");
+    }
+
+    @Test
+    @DisplayName("POST /api/conversations leaves the kind unset when the caller names none")
+    void createWithoutKindSendsNothing() throws Exception {
+        // The other direction, so the wiring cannot be "always studio". A caller that says nothing
+        // gets the server's default, and forcing a value here would make every chat a studio one.
+        ConversationDto created = new ConversationDto();
+        created.setId("conv-chat");
+        created.setUserId("user-1");
+        when(conversationCommandService.createConversation(any())).thenReturn(created);
+
+        mockMvc.perform(post("/api/conversations")
+                        .header("X-User-ID", "user-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CreateConversationDto("title", "model", "provider"))))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<ConversationDto> captor = ArgumentCaptor.forClass(ConversationDto.class);
+        verify(conversationCommandService).createConversation(captor.capture());
+        assertThat(captor.getValue().getKind()).isNull();
     }
 }

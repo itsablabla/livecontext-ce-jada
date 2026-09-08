@@ -50,7 +50,7 @@ export default function UpgradeSuccessModal({
                 window.location.href = '/app/chat';
               }
             }}
-            variant="contrast"
+            variant="default"
             className="w-full"
           >
             <MessageSquare className="w-4 h-4" />

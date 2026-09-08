@@ -84,7 +84,7 @@ class GenerationExecutionServiceTest {
     void postsAndReturnsData() {
         stubResponse(successBody());
 
-        GenerationResult result = service.generate("tenant-1", "run-1", "core:make_clip",
+        GenerationResult result = service.generate("tenant-1", "run-1", "agent:make_clip",
                 "seedance-2.0-fast", Map.of("prompt", "a boat", "duration_seconds", 10), null, null);
 
         assertTrue(result.success());
@@ -104,7 +104,7 @@ class GenerationExecutionServiceTest {
     void neverSendsAQuantity() {
         stubResponse(successBody());
 
-        service.generate("tenant-1", "run-1", "core:make_clip", "seedance-2.0-fast",
+        service.generate("tenant-1", "run-1", "agent:make_clip", "seedance-2.0-fast",
                 Map.of("duration_seconds", 10), null, null);
 
         verify(restTemplate).exchange(any(String.class), eq(HttpMethod.POST),
@@ -124,7 +124,7 @@ class GenerationExecutionServiceTest {
     void sendsRunScopedBillingHeaders() {
         stubResponse(successBody());
 
-        service.generate("tenant-1", "run-1", "core:make_clip", "seedance-2.0-fast", Map.of(), null, null);
+        service.generate("tenant-1", "run-1", "agent:make_clip", "seedance-2.0-fast", Map.of(), null, null);
 
         verify(restTemplate).exchange(any(String.class), eq(HttpMethod.POST),
                 entityCaptor.capture(), eq(Map.class));
@@ -133,7 +133,7 @@ class GenerationExecutionServiceTest {
         assertEquals("tenant-1", headers.getFirst("X-User-ID"));
         assertEquals("RUN", headers.getFirst("X-Lc-Billing-Scope-Kind"));
         assertEquals("run-1", headers.getFirst("X-Lc-Billing-Scope-Id"));
-        assertEquals("core:make_clip", headers.getFirst("X-Lc-Billing-Step-Id"));
+        assertEquals("agent:make_clip", headers.getFirst("X-Lc-Billing-Step-Id"));
     }
 
     @Test
@@ -141,12 +141,12 @@ class GenerationExecutionServiceTest {
     void forwardsCredentialSourceOnlyWhenChosen() {
         stubResponse(successBody());
 
-        service.generate("tenant-1", "run-1", "core:make_clip", "m", Map.of(), "user", null);
+        service.generate("tenant-1", "run-1", "agent:make_clip", "m", Map.of(), "user", null);
         verify(restTemplate).exchange(any(String.class), eq(HttpMethod.POST),
                 entityCaptor.capture(), eq(Map.class));
         assertEquals("user", capturedBody().get("credential_source"));
 
-        service.generate("tenant-1", "run-1", "core:make_clip", "m", Map.of(), null, null);
+        service.generate("tenant-1", "run-1", "agent:make_clip", "m", Map.of(), null, null);
         verify(restTemplate, org.mockito.Mockito.times(2)).exchange(any(String.class), eq(HttpMethod.POST),
                 entityCaptor.capture(), eq(Map.class));
         assertFalse(capturedBody().containsKey("credential_source"));
@@ -157,7 +157,7 @@ class GenerationExecutionServiceTest {
     void forwardsThePinnedCredentialIdOnlyWhenPinned() {
         stubResponse(successBody());
 
-        service.generate("tenant-1", "run-1", "core:make_clip", "m", Map.of(), "user", 42L);
+        service.generate("tenant-1", "run-1", "agent:make_clip", "m", Map.of(), "user", 42L);
         verify(restTemplate).exchange(any(String.class), eq(HttpMethod.POST),
                 entityCaptor.capture(), eq(Map.class));
         assertEquals(42L, capturedBody().get("credential_id"));
@@ -165,7 +165,7 @@ class GenerationExecutionServiceTest {
         // Absent means the account's default key for the provider. Writing a
         // null into the body instead would be a value the reader has to
         // interpret rather than the plain absence it is.
-        service.generate("tenant-1", "run-1", "core:make_clip", "m", Map.of(), "user", null);
+        service.generate("tenant-1", "run-1", "agent:make_clip", "m", Map.of(), "user", null);
         verify(restTemplate, org.mockito.Mockito.times(2)).exchange(any(String.class), eq(HttpMethod.POST),
                 entityCaptor.capture(), eq(Map.class));
         assertFalse(capturedBody().containsKey("credential_id"));
@@ -179,7 +179,7 @@ class GenerationExecutionServiceTest {
         body.put("error", "model 'x' does not accept 'voice'. It accepts: prompt, duration_seconds");
         stubResponse(body);
 
-        GenerationResult result = service.generate("tenant-1", "run-1", "core:make_clip", "x", Map.of(), null, null);
+        GenerationResult result = service.generate("tenant-1", "run-1", "agent:make_clip", "x", Map.of(), null, null);
 
         assertFalse(result.success());
         assertEquals("model 'x' does not accept 'voice'. It accepts: prompt, duration_seconds", result.error());
@@ -200,7 +200,7 @@ class GenerationExecutionServiceTest {
         body.put("data", Map.of("asset_url", "https://provider.example/tmp/abc123"));
         stubResponse(body);
 
-        GenerationResult result = service.generate("tenant-1", "run-1", "core:make_clip", "x", Map.of(), null, null);
+        GenerationResult result = service.generate("tenant-1", "run-1", "agent:make_clip", "x", Map.of(), null, null);
 
         assertFalse(result.success());
         assertEquals("https://provider.example/tmp/abc123", result.recoverableAssetUrl());
@@ -218,7 +218,7 @@ class GenerationExecutionServiceTest {
         body.put("error", "PLATFORM_NOT_AVAILABLE: this model is not sold on the platform key.");
         stubResponse(body);
 
-        GenerationResult result = service.generate("tenant-1", "run-1", "core:make_clip", "x", Map.of(), null, null);
+        GenerationResult result = service.generate("tenant-1", "run-1", "agent:make_clip", "x", Map.of(), null, null);
 
         assertFalse(result.success());
         assertNull(result.recoverableAssetUrl());
@@ -235,7 +235,7 @@ class GenerationExecutionServiceTest {
         when(restTemplate.exchange(any(String.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
                 .thenThrow(new org.springframework.web.client.ResourceAccessException("Read timed out"));
 
-        GenerationResult result = service.generate("tenant-1", "run-1", "core:make_clip", "x", Map.of(), null, null);
+        GenerationResult result = service.generate("tenant-1", "run-1", "agent:make_clip", "x", Map.of(), null, null);
 
         assertFalse(result.success());
         assertTrue(result.error().contains("unknown whether this generation ran"), result.error());
@@ -258,7 +258,7 @@ class GenerationExecutionServiceTest {
                                 .getBytes(java.nio.charset.StandardCharsets.UTF_8),
                         java.nio.charset.StandardCharsets.UTF_8));
 
-        GenerationResult result = service.generate("tenant-1", "run-1", "core:make_clip", "x", Map.of(), null, null);
+        GenerationResult result = service.generate("tenant-1", "run-1", "agent:make_clip", "x", Map.of(), null, null);
 
         assertFalse(result.success());
         assertTrue(result.error().contains("PLATFORM_NOT_AVAILABLE"), result.error());
@@ -274,7 +274,7 @@ class GenerationExecutionServiceTest {
         body.put("data", Map.of("asset_url", "   "));
         stubResponse(body);
 
-        GenerationResult result = service.generate("tenant-1", "run-1", "core:make_clip", "x", Map.of(), null, null);
+        GenerationResult result = service.generate("tenant-1", "run-1", "agent:make_clip", "x", Map.of(), null, null);
 
         assertNull(result.recoverableAssetUrl());
     }
@@ -286,7 +286,7 @@ class GenerationExecutionServiceTest {
         body.put("success", true);
         stubResponse(body);
 
-        GenerationResult result = service.generate("tenant-1", "run-1", "core:make_clip", "x", Map.of(), null, null);
+        GenerationResult result = service.generate("tenant-1", "run-1", "agent:make_clip", "x", Map.of(), null, null);
 
         assertFalse(result.success());
         assertTrue(result.error().contains("no result"), result.error());
@@ -299,7 +299,7 @@ class GenerationExecutionServiceTest {
                 eq(Map.class))).thenThrow(HttpClientErrorException.create(
                         HttpStatus.NOT_FOUND, "Not Found", null, null, null));
 
-        GenerationResult result = service.generate("tenant-1", "run-1", "core:make_clip", "x", Map.of(), null, null);
+        GenerationResult result = service.generate("tenant-1", "run-1", "agent:make_clip", "x", Map.of(), null, null);
 
         assertFalse(result.success());
         assertEquals(GenerationExecutionService.GENERATION_UNAVAILABLE_MESSAGE, result.error());
@@ -311,7 +311,7 @@ class GenerationExecutionServiceTest {
         when(restTemplate.exchange(any(String.class), eq(HttpMethod.POST), any(HttpEntity.class),
                 eq(Map.class))).thenThrow(new ResourceAccessException("connection refused"));
 
-        GenerationResult result = service.generate("tenant-1", "run-1", "core:make_clip", "x", Map.of(), null, null);
+        GenerationResult result = service.generate("tenant-1", "run-1", "agent:make_clip", "x", Map.of(), null, null);
 
         assertFalse(result.success());
         assertTrue(result.error().contains("could not be reached"), result.error());
@@ -324,7 +324,7 @@ class GenerationExecutionServiceTest {
     void noRunIdSendsNoScope() {
         stubResponse(successBody());
 
-        service.generate("tenant-1", null, "core:make_clip", "x", Map.of(), null, null);
+        service.generate("tenant-1", null, "agent:make_clip", "x", Map.of(), null, null);
 
         verify(restTemplate).exchange(any(String.class), eq(HttpMethod.POST),
                 entityCaptor.capture(), eq(Map.class));

@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useRouter, usePathname } from "@/i18n/navigation";
+import { Link, useRouter, usePathname } from "@/i18n/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useAuthGuard } from "@/hooks/useAuthGuard";
 import { useAuth } from "@/lib/providers/smart-providers";
@@ -11,10 +10,13 @@ import { useUserProfile } from "@/hooks/useUserProfile";
 import { useTheme, type ThemePreference } from "@/components/ThemeProvider";
 import { useSidePanelLayoutSafe, type SidePanelBottomMode, type SidePanelDefaultPosition } from "@/contexts/SidePanelLayoutContext";
 import { useWorkflowLayoutDirection, type WorkflowLayoutDirection } from "@/contexts/WorkflowLayoutDirectionContext";
+import { useInspectorDock, type InspectorDock } from "@/contexts/InspectorDockContext";
+import { useInspectorOpenMode, type InspectorOpenMode } from '@/contexts/InspectorOpenModeContext';
 import { useSubscription } from "@/lib/hooks/smart-hooks-complete";
 import { OverviewPageSkeleton } from "@/components/skeletons";
 import { ScheduledChangeAlert } from "@/components/billing";
 import { PublicProfileSettingsCard } from "@/components/profile/PublicProfileSettingsCard";
+import { BadgeCollection } from "@/components/badges/BadgeCollection";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,11 +55,12 @@ import {
   X,
   Info,
   CheckCircle2,
+  ChevronRight,
+  Trophy,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AvatarGallery } from "@/components/settings/AvatarGallery";
 import { unifiedApiService } from "@/lib/api/unified-api-service";
-import { ChatConfigPanel } from "@/components/chat/ChatConfigPanel";
 import { IS_CLOUD } from "@/lib/edition";
 import { embeddedChangePassword } from "@/lib/providers/embedded-auth-provider";
 import { evaluatePasswordChange } from "@/lib/auth/changePasswordOutcome";
@@ -131,8 +134,23 @@ export default function SettingsOverviewPage() {
   // mounted under WorkflowLayoutDirectionProvider (app/[locale]/app/layout.tsx), so
   // a missing provider is a bug we want loud. The safe variant would degrade the
   // select into a no-op that silently discards the user's choice.
-  const { direction: workflowLayoutDirection, setDirection: setWorkflowLayoutDirection } =
+  // The stored DEFAULT, not the active direction. This page describes what a workflow
+  // starts from; reading `direction` meant that after opening a workflow whose plan stamps
+  // a direction, this select displayed that workflow's direction as the user's default -
+  // and being a controlled select, it could not even be used to re-pick the value it was
+  // showing, so there was no way to state the default it was misreporting.
+  const { defaultDirection: workflowLayoutDirection, setDirection: setWorkflowLayoutDirection } =
     useWorkflowLayoutDirection();
+
+  // Where the node inspector opens. Throwing hook for the same reason as the one
+  // above: this page is mounted under InspectorDockProvider, so a missing provider
+  // is a bug, not a reason to silently drop the user's choice. The very same value
+  // is exposed from a workflow's own canvas settings - one preference, two places
+  // to reach it.
+  const { dock: inspectorDock, setDock: setInspectorDock } = useInspectorDock();
+  // Same shape and same contract as the dock above: one stored value, written from here
+  // and from each workflow's canvas settings.
+  const { openMode: inspectorOpenMode, setOpenMode: setInspectorOpenMode } = useInspectorOpenMode();
 
   // All useState hooks first
   const [activeTab, setActiveTab] = useState("profile");
@@ -275,6 +293,7 @@ export default function SettingsOverviewPage() {
     ...(isExternalAccount
       ? []
       : [{ id: "security", label: t('tabs.security'), icon: Shield }]),
+    { id: "trophies", label: t('tabs.trophies'), icon: Trophy },
     { id: "preferences", label: t('tabs.preferences'), icon: Palette },
     { id: "notifications", label: t('tabs.notifications'), icon: Bell },
     { id: "advanced", label: t('tabs.advanced'), icon: Settings },
@@ -758,6 +777,13 @@ export default function SettingsOverviewPage() {
             </TabsContent>
           )}
 
+          {/* Trophies Tab - the user's badge wall. Mounted lazily by Radix's
+              TabsContent, so the badges query (which evaluates server-side)
+              only fires once the user actually opens the tab. */}
+          <TabsContent value="trophies" className="space-y-6">
+            <BadgeCollection />
+          </TabsContent>
+
           {/* Preferences Tab */}
           <TabsContent value="preferences" className="space-y-6">
             <div className="space-y-6">
@@ -893,6 +919,67 @@ export default function SettingsOverviewPage() {
                   </Select>
                 </div>
 
+                {/* Where the node inspector opens - persisted client-side
+                    (localStorage), scoped per workspace like the two above. The same
+                    control sits in each workflow's canvas settings and writes THIS
+                    value, so the two never disagree. 'panel' is a request, not a
+                    guarantee: surfaces with no side panel (the standalone builder,
+                    the marketplace preview) keep the floating inspector rather than
+                    leave it nowhere to open. */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+                  <div>
+                    <h4 className="font-medium text-theme-primary">
+                      {t('preferences.inspectorDock')}
+                    </h4>
+                    <p className="text-sm text-theme-secondary">
+                      {t('preferences.inspectorDockDescription')}
+                    </p>
+                  </div>
+                  <Select
+                    value={inspectorDock}
+                    onValueChange={(value) => setInspectorDock(value as InspectorDock)}
+                  >
+                    <SelectTrigger className="w-full sm:w-[200px]" data-testid="inspector-dock-select">
+                      <SelectValue placeholder={t('preferences.inspectorDock')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="canvas">{t('preferences.inspectorDockCanvas')}</SelectItem>
+                      <SelectItem value="panel">{t('preferences.inspectorDockPanel')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* How much of the inspector a node click opens. Persisted client-side
+                    (localStorage), scoped per workspace, and written by the same control
+                    inside each workflow's canvas settings, so the two never disagree.
+                    Build mode only: opening a RUN opens its results, so the three-column
+                    view is not a preference there. A node with no three-column view to
+                    show (an API step with no tool chosen, anything still on a navigation
+                    step) stays compact on its own - a preference must not leave a node
+                    unconfigurable. */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+                  <div>
+                    <h4 className="font-medium text-theme-primary">
+                      {t('preferences.inspectorOpenMode')}
+                    </h4>
+                    <p className="text-sm text-theme-secondary">
+                      {t('preferences.inspectorOpenModeDescription')}
+                    </p>
+                  </div>
+                  <Select
+                    value={inspectorOpenMode}
+                    onValueChange={(value) => setInspectorOpenMode(value as InspectorOpenMode)}
+                  >
+                    <SelectTrigger className="w-full sm:w-[200px]" data-testid="inspector-open-mode-select">
+                      <SelectValue placeholder={t('preferences.inspectorOpenMode')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="simple">{t('preferences.inspectorOpenModeSimple')}</SelectItem>
+                      <SelectItem value="advanced">{t('preferences.inspectorOpenModeAdvanced')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 {/* Bottom-panel style - persisted client-side (localStorage), scoped per
                     workspace. The header now carries BOTH dock buttons (bottom + right);
                     this setting only chooses which bottom variant that button opens:
@@ -922,12 +1009,12 @@ export default function SettingsOverviewPage() {
                 </div>
               </div>
 
-              {/* Chat defaults - V312: per-(user, workspace) default chat options that
-                  seed the message composer + every new conversation in THIS workspace.
-                  Self-service (each user edits only their own; no role gate). Presented
-                  flat like the Language setting above (plain header, no border card); the
-                  panel ('user-default' target) GET/PUTs /v3/chat/defaults and saves on change. */}
-              <div className="space-y-4">
+              {/* Chat defaults - V312 per-(user, workspace) chat options. The EDITOR now lives
+                  in Settings > Agents & Chat (and the Agents page "Settings" tab), with the
+                  agents it configures, rather than as a third copy of the same panel here. This
+                  row is the signpost for anyone who still looks for it under Preferences; it
+                  reads the same /v3/chat/defaults store on the other side. */}
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
                 <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center">
                     <MessageSquare className="w-5 h-5 text-theme-primary" />
@@ -937,7 +1024,13 @@ export default function SettingsOverviewPage() {
                     <p className="text-sm text-theme-secondary">{t('preferences.chatDefaultsDescription')}</p>
                   </div>
                 </div>
-                <ChatConfigPanel userDefault />
+                <Link
+                  href="/app/settings/agents"
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--accent-primary)] hover:underline whitespace-nowrap"
+                >
+                  {t('preferences.chatDefaultsLink')}
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Link>
               </div>
             </div>
           </TabsContent>

@@ -30,7 +30,7 @@ import java.util.TreeSet;
 /**
  * HTTP face of the generation surface, for the two callers that are not agents:
  * the workflow builder (which has to show a model list and a price before the
- * user runs anything) and the {@code core:generate} node in orchestrator-service
+ * user runs anything) and the {@code agent:generate} node in orchestrator-service
  * (which has to actually run one).
  *
  * <p><b>Why the node goes through HTTP instead of calling the catalog tool by
@@ -307,7 +307,7 @@ public class GenerationController {
      *
      * <p>Both callers of this are surfaces that KNOW the account's credentials:
      * the app dialog, whose picker only ever offers keys of the chosen model's
-     * provider, and the {@code core:generate} node, whose id was chosen in the
+     * provider, and the {@code agent:generate} node, whose id was chosen in the
      * builder by the workflow's owner. Moving it here is what keeps it out of
      * the parameter map an agent controls: the generation tool reads the same
      * module, and an agent has no way to learn a credential id, so it must not
@@ -388,6 +388,15 @@ public class GenerationController {
                         inputs.put(param, shape);
                     });
             if (!inputs.isEmpty()) row.put("inputs", inputs);
+        // The same statement the agent's listing carries: what the call sends
+        // whatever the caller passes. It is what tells two ids apart when a
+        // provider sells a quality or an output size as its own price. No picker
+        // reads it yet, they group by provider and render a flat list, but the
+        // alternative for one that wants to is parsing labels, so the contract
+        // carries it rather than leaving that as the only way.
+        Map<String, Object> fixed = new LinkedHashMap<>(m.spec().constants());
+        fixed.putAll(m.model().constants());
+        if (!fixed.isEmpty()) row.put("fixed", fixed);
         row.put("price", describePrice(m.seedPrice()));
         row.put("async", m.isAsync());
         return row;

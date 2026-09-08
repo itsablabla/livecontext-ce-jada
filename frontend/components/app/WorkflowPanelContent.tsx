@@ -12,7 +12,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Sparkles, MessageSquare, FileText, AppWindow, Workflow, Play, Plus } from 'lucide-react';
+import { Sparkles, MessageSquare, FileText, AppWindow, Workflow, Play, Plus, SlidersHorizontal } from 'lucide-react';
 import { usePathname } from '@/i18n/navigation';
 import { ChatCore } from '@/components/chat/ChatCore';
 import { WelcomeTitle } from '@/app/shared/components';
@@ -35,11 +35,23 @@ import type { TriggerPanelConfig } from '@/app/workflows/builder/components/Trig
 import { normalizeLabel } from '@/app/workflows/builder/utils/labelNormalizer';
 import { isNavigateRef, navigateTargetLabel } from '@/app/workflows/builder/utils/interfaceActionRefs';
 import { TERMINAL_STATUSES } from '@/contexts/workflow-run/RunStateStore';
-import { useCurrentOrgStore } from '@/lib/stores/current-org-store';
+import { useCanMutateInCurrentOrg, useCurrentOrgStore } from '@/lib/stores/current-org-store';
 import { OPEN_TRIGGER_TAB_EVENT, findTriggerTabConfig, type OpenTriggerTabDetail } from '@/lib/workflow/triggerTabEvent';
 import { NodeCreatorPanelContent } from '@/components/app/NodeCreatorPanelContent';
+import {
+  getInspectorDockState,
+  isInspectorOpenRequestFor,
+  setInspectorDockHost,
+  subscribeInspectorDockState,
+  OPEN_INSPECTOR_PANEL_EVENT,
+  type InspectorDockState,
+  type InspectorDockSurface,
+  type OpenInspectorPanelDetail,
+} from '@/lib/workflow/inspectorDockBus';
 import { WorkflowPanelActions } from '@/components/app/WorkflowPanelActions';
 import { RunPanelContent, type RunPanelView } from '@/components/workflow/run-panel/RunPanelContent';
+import { RunActionButton, resolveRunAction } from '@/components/workflow/run-panel/RunActionButton';
+import { useRunActions } from '@/components/workflow/run-panel/useRunActions';
 import { resetEpochSelectionState } from '@/components/workflow/run-panel/useDefaultEpochSelection';
 import {
   clearRunPanelCache,
@@ -62,6 +74,8 @@ export const WORKFLOW_TAB_ID = '__workflow__';
 export const RUN_TAB_ID = '__run__';
 /** Node palette (edit mode) - the former floating "Add node" panel. */
 export const NODE_CREATOR_TAB_ID = '__add_node__';
+/** Configuration of the node selected on the canvas - the docked inspector. */
+export const INSPECTOR_TAB_ID = '__inspector__';
 
 // ── Per-workflow cache for data that survives unmount/remount ──
 // When the SidePanel closes, WorkflowPanelContent unmounts.
@@ -431,7 +445,41 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
   // exclusive because the canvas is in exactly one of the two modes.
   const hasRun = runData.hasRunInfo || !!runData.runId;
   const showRunTab = hasRun;
-  const showNodeCreatorTab = !hasRun && !isPreviewOnly;
+  // The palette is an editing tool, so it follows the same permission as the Save
+  // beside it: on a workflow the caller may not change (an installed application's
+  // frozen clone, someone else's published workflow) a dropped node could never be
+  // saved, and the panel would be inviting an edit it has no Save for.
+  const showNodeCreatorTab = !hasRun && !isPreviewOnly && canEditWorkflow;
+
+  // ── Inspector sub-tab (the node inspector, docked out of the canvas) ──
+  // Published by the canvas this panel is paired with, when the user's preference
+  // puts the inspector here and a node is selected. Read from the module cache on
+  // mount, not just from the next publish: the panel body is unmounted while the
+  // side panel is closed, so reopening it on a canvas that already has a node
+  // selected must still find the tab.
+  //
+  // Which canvas is "paired" is exactly what the surface says, and this panel
+  // knows it from a fact it already has. Hosting a canvas (`workflowCanvasSlot`)
+  // means the Application panel or a sub-workflow tab: the canvas is a sub-tab of
+  // THIS panel, so the inspector becomes its sibling and the two are shown one at
+  // a time. No canvas slot means the panel beside a workflow page, whose canvas is
+  // the page itself. Listening on both would make one panel answer for the other.
+  const inspectorDockSurface: InspectorDockSurface = hasWorkflowSlot ? 'embedded' : 'page';
+  const [inspectorDock, setInspectorDock] = useState<InspectorDockState>(
+    () => getInspectorDockState(workflowId, inspectorDockSurface),
+  );
+  useEffect(() => {
+    setInspectorDock(getInspectorDockState(workflowId, inspectorDockSurface));
+    return subscribeInspectorDockState(workflowId, inspectorDockSurface, setInspectorDock);
+  }, [workflowId, inspectorDockSurface]);
+  const showInspectorTab = inspectorDock.docked && !isPreviewOnly;
+
+  // The slot itself. A ref callback rather than an effect so the element is
+  // published in the same commit it is attached, and withdrawn on unmount - a
+  // detached node left in the registry would silently swallow the portal.
+  const registerInspectorHost = useCallback((el: HTMLDivElement | null) => {
+    setInspectorDockHost(workflowId, inspectorDockSurface, el);
+  }, [workflowId, inspectorDockSurface]);
   // Run history is a navigation between runs of the SAME workflow. The default
   // is "only the standalone workflow page", because an embedded canvas whose host
   // CHOSE the run for it - the application panel, the marketplace preview - must
@@ -440,7 +488,7 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
   // back up to the list of runs it came from. Preview is never negotiable.
   const allowRunHistory = (allowRunHistoryProp ?? !hasWorkflowSlot) && !isPreviewOnly;
 
-  const hasExtraTabs = visibleTriggerConfigs.length > 0 || showAppTab || hasWorkflowSlot || showRunTab || showNodeCreatorTab;
+  const hasExtraTabs = visibleTriggerConfigs.length > 0 || showAppTab || hasWorkflowSlot || showRunTab || showNodeCreatorTab || showInspectorTab;
   /**
    * Tab to show when nothing else applies: the Application on a panel opened on
    * an application, the canvas when this panel hosts one, else the AI chat.
@@ -511,13 +559,14 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
       (activeTabId === WORKFLOW_TAB_ID && hasWorkflowSlot) ||
       (activeTabId === APP_TAB_ID && applicationConfigs.length > 0) ||
       (activeTabId === RUN_TAB_ID && showRunTab) ||
-      (activeTabId === NODE_CREATOR_TAB_ID && showNodeCreatorTab);
+      (activeTabId === NODE_CREATOR_TAB_ID && showNodeCreatorTab) ||
+      (activeTabId === INSPECTOR_TAB_ID && showInspectorTab);
     if (!isActiveTabAvailable) {
       // An application-first panel whose interfaces have not arrived yet keeps
       // waiting on the Application tab rather than flashing the canvas.
       setActiveTabId(applicationFirst && hasWorkflowSlot ? APP_TAB_ID : defaultTabId);
     }
-  }, [triggerConfigs, applicationConfigs.length, activeTabId, hasWorkflowSlot, showRunTab, showNodeCreatorTab, applicationFirst, defaultTabId]);
+  }, [triggerConfigs, applicationConfigs.length, activeTabId, hasWorkflowSlot, showRunTab, showNodeCreatorTab, showInspectorTab, applicationFirst, defaultTabId]);
 
   // Consume pending tab activation (set before panel was opened)
   useEffect(() => {
@@ -567,11 +616,15 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
   useEffect(() => {
     const handler = (event: CustomEvent<{ tabId: string; workflowId?: string }>) => {
       if (event.detail.workflowId && event.detail.workflowId !== workflowId) return;
+      // Same refusal as the canvas "+": the palette is not on offer here, and
+      // honouring it would move the reader off their tab for a commit before the
+      // availability effect took it back.
+      if (event.detail.tabId === NODE_CREATOR_TAB_ID && !showNodeCreatorTab) return;
       setActiveTabId(event.detail.tabId);
     };
     window.addEventListener('workflowPanelActivateTab', handler as EventListener);
     return () => window.removeEventListener('workflowPanelActivateTab', handler as EventListener);
-  }, [workflowId]);
+  }, [workflowId, showNodeCreatorTab]);
 
   // Listen for "open the Run tab" requests (canvas history button, version chip).
   // Scoped by workflowId so a sub-workflow tab and the main panel never steal
@@ -599,11 +652,46 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ workflowId?: string }>).detail ?? {};
       if (detail.workflowId && detail.workflowId !== workflowId) return;
+      // Refuse it where the tab itself is not on offer. Leaving it to the
+      // availability effect is not equivalent: that effect resets to the DEFAULT
+      // tab, so a "+" the panel cannot honour would still take the reader off
+      // whatever tab they were on and drop them at the canvas.
+      if (!showNodeCreatorTab) return;
       setActiveTabId(NODE_CREATOR_TAB_ID);
     };
     window.addEventListener(OPEN_NODE_CREATOR_EVENT, handler);
     return () => window.removeEventListener(OPEN_NODE_CREATOR_EVENT, handler);
-  }, [workflowId]);
+  }, [workflowId, showNodeCreatorTab]);
+
+  // Selecting a node on the canvas focuses the Inspector sub-tab. Same listener
+  // rationale as the two above: with the panel already open on this tab, the
+  // page-level handler cannot react, only an in-panel listener can. Focus is
+  // taken on the OPEN request, never on the dock state itself - the state also
+  // changes when the selected node's LABEL is edited, and stealing the tab back
+  // mid-rename would fight the user.
+  //
+  // The request is RECORDED, not applied on the spot. It arrives beside the
+  // publish that makes the tab exist, and where the two do not land in the same
+  // commit, setting the active tab first means setting one the "active tab
+  // vanished" fallback below immediately undoes - the tab appears and the panel
+  // stays on the canvas. Holding it until the tab is really available removes the
+  // ordering assumption instead of betting on it.
+  const [inspectorFocusRequest, setInspectorFocusRequest] = useState(0);
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<OpenInspectorPanelDetail>).detail;
+      if (!isInspectorOpenRequestFor(detail, workflowId, inspectorDockSurface)) return;
+      setInspectorFocusRequest(n => n + 1);
+    };
+    window.addEventListener(OPEN_INSPECTOR_PANEL_EVENT, handler);
+    return () => window.removeEventListener(OPEN_INSPECTOR_PANEL_EVENT, handler);
+  }, [workflowId, inspectorDockSurface]);
+
+  useEffect(() => {
+    if (inspectorFocusRequest === 0 || !showInspectorTab) return;
+    setInspectorFocusRequest(0);
+    setActiveTabId(INSPECTOR_TAB_ID);
+  }, [inspectorFocusRequest, showInspectorTab]);
 
 
   // ── Terminal run status check ──
@@ -726,7 +814,8 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
     + (hasWorkflowSlot ? 1 : 0)
     + (showAppTab ? 1 : 0)
     + (showRunTab ? 1 : 0)
-    + (showNodeCreatorTab ? 1 : 0);
+    + (showNodeCreatorTab ? 1 : 0)
+    + (showInspectorTab ? 1 : 0);
   // `hasExtraTabs` implies at least one extra tab, so tabCount is always >= 2 here:
   // tabsAtBottom is currently equivalent to hasExtraTabs, and renderTabBar() is only
   // reached under it. The top-position branch below is therefore unreachable today,
@@ -763,6 +852,52 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
    */
   const canHostCanvasActions = hasWorkflowSlot && !isPreviewOnly && canEditWorkflow;
   const showCanvasActions = canHostCanvasActions && activeTabId === WORKFLOW_TAB_ID;
+
+  /**
+   * Stop the run, from whichever sub-tab has no stop of its own.
+   *
+   * Launching a workflow lands the user somewhere the run controls never
+   * reached: the form or chat tab of the trigger that needs a payload, the AI
+   * Chat, the node palette. A live run had no stop on those tabs at all - the
+   * user had to know the control existed on a different tab. The tab bar is the
+   * one piece of chrome every sub-tab shares, so it lives here.
+   *
+   * It is here on EVERY sub-tab, including the three that carry a stop of their
+   * own. Suppressing it on those was tried and was wrong twice over, because
+   * "this tab has a stop" is never unconditional:
+   *  - the Application tab's stop lives in the interface controls, COLLAPSED
+   *    behind a grip by default, which is the state a user actually finds;
+   *  - the canvas pill needs run mode and no settings drawer open;
+   *  - the Run tab shows the run identity bar only on its RUN level - walk up to
+   *    the run history and the panel has no action control at all.
+   * Each exception needs a condition the tab bar cannot see, and getting one
+   * wrong costs the user the only control on screen. A duplicate button is a
+   * cosmetic cost; an absent one is this entire bug.
+   *
+   * Deliberately the STOP alone (RUNNING / PAUSED). Cancel and reactivate belong
+   * to the run's lifecycle, which the Run tab and the canvas pill present in
+   * full; a permanent red square beside the tabs for every idle WAITING_TRIGGER
+   * run would be noise, and a destructive one. Gated on the workspace role
+   * because stopping a run is a mutation - deliberately NOT on `canEditWorkflow`
+   * like the Save/Run cluster, since stopping your own run of an application you
+   * acquired is not editing its publisher's workflow.
+   */
+  // Given the run this PANEL resolved, like its two sibling surfaces do. Reading
+  // the bus alone leaves the control absent on a /run/<id> deep link until the
+  // canvas publishes, and targets the bus' run if the panel ever shows another.
+  const runActions = useRunActions(workflowId, currentRunId);
+  const canMutate = useCanMutateInCurrentOrg();
+  // Same exclusion the application controls make, and for the same reason: the
+  // gateway's share allow-list does not cover stopping a run, so a visitor's
+  // click would 403. What keeps this panel off a share page today is a
+  // `display:none` wrapper, which is a layout detail, not a guard - the control
+  // is still in the visitor's DOM.
+  const isPublicShareRoute = (pathname ?? '').startsWith('/s/');
+  const showStopInTabBar = canMutate
+    && !isPublicShareRoute
+    && !isPreviewOnly
+    && !runData.isPreviewOnly
+    && resolveRunAction(runActions.status) === 'stop';
 
   // ── Tab bar rendering (shared between top and bottom positions) ──
   const renderTabBar = () => (
@@ -831,6 +966,26 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
           </button>
         )}
 
+        {/* Inspector tab - the configuration of the node selected on the canvas.
+            Captioned with the node's own label so a panel with several sub-tabs
+            still says WHICH node is being configured. */}
+        {showInspectorTab && (
+          <button
+            type="button"
+            data-inspector-tab-button
+            aria-pressed={activeTabId === INSPECTOR_TAB_ID}
+            data-testid="panel-sub-tab"
+            data-active={activeTabId === INSPECTOR_TAB_ID ? 'true' : undefined}
+            onClick={() => setActiveTabId(INSPECTOR_TAB_ID)}
+            className={subTabClass(activeTabId === INSPECTOR_TAB_ID)}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate max-w-[150px]">
+              {inspectorDock.label || t('sidePanel.inspectorTab')}
+            </span>
+          </button>
+        )}
+
         {/* Trigger tabs - hidden in preview mode */}
         {!isPreviewOnly && triggerConfigs.map((config, index) => {
           const isActive = activeTabId === config.triggerId;
@@ -893,6 +1048,20 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
         )}
 
       </div>
+
+      {/* Outside the scrolling track on purpose: the one control that stops a
+          live run must stay on screen when the tabs overflow. */}
+      {showStopInTabBar && (
+        <div className="flex-shrink-0 flex items-center pr-2" data-testid="panel-run-stop">
+          <RunActionButton
+            status={runActions.status}
+            onStop={() => runActions.perform('stop')}
+            pendingAction={runActions.pending}
+            failed={runActions.failed}
+            size="panel"
+          />
+        </div>
+      )}
 
       {/* Mounted for as long as the panel hosts a canvas, and merely HIDDEN off
           the Workflow tab. Unmounting it looked equivalent and was not: its
@@ -966,8 +1135,17 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
              Workflow tab does not exist and the button would lead nowhere. */
           onBackToWorkflow={hasWorkflowSlot ? focusWorkflowTab : undefined}
         />
-      ) : activeTabId === NODE_CREATOR_TAB_ID ? (
+      ) : /* Both event listeners refuse the palette themselves; the pending-tab handoff
+             above does not, and it lands straight in `activeTabId` - the availability
+             effect only takes it back on the NEXT commit, so without this the palette
+             would be mounted for that one commit. No producer records a pending palette
+             for a locked panel today (the only one is the workflow page, whose own panel
+             is always editable), so this guards a state only a future caller can reach.
+             It is one condition, and it is pinned. */
+        activeTabId === NODE_CREATOR_TAB_ID && showNodeCreatorTab ? (
         <NodeCreatorPanelContent workflowId={workflowId} />
+      ) : activeTabId === INSPECTOR_TAB_ID ? (
+        null /* Inspector portalled into its slot below (always mounted) */
       ) : activeTabId === WORKFLOW_TAB_ID ? (
         null /* Workflow canvas rendered separately (always mounted) */
       ) : (
@@ -1003,6 +1181,16 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
                 {workflowCanvasSlot}
               </div>
             )}
+            {/* Inspector slot - always mounted, display toggled. The canvas
+                portals the real inspector in here. */}
+            {showInspectorTab && (
+              <div
+                ref={registerInspectorHost}
+                data-testid="inspector-dock-slot"
+                className="flex-1 min-h-0 min-w-0 flex flex-col"
+                style={{ display: activeTabId === INSPECTOR_TAB_ID ? undefined : 'none' }}
+              />
+            )}
             {renderTabBar()}
           </>
         ) : (
@@ -1014,6 +1202,16 @@ function WorkflowPanelInner({ workflowId, runId: runIdProp, workflowCanvasSlot, 
               <div className="flex-1 min-h-0 flex flex-col overflow-x-auto" style={{ display: activeTabId === WORKFLOW_TAB_ID ? undefined : 'none' }}>
                 {workflowCanvasSlot}
               </div>
+            )}
+            {/* Inspector slot - always mounted, display toggled. The canvas
+                portals the real inspector in here. */}
+            {showInspectorTab && (
+              <div
+                ref={registerInspectorHost}
+                data-testid="inspector-dock-slot"
+                className="flex-1 min-h-0 min-w-0 flex flex-col"
+                style={{ display: activeTabId === INSPECTOR_TAB_ID ? undefined : 'none' }}
+              />
             )}
           </>
         )
@@ -1071,9 +1269,14 @@ interface WorkflowPanelContentProps {
    */
   applicationTemplateSource?: ApplicationTemplateSource;
   /**
-   * The caller may change this workflow. Only an application panel says
-   * otherwise, when its publication resolves to the PUBLISHER's workflow rather
-   * than an acquired clone.
+   * The caller may change this workflow. False wherever a save would be refused:
+   * an INSTALLED application (its plan is a frozen clone the backend will not
+   * write), a publication the caller does not own (which resolves to the
+   * PUBLISHER's workflow), and a marketplace preview. It withholds the Share /
+   * Save / Run bar and the node palette, while leaving the canvas readable and
+   * the application interactive. It does NOT gate the AI Chat sub-tab: the
+   * builder agent refuses its own plan-mutating actions on a frozen application,
+   * and the tab is still the place to ask about the workflow you are reading.
    */
   canEditWorkflow?: boolean;
 }

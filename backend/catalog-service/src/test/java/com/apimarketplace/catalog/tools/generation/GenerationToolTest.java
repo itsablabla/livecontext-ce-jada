@@ -97,6 +97,15 @@ class GenerationToolTest {
         return model(spec, id, java.util.Map.of());
     }
 
+    /** The same model, sold by somebody else. */
+    private static GenerationRegistry.GenerationModel modelFrom(GenerationSpec spec, String id,
+                                                                 String slug, String name) {
+        return new GenerationRegistry.GenerationModel(
+                id, spec.kind(), spec.model(id).orElseThrow(), spec,
+                UUID.randomUUID(), slug + "/" + id, slug, name,
+                slug, slug + "_key", "async_poll", java.util.Map.of());
+    }
+
     /** The same model, carrying values inherited from the catalogue. */
     private static GenerationRegistry.GenerationModel model(GenerationSpec spec, String id,
                                                             java.util.Map<String, java.util.List<String>> inherited) {
@@ -105,6 +114,41 @@ class GenerationToolTest {
                 UUID.randomUUID(), "provider/" + id, "provider", "Provider Inc",
                 "provider", "provider_key", "async_poll", inherited);
     }
+
+    /** An endpoint whose own constants are sent on every call, tier or no tier. */
+    private static final GenerationSpec SCAFFOLDED_SPEC = spec("""
+            {
+              "kind": "video", "assetPath": "content.video_url",
+              "paramMap": { "prompt": "content[0].text" },
+              "constants": { "content[0].type": "text" },
+              "models": [{
+                "id": "scaffolded", "label": "Scaffolded",
+                "capabilities": ["prompt"],
+                "price": { "unit": "call", "baseCredits": 10 }
+              }]
+            }
+            """);
+
+    /** Two ids that accept the same parameters and differ only in what they pin. */
+    private static final GenerationSpec TIERED_SPEC = spec("""
+            {
+              "kind": "image", "modelParam": "model", "assetPath": "$binary",
+              "paramMap": { "prompt": "prompt" },
+              "models": [
+                {
+                  "id": "tier-plain", "upstream": "img", "label": "Plain",
+                  "capabilities": ["prompt"],
+                  "price": { "unit": "call", "baseCredits": 10 }
+                },
+                {
+                  "id": "tier-tall", "upstream": "img", "label": "Tall",
+                  "capabilities": ["prompt"],
+                  "constants": { "size": "1024x1536", "quality": "high" },
+                  "price": { "unit": "call", "baseCredits": 15 }
+                }
+              ]
+            }
+            """);
 
     /** Listed per minute, still measured in seconds like every other duration. */
     private static final GenerationSpec MUSIC_PER_MINUTE_SPEC = spec("""
@@ -347,6 +391,97 @@ class GenerationToolTest {
     @Nested
     @DisplayName("models")
     class Models {
+
+        @Test
+        @DisplayName("a model states what it PINS, which is the only thing telling two same-accepting ids apart")
+        void aPinnedTierIsOnTheWire() {
+            // Two ids, one accepted parameter, two prices. Without this the
+            // difference lives only in the id string, and an agent looking for
+            // a tall image has to parse names to find one.
+            when(registry.list(null)).thenReturn(List.of(
+                    model(TIERED_SPEC, "tier-plain"), model(TIERED_SPEC, "tier-tall")));
+
+            Map<String, Object> d = data(call("generation", params("action", "models")));
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> rows = (List<Map<String, Object>>) d.get("models");
+            Map<String, Object> plain = rows.stream()
+                    .filter(r -> "tier-plain".equals(r.get("model"))).findFirst().orElseThrow();
+            Map<String, Object> tall = rows.stream()
+                    .filter(r -> "tier-tall".equals(r.get("model"))).findFirst().orElseThrow();
+
+            assertThat(tall).containsEntry("fixed",
+                    java.util.Map.of("size", "1024x1536", "quality", "high"));
+            // The ordinary model pins nothing and pays no tokens for the key.
+            assertThat(plain).doesNotContainKey("fixed");
+
+            // And the endpoint's own scaffolding counts as fixed too: it is sent
+            // on every call of every model, so a field that claims to list what
+            // the call always sends cannot show only the tier half.
+            when(registry.list(null)).thenReturn(List.of(model(SCAFFOLDED_SPEC, "scaffolded")));
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> scaffolded =
+                    (List<Map<String, Object>>) data(call("generation", params("action", "models")))
+                            .get("models");
+            assertThat(scaffolded.get(0)).containsEntry("fixed",
+                    java.util.Map.of("content[0].type", "text"));
+        }
+
+        @Test
+        @DisplayName("the filters an agent may pass are DECLARED, not only handled")
+        void theFiltersAreInTheInputSchema() {
+            // An argument the handler reads and the schema omits is one an agent
+            // can see described and cannot send: the same trap this tool already
+            // hit once with action='options' and its 'parameter' argument.
+            var tool = provider.getTools().get(0);
+
+            assertThat(tool.parameters().stream().map(p -> p.name()))
+                    .contains("kind", "provider", "parameter", "model");
+            assertThat(tool.inputSchema().toString()).contains("provider");
+        }
+
+        @Test
+        @DisplayName("an unmatched provider says the filter matched nothing, not that the platform sells nothing")
+        void anUnmatchedProviderDoesNotClaimAnEmptyPlatform() {
+            // The hint is the only sentence an agent gets when the list is
+            // empty, and "no models are configured" ends the task.
+            when(registry.list(null)).thenReturn(List.of(model(TIERED_SPEC, "tier-plain")));
+
+            Map<String, Object> d = data(call("generation",
+                    params("action", "models", "provider", "opemai")));
+
+            assertThat((String) d.get("hint")).contains("opemai");
+            assertThat((String) d.get("hint")).doesNotContain("are configured on this platform");
+        }
+
+        @Test
+        @DisplayName("the listing can be narrowed to one provider, by slug or by display name")
+        void providerNarrowsTheListing() {
+            // The help tells an agent to compare a provider's ids; without a
+            // filter that means reading every model of that format, which for
+            // images is most of the catalogue.
+            when(registry.list(null)).thenReturn(List.of(
+                    model(TIERED_SPEC, "tier-plain"),
+                    modelFrom(TIERED_SPEC, "tier-tall", "other", "Other Inc")));
+
+            for (String asked : List.of("provider", "Provider Inc", "PROVIDER INC")) {
+                Map<String, Object> d = data(call("generation",
+                        params("action", "models", "provider", asked)));
+
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> rows = (List<Map<String, Object>>) d.get("models");
+                // Narrowing, not filtering-to-everything: the other provider's
+                // model is the one this must drop.
+                assertThat(rows).as("asked for %s", asked).hasSize(1);
+                assertThat(rows.get(0)).containsEntry("model", "tier-plain");
+            }
+
+            Map<String, Object> none = data(call("generation",
+                    params("action", "models", "provider", "someone-else")));
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> empty = (List<Map<String, Object>>) none.get("models");
+            assertThat(empty).isEmpty();
+        }
 
         @Test
         @DisplayName("regression: an inherited list reaches the wire, capped and marked")
@@ -1246,6 +1381,29 @@ class GenerationToolTest {
             assertThat(r.error())
                     .contains("https://cdn.example.com/v/job-1.mp4")
                     .contains("charged");
+        }
+
+        @Test
+        @DisplayName("a refusal that never reached the provider answers with NO data - that absence is a contract")
+        void aFreeRefusalCarriesNoData() {
+            // The studio reads this exact distinction to decide what to tell a reader about their
+            // money: a failing answer with data means the generation RAN and was billed, and a
+            // failing answer with none means it never left. Nothing on this side stated it, so
+            // attaching diagnostics to a free refusal - one keystroke, `data` instead of
+            // `metadata` - would make the studio announce a charge that never happened AND destroy
+            // the reader's prompt and uploaded files, with nothing anywhere going red.
+            //
+            // Pinned on a refusal raised BEFORE any provider call, which is the whole class: every
+            // ToolExecutionResult.failure(...) factory leaves data null.
+            ToolExecutionResult r = call("generation", params("action", "create", "model", "no-such-model"));
+
+            assertThat(r.success()).isFalse();
+            assertThat(r.data())
+                    .as("a refusal that cost nothing must carry nothing: see generationWasCharged "
+                            + "in the studio, which infers 'you were charged' from data being present")
+                    .satisfiesAnyOf(
+                            d -> assertThat(d).isNull(),
+                            d -> assertThat((Map<String, Object>) d).isEmpty());
         }
 
         @Test

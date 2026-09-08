@@ -138,20 +138,22 @@ export class InterfaceService {
   }
 
   /**
-   * Get interface snapshot for a specific run
+   * The frozen copy of one interface as a given run captured it (templates + format).
+   *
+   * The parameter is `workflowRunId`, which is what interface-service requires: both of
+   * these read methods used to send `runId` and could only ever answer 400. Neither had a
+   * caller, so nothing broke - and nothing would have told us either.
    */
-  async getInterfaceSnapshot(interfaceId: string, runId: string): Promise<InterfaceSnapshot> {
+  async getInterfaceSnapshot(interfaceId: string, workflowRunId: string): Promise<InterfaceSnapshot> {
     return apiClient.get<InterfaceSnapshot>(`/interfaces/${interfaceId}/snapshot`, {
-      params: { runId }
+      params: { workflowRunId }
     });
   }
 
-  /**
-   * Get all interface snapshots for a run
-   */
-  async getInterfaceSnapshotsForRun(runId: string): Promise<InterfaceSnapshot[]> {
+  /** Every interface a run froze, in one request. Scoped to the caller server-side. */
+  async getInterfaceSnapshotsForRun(workflowRunId: string): Promise<InterfaceSnapshot[]> {
     return apiClient.get<InterfaceSnapshot[]>('/interfaces/snapshots', {
-      params: { runId }
+      params: { workflowRunId }
     });
   }
 

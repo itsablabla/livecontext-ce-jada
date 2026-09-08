@@ -5,6 +5,7 @@
 
 import { apiClient } from '@/lib/api/api-client';
 import { orgScopeRequestOptions } from '@/lib/stores/current-org-store';
+import type { ModelCostBasis } from '@/lib/billing/model-cost-estimate';
 
 export interface CreditBalance {
   balance: number;
@@ -151,6 +152,18 @@ export interface AdminAssignPlanResponse {
 class QuotaApiService {
   async getBalance(): Promise<CreditBalance> {
     return apiClient.get<CreditBalance>('/credits/balance');
+  }
+
+  /**
+   * The two inputs a model picker needs to show a pre-flight cost estimate: the
+   * effective billing multiplier and the token workload of each cost profile.
+   * Deliberately not a per-model table (the catalogue already carries every
+   * model's rates) and deliberately not a client constant: the margin lever has
+   * one home, in auth-service. Answers `enabled: false` where credits are not
+   * metered (CE).
+   */
+  async getEstimateBasis(): Promise<ModelCostBasis> {
+    return apiClient.get<ModelCostBasis>('/credits/estimate-basis');
   }
 
   /**

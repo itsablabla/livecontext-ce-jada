@@ -46,8 +46,27 @@ public record CliSessionStartRequest(
      * after the user clicked approve, with the action already paid for. It is per-agent
      * (config, 10-7200 s), which is why it has to travel rather than be assumed.
      */
-    Integer inactivityTimeoutSeconds
+    Integer inactivityTimeoutSeconds,
+
+    /**
+     * How long a tool call may be HELD on the CLI this session belongs to, in seconds, as
+     * worked out by the bridge from the per-call timeout it configured for that CLI. The
+     * approval gate parks a call (an authorization card, an ask_user question) no longer
+     * than this. Null when the bridge did not say: the gate then uses its shortest-CLI floor.
+     * Read within 1..600 s ({@code ParkRequests.MIN_CLI_MAX_PARK_MS} / {@code MAX_CLI_MAX_PARK_MS},
+     * values outside are pulled to the nearest bound; 0 and negative mean "not said"). The
+     * gate's budget and half the inactivity window still bind above it.
+     */
+    Integer maxToolHoldSeconds
 ) {
+
+    public CliSessionStartRequest(List<String> enabledModules, String sessionId, String model,
+                                  String conversationId, String conversationServiceUrl, String streamId,
+                                  Boolean isNewConversation, String agentId, String executionId,
+                                  List<String> approvedToolActions, Integer inactivityTimeoutSeconds) {
+        this(enabledModules, sessionId, model, conversationId, conversationServiceUrl, streamId,
+                isNewConversation, agentId, executionId, approvedToolActions, inactivityTimeoutSeconds, null);
+    }
 
     /**
      * The shape before the inactivity window was threaded through. Kept so the many existing
@@ -60,6 +79,6 @@ public record CliSessionStartRequest(
                                   Boolean isNewConversation, String agentId, String executionId,
                                   List<String> approvedToolActions) {
         this(enabledModules, sessionId, model, conversationId, conversationServiceUrl, streamId,
-                isNewConversation, agentId, executionId, approvedToolActions, null);
+                isNewConversation, agentId, executionId, approvedToolActions, null, null);
     }
 }

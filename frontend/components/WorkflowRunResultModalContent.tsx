@@ -8,7 +8,6 @@ import DataTable from '@/components/DataTable';
 import { WorkflowStepTable } from '@/components/workflow/WorkflowStepTable';
 import { normalizeLabel } from '@/app/workflows/builder/utils/labelNormalizer';
 import { normalizeId } from '@/app/workflows/builder/services/idMatcherUtils';
-import { apiClient } from '@/lib/api';
 import { getCanvasNodes } from '@/app/workflows/builder/services/canvasNodesStore';
 import { nodeMatchesStep } from '@/app/workflows/builder/services/nodeMatcher';
 import { getIconSlug, NodeIcon } from '@/app/workflows/builder/components/nodes/shared';
@@ -34,63 +33,17 @@ export function WorkflowRunResultModalContent({
   const [selectedIndividualStep, setSelectedIndividualStep] = useState<any | null>(null);
   const [jsonPath, setJsonPath] = useState<string>('');
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
-  const [loadingSteps, setLoadingSteps] = useState(true);
 
   // stepAlias du step sélectionné (pour le breadcrumb et MergedCallsDataTable)
   const stepAlias = selectedStep?.stepAlias;
 
-  // Charger les steps agrégés pour pouvoir sélectionner automatiquement initialStepAlias
-  useEffect(() => {
-    const fetchSteps = async () => {
-      if (!runId) {
-        setSteps([]);
-        setLoadingSteps(false);
-        return;
-      }
-
-      try {
-        setLoadingSteps(true);
-        const aggregatedData = await apiClient.get<Array<{
-          status: string;
-          alias: string;
-          toolId: string;
-          startTime: string | null;
-          endTime: string | null;
-          statusCounts?: {
-            completed?: number;
-            failed?: number;
-            skipped?: number;
-            running?: number;
-          };
-        }>>(`/v2/workflows/dag/instances/${runId}/steps/aggregated`);
-        
-        if (!aggregatedData || !Array.isArray(aggregatedData)) {
-          setSteps([]);
-          return;
-        }
-        
-        const transformedSteps: WorkflowStep[] = aggregatedData.map((step) => ({
-          id: step.alias,
-          stepAlias: step.alias,
-          toolId: step.toolId,
-          status: step.status,
-          startTime: step.startTime || new Date().toISOString(),
-          endTime: step.endTime || undefined,
-          statusCounts: step.statusCounts,
-          runId: runId,
-        }));
-        
-        setSteps(transformedSteps);
-      } catch (err) {
-        console.error('Error fetching aggregated steps:', err);
-        setSteps([]);
-      } finally {
-        setLoadingSteps(false);
-      }
-    };
-
-    fetchSteps();
-  }, [runId]);
+  // The aggregated steps come from StepTable, which already loads them to render itself. This view
+  // needs them only to resolve initialStepAlias, and asking for them again on its own side doubled
+  // the modal's most expensive request on every open (the aggregation walks every epoch of the run).
+  // One request, two consumers.
+  const handleStepsLoaded = useCallback((loaded: WorkflowStep[]) => {
+    setSteps(loaded);
+  }, []);
 
   // Sélectionner automatiquement le step correspondant à initialStepAlias
   useEffect(() => {
@@ -317,6 +270,7 @@ export function WorkflowRunResultModalContent({
                 workflowId={workflowId}
                 runId={runId}
                 onStepClick={handleStepClick}
+                onStepsLoaded={handleStepsLoaded}
             />
           </div>
         </div>

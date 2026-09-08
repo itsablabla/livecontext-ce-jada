@@ -14,8 +14,8 @@ import { useDefaultSkills } from '@/hooks/useDefaultSkills';
 import { useMobileDetection } from '@/hooks/useMobileDetection';
 import { orchestratorApi } from '@/lib/api/orchestrator';
 import { QueuedMessageBar } from './QueuedMessageBar';
-import { CreateGenerationModal } from '@/components/chat/generationModalEntry';
-import { GenerateEntryButton } from '@/components/chat/GenerateEntryButton';
+// Locale-aware: a bare '/app/studio' through next/navigation lands a French reader on /en.
+import { useRouter as useLocaleRouter } from '@/i18n/navigation';
 import { menuItemClass, menuSurfaceClass } from '@/components/ui/menu';
 import { MAX_QUEUE_SIZE, type QueuedMessage } from '@/lib/stores/message-queue-store';
 import { readDraft, writeDraft, clearDraft } from '@/lib/chat/draftStorage';
@@ -71,6 +71,23 @@ export interface MessageComposerProps {
   fixedBottom?: boolean;
   sidebarWidth?: number;
   fullWidth?: boolean;
+  /**
+   * The chat/studio switch, rendered inside the control row.
+   *
+   * <p>Optional and passed in: this composer is used on the home page, in a thread, in a side
+   * panel and in DM mode, and only the home page has a mode to switch. Importing the switch here
+   * would put a navigation control in all four.
+   */
+  modeSwitch?: React.ReactNode;
+  /**
+   * Rendered at the END of the composer's leading group, after the tools button.
+   *
+   * <p>Distinct from {@link modeSwitch}, which leads the row: that one changes what the whole
+   * surface IS and is read before the controls it changes. This one is another control among
+   * them, so it sits with them - and after the last of them, which is where the eye lands once
+   * the row has been read.
+   */
+  trailingLeadingAction?: React.ReactNode;
   /** When true, disables the textarea and send button */
   disabled?: boolean;
   /** Minimal/DM mode: render the same composer as a plain text+send box, hiding the
@@ -108,6 +125,8 @@ export function MessageComposer({
   fixedBottom = false,
   sidebarWidth = 256,
   fullWidth = false,
+  modeSwitch,
+  trailingLeadingAction,
   disabled = false,
   minimal = false,
   conversationId,
@@ -122,6 +141,7 @@ export function MessageComposer({
   linkedAgentId,
 }: MessageComposerProps) {
   const t = useTranslations();
+  const studioRouter = useLocaleRouter();
   const isMobile = useMobileDetection();
   const {
     activeSkillIds,
@@ -211,7 +231,6 @@ export function MessageComposer({
 
   const [localValue, setLocalValue] = useState(inputValue);
   const [openPanel, setOpenPanel] = useState<AttachmentView | null>(null);
-  const [generationOpen, setGenerationOpen] = useState(false);
   // Open state of the merged actions menu (narrow composers only - see
   // MERGE_ACTIONS_BELOW_WIDTH_PX).
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
@@ -697,6 +716,11 @@ export function MessageComposer({
                   what has to survive a narrow row is the send button at the
                   other end, never these. */}
               <div ref={panelAnchorRef} className="flex items-center gap-0.5 shrink-0">
+                {/* Leftmost in the row, the same position the studio composer gives it: the switch
+                    is read before the controls it changes, not after them. Outside the narrow-row
+                    merge below on purpose - a control that changes the whole surface should not sit
+                    two taps deep behind a "+". */}
+                {modeSwitch}
                 {mergeActions ? (
                   <Popover open={actionsMenuOpen} onOpenChange={setActionsMenuOpen}>
                     <PopoverTrigger asChild>
@@ -748,17 +772,6 @@ export function MessageComposer({
                             <span>{t('credentials.toolsAndSkills')}</span>
                           </button>
                         )}
-                        {/* The same component as the wide row, so the gate
-                            deciding whether a generation can be started here is
-                            asked once and answered the same way in both. */}
-                        <GenerateEntryButton
-                          variant="menuitem"
-                          label={t('chat.generateAsset')}
-                          onOpen={() => {
-                            setActionsMenuOpen(false);
-                            setGenerationOpen(true);
-                          }}
-                        />
                       </div>
                     </PopoverContent>
                   </Popover>
@@ -790,27 +803,13 @@ export function MessageComposer({
                     </Button>
                       </>
                     )}
-
-                    {/* Make an asset, beside the tools that use one. Outside the
-                        `minimal` block on purpose: making one is about the account,
-                        not about who reads the thread, so a DM offers it too, and
-                        so do the builder's chat-trigger panels, which render this
-                        composer whole. Every composer, deliberately: an asset is
-                        worth making wherever a message is written.
-
-                        The asset lands in the workspace files and is NOT attached
-                        to the draft: an attachment needs the bytes in hand, so that
-                        would download a stored asset only to upload a second copy
-                        of it, and the composer accepts neither video nor audio
-                        anyway. Independent of `disabled` too, which says this
-                        message cannot be sent yet, not that nothing may be made. */}
-                    <GenerateEntryButton
-                      variant="icon"
-                      label={t('chat.generateAsset')}
-                      onOpen={() => setGenerationOpen(true)}
-                    />
-                  </>
+</>
                 )}
+
+                {/* After the tools button, so it reads as the last control of the row rather
+                    than as something announcing it. Outside the narrow-row merge on purpose: it
+                    opens a dialog, and a control two taps deep behind a "+" is one nobody finds. */}
+                {trailingLeadingAction}
 
                 {/* Outside the branch above: the picker is what BOTH the button
                     and the menu row click, so unmounting it on a resize would
@@ -879,7 +878,7 @@ export function MessageComposer({
                   if (showEnqueue) {
                     return (
                       <Button
-                        variant="contrast"
+                        variant="default"
                         size="icon"
                         onClick={handleSend}
                         disabled={disabled || isUploading || queueIsFull}
@@ -894,7 +893,12 @@ export function MessageComposer({
 
                   return (
                     <Button
-                      variant={showStopButton ? 'default' : 'contrast'}
+                      // Send is the app's primary button; Stop is destructive, the
+                      // same pairing the builder's empty-canvas composer uses. The two
+                      // states used to be `default` and `contrast`, two solid dark
+                      // buttons a shade apart, so the only thing that said which one
+                      // was under the cursor was the glyph.
+                      variant={showStopButton ? 'destructive' : 'default'}
                       size="icon"
                       onClick={showStopButton ? onStopStream : handleSend}
                       disabled={disabled || isUploading || (!showStopButton && !hasInput)}
@@ -944,14 +948,6 @@ export function MessageComposer({
         </div>
       </div>
 
-      {generationOpen && (
-        <React.Suspense fallback={null}>
-          <CreateGenerationModal
-            isOpen
-            onClose={() => setGenerationOpen(false)}
-          />
-        </React.Suspense>
-      )}
 
       {/* Enlarge a pre-send image preview. Local object URL → no auth, not downloadable. */}
       <ImageLightbox

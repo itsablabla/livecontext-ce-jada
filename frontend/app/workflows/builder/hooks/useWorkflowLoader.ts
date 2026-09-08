@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import type { Node, Edge } from 'reactflow';
 import type { BuilderNodeData } from '../types';
@@ -192,6 +193,24 @@ export function useWorkflowLoader(config: UseWorkflowLoaderConfig): UseWorkflowL
   const setWorkflowDirectionRef = React.useRef(setWorkflowDirection);
   setWorkflowDirectionRef.current = setWorkflowDirection;
 
+  // Handed to the importer so its interface-format lookup shares the cache entry the
+  // interface node itself uses, instead of reaching for a module-level client (see
+  // InterfaceFormatService). Through a ref for the same reason as the direction above:
+  // it must not re-register the load effect.
+  const queryClient = useQueryClient();
+  // The run's INTERNAL id, learned from the run payload mid-load: the URL carries the
+  // public `run_...` string, and the interface snapshots a run canvas is laid out from are
+  // keyed by the uuid. Kept in a ref so EVERY import in this hook carries it, the version
+  // restore included, rather than only the branch that resolved it.
+  const workflowRunIdRef = React.useRef<string | null>(null);
+  const importContextRef = React.useRef<{
+    queryClient: ReturnType<typeof useQueryClient>;
+    isRunMode: boolean;
+  }>({ queryClient, isRunMode: false });
+  // Deliberately NOT carrying the run id: this object is rebuilt on RENDER, and the id is
+  // learned mid-load, so a caller relying on it here would pass the previous render's
+  // value - null, on exactly the load that needs it. Every call adds it explicitly.
+  importContextRef.current = { queryClient, isRunMode: !!runId };
 
   const [isLoadingWorkflow, setIsLoadingWorkflow] = React.useState(false);
   const [workflowLoaded, setWorkflowLoaded] = React.useState(false);
@@ -223,6 +242,9 @@ export function useWorkflowLoader(config: UseWorkflowLoaderConfig): UseWorkflowL
       // Check if this is a run we just executed - if so, skip reload
       if (runId && wasJustExecuted(runId)) {
         console.log('[WorkflowLoader] Skipping reload - run was just executed, plan already in memory:', runId);
+        // No load runs here, so nothing else clears it: leaving the previous run's id would
+        // let a later import (a version restore) resolve another run's page formats.
+        workflowRunIdRef.current = null;
         // Update the source key without reloading
         loadedSourceKeyRef.current = sourceKey;
         // Clear the flag since we've used it
@@ -386,6 +408,8 @@ export function useWorkflowLoader(config: UseWorkflowLoaderConfig): UseWorkflowL
 
         // In run mode, load plan from the run; in edit mode, load from workflow
         let plan, schedule;
+        // Cleared per load: a stale id would hand the next canvas another run's formats.
+        workflowRunIdRef.current = null;
         let resolvedRunId = runId;
 
         // Resolve "latest" to actual run ID
@@ -416,6 +440,9 @@ export function useWorkflowLoader(config: UseWorkflowLoaderConfig): UseWorkflowL
             try {
               const runData = await orchestratorApi.getRun(resolvedRunId);
               plan = (runData as any).plan;
+              // The snapshots a run canvas is laid out from are keyed by the run's INTERNAL
+              // id; the URL only ever carries the public one.
+              workflowRunIdRef.current = runData.id ?? null;
             } catch (err) {
               console.error('Failed to load run:', err);
               setLoadError(true);
@@ -499,7 +526,10 @@ export function useWorkflowLoader(config: UseWorkflowLoaderConfig): UseWorkflowL
           const planJson = JSON.stringify(plan);
 
           // Import the plan into the builder
-          const importResult = await WorkflowPlanImporter.importPlan(planJson, [], layoutDirectionRef.current);
+          const importResult = await WorkflowPlanImporter.importPlan(
+            planJson, [], layoutDirectionRef.current,
+            { ...importContextRef.current, workflowRunId: workflowRunIdRef.current },
+          );
           console.log('[AppDebug] useWorkflowLoader importPlan done', {
             workflowId,
             success: importResult.success,
@@ -677,7 +707,10 @@ export function useWorkflowLoader(config: UseWorkflowLoaderConfig): UseWorkflowL
           layoutDirectionRef.current = restoreDir;
         }
         const planJson = JSON.stringify(plan);
-        const importResult = await WorkflowPlanImporter.importPlan(planJson, [], layoutDirectionRef.current);
+        const importResult = await WorkflowPlanImporter.importPlan(
+          planJson, [], layoutDirectionRef.current,
+          { ...importContextRef.current, workflowRunId: workflowRunIdRef.current },
+        );
 
         if (importResult.success) {
           let finalNodes = importResult.nodes;

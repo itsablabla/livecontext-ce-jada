@@ -42,6 +42,9 @@ class CreditControllerTest {
     @Mock
     private ModelPricingService pricingService;
 
+    @Mock
+    private com.apimarketplace.auth.service.LlmCostEstimateService estimateService;
+
     @InjectMocks
     private CreditController controller;
 
@@ -522,6 +525,43 @@ class CreditControllerTest {
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(response.getBody()).containsEntry("exists", false);
+        }
+    }
+
+    // ---- GET /api/credits/estimate-basis ----
+
+    @Nested
+    @DisplayName("GET /api/credits/estimate-basis")
+    class EstimateBasisTests {
+
+        @Test
+        @DisplayName("serves the basis the estimate service builds, verbatim")
+        void servesTheBasis() {
+            Map<String, Object> basis = Map.of("enabled", true, "profiles", Map.of());
+            when(estimateService.buildBasis()).thenReturn(basis);
+
+            ResponseEntity<Map<String, Object>> response = controller.getEstimateBasis();
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getBody()).isSameAs(basis);
+        }
+
+        @Test
+        @DisplayName("names no margin on the wire: the response carries coefficients, never a multiplier")
+        void neverNamesTheMargin() {
+            // The estimate is honest about the PRICE (it is the figure the ledger
+            // debits) without publishing a field a reader could read as the
+            // platform's margin. Nothing else in this response may reintroduce one.
+            when(estimateService.buildBasis()).thenReturn(Map.of(
+                    "enabled", true,
+                    "profiles", Map.of("agentConversation", Map.of(
+                            "inputCoefficient", new BigDecimal("114.33"),
+                            "outputCoefficient", new BigDecimal("5.55")))));
+
+            ResponseEntity<Map<String, Object>> response = controller.getEstimateBasis();
+
+            assertThat(response.getBody()).doesNotContainKey("multiplier");
+            assertThat(response.getBody().toString()).doesNotContain("multiplier");
         }
     }
 

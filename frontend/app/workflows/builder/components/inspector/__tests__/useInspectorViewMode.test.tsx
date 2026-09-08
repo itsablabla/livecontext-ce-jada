@@ -156,3 +156,87 @@ describe('useInspectorViewMode - execution-data toggle default by run data', () 
     expect(result.current.showExecutionData).toBe(false);
   });
 });
+
+describe('useInspectorViewMode - the run-data flag is latched per node', () => {
+  it('does NOT fall back to Configuration when a node stops reporting run data', () => {
+    // nodeHasRunData now folds in "executing / parked on a signal", which can go
+    // back to false without the node leaving any statusCounts behind (a branch
+    // pruned mid-flight). Following it down would yank the panel back to the
+    // form under a reader who is looking at the run.
+    const { result, rerender } = renderHook(
+      ({ hasRunData }: { hasRunData: boolean }) =>
+        useInspectorViewMode({
+          isRunMode: true,
+          runId: 'run-1',
+          isInterfaceNode: false,
+          nodeId: 'core:step_a',
+          nodeHasRunData: hasRunData,
+        }),
+      { initialProps: { hasRunData: true } },
+    );
+
+    expect(result.current.showExecutionData).toBe(true);
+
+    rerender({ hasRunData: false });
+    expect(result.current.showExecutionData).toBe(true);
+  });
+
+  it('re-evaluates from scratch on a DIFFERENT node, so the latch cannot leak across nodes', () => {
+    const { result, rerender } = renderHook(
+      ({ nodeId, hasRunData }: { nodeId: string; hasRunData: boolean }) =>
+        useInspectorViewMode({
+          isRunMode: true,
+          runId: 'run-1',
+          isInterfaceNode: false,
+          nodeId,
+          nodeHasRunData: hasRunData,
+        }),
+      { initialProps: { nodeId: 'core:step_a', hasRunData: true } },
+    );
+
+    expect(result.current.showExecutionData).toBe(true);
+
+    rerender({ nodeId: 'core:step_b', hasRunData: false });
+    expect(result.current.showExecutionData).toBe(false);
+  });
+
+  it('still switches to the run view when a node produces data during a live run', () => {
+    const { result, rerender } = renderHook(
+      ({ hasRunData }: { hasRunData: boolean }) =>
+        useInspectorViewMode({
+          isRunMode: true,
+          runId: 'run-1',
+          isInterfaceNode: false,
+          nodeId: 'core:step_a',
+          nodeHasRunData: hasRunData,
+        }),
+      { initialProps: { hasRunData: false } },
+    );
+
+    expect(result.current.showExecutionData).toBe(false);
+
+    rerender({ hasRunData: true });
+    expect(result.current.showExecutionData).toBe(true);
+  });
+});
+
+describe('useInspectorViewMode - the latch is per RUN, not only per node', () => {
+  it('re-evaluates the same node in a different run, where it may never have executed', () => {
+    const { result, rerender } = renderHook(
+      ({ runId, hasRunData }: { runId: string; hasRunData: boolean }) =>
+        useInspectorViewMode({
+          isRunMode: true,
+          runId,
+          isInterfaceNode: false,
+          nodeId: 'core:step_a',
+          nodeHasRunData: hasRunData,
+        }),
+      { initialProps: { runId: 'run-1', hasRunData: true } },
+    );
+
+    expect(result.current.showExecutionData).toBe(true);
+
+    rerender({ runId: 'run-2', hasRunData: false });
+    expect(result.current.showExecutionData).toBe(false);
+  });
+});

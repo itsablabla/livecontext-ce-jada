@@ -1,0 +1,89 @@
+import { describe, expect, it } from 'vitest';
+import { AGENDA_EMPTY_KEYS, selectAgendaEmptyState, type AgendaEmptyInput } from '../agendaEmptyState';
+
+/**
+ * Which empty message the page is allowed to show.
+ *
+ * "Nothing scheduled here / Schedules from your workflows, applications and agents show up
+ * on this calendar" is a statement about the WORKSPACE. Shown while a filter is active it
+ * is simply false, and the user has no way to tell - the page looks equally confident
+ * either way. Every control on this page narrows the view, so every one of them has to
+ * suppress that message.
+ */
+describe('selectAgendaEmptyState', () => {
+  const base: AgendaEmptyInput = {
+    loading: false,
+    resourceTypes: ['WORKFLOW', 'APPLICATION', 'AGENT'],
+    search: '',
+    showPast: true,
+    showPaused: true,
+    occurrenceCount: 0,
+  };
+
+  it('says nothing while there is something to draw', () => {
+    expect(selectAgendaEmptyState({ ...base, occurrenceCount: 1 })).toBe('none');
+  });
+
+  it('says nothing while still loading, so the empty state does not flash', () => {
+    expect(selectAgendaEmptyState({ ...base, loading: true })).toBe('none');
+  });
+
+  it('never claims an empty workspace when the load FAILED', () => {
+    // The input the module was not given, and so the one lie it could not avoid telling.
+    // A failed load leaves zero occurrences and zero markers with no filter narrowing
+    // anything, which is indistinguishable from an empty workspace - so a workspace full of
+    // schedules was told it had none, once the error toast had auto-dismissed.
+    expect(selectAgendaEmptyState({ ...base, failed: true })).toBe('failed');
+  });
+
+  it('reports the failure ahead of every filter verdict', () => {
+    // With no data, "your filters hide everything" is also a claim about a workspace this
+    // page has not managed to read. Most-specific-wins does not apply: nothing is known.
+    expect(selectAgendaEmptyState({ ...base, failed: true, search: 'zzz' })).toBe('failed');
+    expect(selectAgendaEmptyState({ ...base, failed: true, resourceTypes: [] })).toBe('failed');
+    expect(selectAgendaEmptyState({ ...base, failed: true, showPast: false })).toBe('failed');
+  });
+
+  it('says nothing at all when a failed load still has something to draw', () => {
+    // A refresh that fails over a view already holding data must not blank it.
+    expect(selectAgendaEmptyState({ ...base, failed: true, occurrenceCount: 1 })).toBe('none');
+  });
+
+  it('claims an empty workspace ONLY when no filter is narrowing the view', () => {
+    expect(selectAgendaEmptyState(base)).toBe('workspace');
+  });
+
+  it('does not claim an empty workspace when a resource kind is deselected', () => {
+    // The partial case is the one that slipped through: a workspace whose only schedules
+    // are agents, with the Agents chip clicked off, was told it had nothing scheduled.
+    expect(selectAgendaEmptyState({ ...base, resourceTypes: ['WORKFLOW', 'APPLICATION'] }))
+      .toBe('filters');
+    expect(selectAgendaEmptyState({ ...base, resourceTypes: ['WORKFLOW'] })).toBe('filters');
+  });
+
+  it('does not claim an empty workspace when any include toggle is off', () => {
+    expect(selectAgendaEmptyState({ ...base, showPast: false })).toBe('filters');
+    expect(selectAgendaEmptyState({ ...base, showPaused: false })).toBe('filters');
+  });
+
+  it('names the search when a search is what emptied the view', () => {
+    // Telling someone who typed "zzz" to turn a resource kind back on is not an answer.
+    expect(selectAgendaEmptyState({ ...base, search: 'zzz' })).toBe('search');
+    expect(selectAgendaEmptyState({ ...base, search: '   ' })).toBe('workspace');
+  });
+
+  it('names the deselected kinds when every kind is off, ahead of a search', () => {
+    // Most specific wins: with no kind selected, nothing can match whatever was typed.
+    expect(selectAgendaEmptyState({ ...base, resourceTypes: [] })).toBe('no-kind');
+    expect(selectAgendaEmptyState({ ...base, resourceTypes: [], search: 'zzz' })).toBe('no-kind');
+  });
+
+  it('gives every state a distinct message pair', () => {
+    // Two states sharing one message is how "No resource kind selected" ended up being
+    // shown to someone whose search simply missed.
+    const pairs = Object.values(AGENDA_EMPTY_KEYS);
+    const titles = pairs.map((p) => p.title);
+    expect(new Set(titles).size).toBe(titles.length);
+    expect(pairs.every((p) => p.title && p.description)).toBe(true);
+  });
+});

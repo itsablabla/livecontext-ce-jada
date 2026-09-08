@@ -22,8 +22,22 @@ const historyProps = vi.hoisted(() => ({ current: null as any }));
 const summaryProps = vi.hoisted(() => ({ current: null as any }));
 const stepsProps = vi.hoisted(() => ({ current: null as any }));
 
+const api = vi.hoisted(() => ({
+  stopWorkflow: vi.fn(async () => ({}) as never),
+  cancelWorkflow: vi.fn(async () => ({}) as never),
+  reactivateWorkflow: vi.fn(async () => ({}) as never),
+}));
+vi.mock('@/lib/api', () => ({ orchestratorApi: api }));
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k, useLocale: () => 'en' }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
+/** Workspace role the Run tab is rendered under. */
+const orgRole = vi.hoisted(() => ({ canMutate: true }));
+vi.mock('@/lib/stores/current-org-store', () => ({
+  useCanMutateInCurrentOrg: () => orgRole.canMutate,
+}));
+/** Route the Run tab is mounted on - a public share link is not the same thing. */
+const pathname = vi.hoisted(() => ({ current: '/app/workflow/wf-1' }));
+vi.mock('@/i18n/navigation', () => ({ usePathname: () => pathname.current }));
 vi.mock('@/contexts/WorkflowModeContext', () => ({
   useWorkflowMode: () => ({ runId: ctxRunId.value, setRunId, viewingEpoch: ctxEpoch.value, setViewingEpoch }),
 }));
@@ -225,11 +239,86 @@ describe('RunPanelContent - run actions', () => {
       window.removeEventListener('workflowRunAction', handler);
     }
 
-    expect(seen).toEqual([
-      { action: 'stop', workflowId: 'wf-1', runId: 'run-1' },
-      { action: 'cancel', workflowId: 'wf-1', runId: 'run-1' },
-      { action: 'reactivate', workflowId: 'wf-1', runId: 'run-1' },
+    expect(seen.map((d) => ({ action: d.action, workflowId: d.workflowId, runId: d.runId, handled: d.handled }))).toEqual([
+      { action: 'stop', workflowId: 'wf-1', runId: 'run-1', handled: false },
+      { action: 'cancel', workflowId: 'wf-1', runId: 'run-1', handled: false },
+      { action: 'reactivate', workflowId: 'wf-1', runId: 'run-1', handled: false },
     ]);
+  });
+
+  it('hides all three actions from a VIEWER, who may watch but not steer', () => {
+    // This bar offers the hard CANCEL and the reactivate as well as the stop, so
+    // a role gate matters more here than on the tab bar, not less.
+    orgRole.canMutate = false;
+    try {
+      render(<RunPanelContent workflowId="wf-1" allowHistory />);
+      expect(summaryProps.current.onStop).toBeUndefined();
+      expect(summaryProps.current.onCancel).toBeUndefined();
+      expect(summaryProps.current.onReactivate).toBeUndefined();
+    } finally {
+      orgRole.canMutate = true;
+    }
+  });
+
+  it('hides all three on a public share link, where none of them is allow-listed', () => {
+    // The panel is kept off a share page by a `display:none` wrapper, which is
+    // layout, not authorization - and the role check reads an anonymous visitor
+    // as a personal workspace, so it does not help either.
+    pathname.current = '/s/some-share-token';
+    try {
+      render(<RunPanelContent workflowId="wf-1" allowHistory />);
+      expect(summaryProps.current.onStop).toBeUndefined();
+      expect(summaryProps.current.onCancel).toBeUndefined();
+      expect(summaryProps.current.onReactivate).toBeUndefined();
+    } finally {
+      pathname.current = '/app/workflow/wf-1';
+    }
+  });
+
+  it('acts on the run just PICKED, not the one the bus still names', async () => {
+    // Picking a run binds it here and only then asks the page to rebind the
+    // canvas; until it does, the bus still names the previous run. Dropping the
+    // id from the hook call would stop that previous run from a bar showing the
+    // new one - the exact case the hook's own doc calls out.
+    publish({ runId: 'run-STALE', runInfo: { runId: 'run-STALE', status: 'RUNNING' } });
+    render(<RunPanelContent workflowId="wf-1" allowHistory viewRequest={{ view: 'history', seq: 1 }} />);
+    act(() => { screen.getByTestId('history').click(); });
+
+    await act(async () => { summaryProps.current.onStop(); });
+
+    expect(api.stopWorkflow).toHaveBeenCalledWith('run-2');
+  });
+
+  it('offers all three to a member', () => {
+    render(<RunPanelContent workflowId="wf-1" allowHistory />);
+    expect(summaryProps.current.onStop).toBeTypeOf('function');
+    expect(summaryProps.current.onCancel).toBeTypeOf('function');
+    expect(summaryProps.current.onReactivate).toBeTypeOf('function');
+  });
+
+  it('tells the bar what is in flight and what failed, so the control is never inert', async () => {
+    // Both are passed straight through to the shared control: without them a
+    // pressed stop looks identical to a stop that never happened.
+    render(<RunPanelContent workflowId="wf-1" allowHistory />);
+
+    expect(summaryProps.current.actionPending).toBeNull();
+    expect(summaryProps.current.actionFailed).toBe(false);
+
+    // Observed NON-null mid-flight: asserting it is null before and after cannot
+    // see the prop stop being forwarded at all.
+    let release!: () => void;
+    api.stopWorkflow.mockImplementationOnce(() => new Promise((_r, rej) => {
+      release = () => rej(new Error('backend refused'));
+    }));
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await act(async () => { summaryProps.current.onStop(); });
+    expect(summaryProps.current.actionPending).toBe('stop');
+
+    await act(async () => { release(); });
+    errors.mockRestore();
+
+    expect(summaryProps.current.actionFailed).toBe(true);
+    expect(summaryProps.current.actionPending).toBeNull();
   });
 });
 

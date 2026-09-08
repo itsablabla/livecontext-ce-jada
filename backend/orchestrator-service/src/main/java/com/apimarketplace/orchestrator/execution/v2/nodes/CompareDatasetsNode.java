@@ -119,10 +119,10 @@ public class CompareDatasetsNode extends BaseNode {
             result.put("item_index", context.itemIndex());
             result.put("itemIndex", context.itemIndex());
             result.put("item_id", context.itemId());
-            inputData.put("datasetA_count", datasetA.size());
-            inputData.put("datasetB_count", datasetB.size());
-            inputData.put("datasetA", datasetA);
-            inputData.put("datasetB", datasetB);
+            inputData.put("inputACount", datasetA.size());
+            inputData.put("inputBCount", datasetB.size());
+            inputData.put("inputA", datasetA);
+            inputData.put("inputB", datasetB);
             inputData.put("matchFields", matchFields);
             inputData.put("returnMatched", config.returnMatched());
             inputData.put("returnOnlyA", config.returnOnlyA());

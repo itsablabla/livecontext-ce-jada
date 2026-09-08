@@ -82,12 +82,23 @@ describe('WorkflowPanelActions - the real Save control', () => {
     expect(saveButton()).toBeDisabled();
   });
 
-  it('is disabled in run mode even with unsaved changes, like the page header', () => {
+  it('is GONE in run mode, not merely disabled - a run is watched, not authored', () => {
     renderActions({ isRunMode: true });
 
+    // Even with unsaved changes pending: the control used to render permanently
+    // greyed out, which kept an edit affordance in the header of a page where it can
+    // never do anything. It is dropped instead.
     emit('workflowDirtyChange', { isDirty: true, workflowId: 'wf-1' });
 
-    expect(saveButton()).toBeDisabled();
+    expect(screen.queryByTitle('actions.save')).toBeNull();
+  });
+
+  it('keeps the version history reachable in run mode - it is a read, not an edit', () => {
+    renderActions({ isRunMode: true });
+
+    // Which plan version a run is executing is exactly a run-mode question, so the
+    // half of the split button that opens the list survives on its own.
+    expect(screen.getByTestId('workflow-version-history-toggle')).toBeInTheDocument();
   });
 
   it('is disabled while this workflow agent is streaming into the canvas', () => {

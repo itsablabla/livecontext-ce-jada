@@ -5,6 +5,7 @@ import com.apimarketplace.auth.domain.UserProfileEntity;
 import com.apimarketplace.auth.repository.OrganizationMemberRepository;
 import com.apimarketplace.auth.repository.UserOnboardingRepository;
 import com.apimarketplace.auth.repository.UserProfileRepository;
+import com.apimarketplace.auth.repository.UserRepository;
 import com.apimarketplace.common.auth.UserSummaryDto;
 import com.apimarketplace.auth.dto.CeLinkEntitlements;
 import com.apimarketplace.auth.service.CreditConsumptionDeadLetterService;
@@ -61,6 +62,11 @@ public class InternalAuthController {
     // publication can link to the author's public profile without an extra
     // round-trip per marketplace card.
     private final UserProfileRepository userProfileRepository;
+    // Badge system - reads users.created_at (the cohort + tenure metrics) and
+    // users.enabled for the badge-profile probe. The onboarding row cannot
+    // answer either: it is optional, so a user who never finished onboarding
+    // would silently score "joined never".
+    private final UserRepository userRepository;
 
     public InternalAuthController(OrgRestrictionQueryService restrictionService,
                                   CreditConsumptionDeadLetterService deadLetterService,
@@ -71,7 +77,8 @@ public class InternalAuthController {
                                   OrganizationMemberRepository memberRepository,
                                   ObjectProvider<CeLinkService> ceLinkServiceProvider,
                                   ObjectProvider<CeLinkEntitlementsService> ceLinkEntitlementsServiceProvider,
-                                  UserProfileRepository userProfileRepository) {
+                                  UserProfileRepository userProfileRepository,
+                                  UserRepository userRepository) {
         this.restrictionService = restrictionService;
         this.deadLetterService = deadLetterService;
         this.onboardingRepository = onboardingRepository;
@@ -82,6 +89,60 @@ public class InternalAuthController {
         this.ceLinkServiceProvider = ceLinkServiceProvider;
         this.ceLinkEntitlementsServiceProvider = ceLinkEntitlementsServiceProvider;
         this.userProfileRepository = userProfileRepository;
+        this.userRepository = userRepository;
+    }
+
+    /**
+     * Identity facts the badge evaluator in orchestrator-service needs, and
+     * nothing else: when the account was created (the cohort + tenure metrics)
+     * and whether its public profile page exists at all.
+     *
+     * <p>Deliberately NOT folded into {@code /publisher-profile}: that payload is
+     * frozen onto every publication row at publish time, so widening it would
+     * push join dates into marketplace snapshots that have no use for them.
+     *
+     * <p>{@code pageVisible} mirrors {@link UserProfileEntity#isPageVisible()}
+     * exactly (false only for PRIVATE). The public badge endpoint gates on it so
+     * a user who hid their profile does not get a badge page that outlives it,
+     * and so the numeric-id lookup cannot become an "is this account active"
+     * oracle for profiles their owner withdrew.
+     *
+     * <p>404 for unknown or disabled users - same indistinguishability contract
+     * as {@code UserService.getPublicProfile}.
+     */
+    @GetMapping("/users/{userId}/badge-profile")
+    public ResponseEntity<Map<String, Object>> getBadgeProfile(@PathVariable String userId) {
+        if (userId == null || userId.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        Optional<com.apimarketplace.auth.domain.User> userOpt;
+        if (userId.matches("\\d+")) {
+            try {
+                userOpt = userRepository.findById(Long.parseLong(userId));
+            } catch (NumberFormatException e) {
+                userOpt = Optional.empty();
+            }
+        } else {
+            userOpt = userRepository.findByProviderId(userId);
+        }
+        if (userOpt.isEmpty() || !userOpt.get().isEnabled()) {
+            return ResponseEntity.notFound().build();
+        }
+        com.apimarketplace.auth.domain.User user = userOpt.get();
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("userId", String.valueOf(user.getId()));
+        if (user.getCreatedAt() != null) {
+            // ISO-8601 without a zone: `users.created_at` is stored UTC and the
+            // consumer reads it as UTC. Sending the raw LocalDateTime keeps that
+            // explicit instead of stamping a server-local zone onto it here.
+            body.put("joinedAt", user.getCreatedAt().toString());
+        }
+        // Absent profile row = never customised = UNLISTED default = visible.
+        body.put("pageVisible", userProfileRepository.findByUserId(user.getId())
+                .map(UserProfileEntity::isPageVisible)
+                .orElse(true));
+        return ResponseEntity.ok(body);
     }
 
     /**

@@ -30,12 +30,6 @@ vi.mock('@/lib/stores/current-org-store', () => ({
   useCanMutateInCurrentOrg: () => gate.canMutate,
 }));
 
-const warm = vi.hoisted(() => vi.fn());
-vi.mock('@/components/chat/generationModalEntry', () => ({
-  importGenerationModal: vi.fn(),
-  CreateGenerationModal: () => null,
-  warmGenerationModal: warm,
-}));
 
 import { ApiError } from '@/lib/api/api-client';
 import { GenerateEntryButton } from '../GenerateEntryButton';
@@ -69,7 +63,6 @@ function control(): HTMLButtonElement | null {
 
 beforeEach(() => {
   gate.canMutate = true;
-  warm.mockClear();
   onOpen.mockClear();
   api.getModels.mockReset();
   api.getModels.mockResolvedValue(catalogue());
@@ -184,19 +177,20 @@ describe('GenerateEntryButton - what each answer from the catalogue means', () =
     expect(api.getModels).not.toHaveBeenCalled();
   });
 
-  it('fetches the dialog on hover and on focus, before it is asked for', async () => {
-    // Two different readers: a pointer hovers, a keyboard focuses, and neither
-    // should be the one that waits for the chunk.
+  it('acts only on a press, never on a hover or a focus', async () => {
+    // The control used to prefetch a lazy dialog on hover and on focus. It leads to a route now,
+    // whose code the router fetches, so there is nothing left to warm - and the mistake this
+    // guards against is one character away: wiring the action to hover would move the reader out
+    // from under a passing pointer.
     renderButton();
     await settled();
 
     fireEvent.mouseEnter(control()!);
-    expect(warm).toHaveBeenCalledTimes(1);
-
     fireEvent.focus(control()!);
-    expect(warm).toHaveBeenCalledTimes(2);
-    // Warming is not opening: a passing pointer must not pop a dialog.
     expect(onOpen).not.toHaveBeenCalled();
+
+    fireEvent.click(control()!);
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
   it('shows the word in a toolbar and only the icon in a button row', async () => {

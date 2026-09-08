@@ -28,6 +28,104 @@ describe('NodeConfigurationRule', () => {
     expect(rule.priority).toBe(8);
   });
 
+  // ===================== Generate node =====================
+
+  /**
+   * The two builder issues the generate node can raise, and the family they
+   * are filed under.
+   *
+   * <p>An issue carries an element TYPE as well as a key, and the canvas uses
+   * the pair to find the node the warning belongs to. Generate moved to the AI
+   * family, so an issue still tagged `core` addresses core:make_clip for a node
+   * keyed agent:make_clip: nothing errors, the warning simply stops appearing,
+   * and the author saves a node with no model and finds out at run time.
+   */
+  describe('Generate - the model, and the family the issue is filed under', () => {
+    const makeGenerateNode = (data: Record<string, unknown> = {}) =>
+      ({
+        id: 'n-generate',
+        type: 'flowNode',
+        position: { x: 0, y: 0 },
+        data: { id: 'generate-1', label: 'Make Clip', kind: 'generate', ...data },
+      }) as any;
+
+    it('reports a missing model, which is the one parameter the node cannot run without', () => {
+      const ctx = buildContext([makeGenerateNode()], []);
+      const result = rule.validate(ctx);
+
+      const issues = result.issues.filter((i) => i.context?.rule === 'generate_missing_model');
+      expect(issues).toHaveLength(1);
+    });
+
+    it('files that issue with the AI family, so the canvas can find the node it is about', () => {
+      const ctx = buildContext([makeGenerateNode()], []);
+      const result = rule.validate(ctx);
+
+      const issue = result.issues.find((i) => i.context?.rule === 'generate_missing_model');
+      expect(
+        issue?.elementType,
+        'tagged core, the warning addresses a key this node does not have and silently '
+        + 'stops appearing',
+      ).toBe('agent');
+    });
+
+    it('says nothing once a model is chosen', () => {
+      const ctx = buildContext([makeGenerateNode({ generateModel: 'seedance-2.0-fast' })], []);
+      const result = rule.validate(ctx);
+
+      expect(
+        result.issues.filter((i) => i.context?.rule === 'generate_missing_model'),
+      ).toHaveLength(0);
+    });
+
+    it('refuses a credential source that is neither pool, and files it with the AI family too', () => {
+      const ctx = buildContext([makeGenerateNode({
+        generateModel: 'seedance-2.0-fast',
+        generateCredentialSource: 'whatever',
+      })], []);
+      const result = rule.validate(ctx);
+
+      const issue = result.issues.find(
+        (i) => i.context?.rule === 'generate_invalid_credential_source');
+      expect(issue).toBeDefined();
+      expect(issue?.elementType).toBe('agent');
+    });
+
+    it('accepts both real pools, and an unstated one', () => {
+      // Unstated is not an error: it means the platform key, which is what the
+      // node substitutes at run time.
+      for (const source of ['platform', 'user', undefined]) {
+        const ctx = buildContext([makeGenerateNode({
+          generateModel: 'seedance-2.0-fast',
+          ...(source === undefined ? {} : { generateCredentialSource: source }),
+        })], []);
+
+        expect(
+          rule.validate(ctx).issues.filter(
+            (i) => i.context?.rule === 'generate_invalid_credential_source'),
+          `source=${source} must be accepted`,
+        ).toHaveLength(0);
+      }
+    });
+
+    it('still files an unrelated core issue with the core family', () => {
+      // requireField gained the element type as a defaulted parameter, and every
+      // other caller relies on that default. Getting it wrong there would move
+      // warnings off nodes that never changed family.
+      const sendEmail = {
+        id: 'n-email',
+        type: 'flowNode',
+        position: { x: 0, y: 0 },
+        data: { id: 'send-email-1', label: 'Notify', kind: 'send_email' },
+      } as any;
+      const ctx = buildContext([sendEmail], []);
+
+      const issue = rule.validate(ctx).issues.find(
+        (i) => i.context?.rule === 'email_missing_to');
+      expect(issue?.elementType).toBe('core');
+    });
+  });
+
   // ===================== Approval context template (warning) =====================
 
   describe('Approval - context template (warning, non-blocking)', () => {
@@ -891,7 +989,172 @@ describe('NodeConfigurationRule', () => {
       expect(rulesFor(mediaNode('overlay', { ...base, opacity: '{{o}}', width_percent: '{{w}}', end_seconds: '{{e}}' }), 'media_opacity_out_of_range')).toHaveLength(0);
     });
 
-    it('fully valid concat, frame, and overlay configs produce no media_* issues', () => {
+    it('requires video AND at least one cue for subtitles', () => {
+      const bare = mediaNode('subtitles');
+      expect(rulesFor(bare, 'media_missing_video')).toHaveLength(1);
+      expect(rulesFor(bare, 'media_missing_cues')).toHaveLength(1);
+
+      const filled = mediaNode('subtitles', {
+        video: '{{v}}',
+        cues: [{ start_seconds: 0, end_seconds: 2.4, text: 'It starts here' }],
+      });
+      expect(rulesFor(filled, 'media_missing_video')).toHaveLength(0);
+      expect(rulesFor(filled, 'media_missing_cues')).toHaveLength(0);
+    });
+
+    it('flags an EMPTY cues array exactly like no cues at all', () => {
+      expect(rulesFor(mediaNode('subtitles', { video: '{{v}}', cues: [] }), 'media_missing_cues')).toHaveLength(1);
+    });
+
+    it('flags a cue with no text, and one longer than the contract length', () => {
+      const base = { video: '{{v}}' };
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: 0, end_seconds: 2 }] }), 'media_cue_missing_text')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: 0, end_seconds: 2, text: '   ' }] }), 'media_cue_missing_text')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: 0, end_seconds: 2, text: 'x'.repeat(241) }] }), 'media_cue_text_too_long')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: 0, end_seconds: 2, text: 'x'.repeat(240) }] }), 'media_cue_text_too_long')).toHaveLength(0);
+    });
+
+    it('flags a cue that ends at or before it starts', () => {
+      const base = { video: '{{v}}' };
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: 2, end_seconds: 2, text: 'Hi' }] }), 'media_cue_end_before_start')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: 3, end_seconds: 1, text: 'Hi' }] }), 'media_cue_end_before_start')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: 0, end_seconds: 2, text: 'Hi' }] }), 'media_cue_end_before_start')).toHaveLength(0);
+    });
+
+    it('flags OVERLAPPING cues, and accepts cues that merely touch', () => {
+      const base = { video: '{{v}}' };
+      const overlapping = mediaNode('subtitles', {
+        ...base,
+        cues: [{ start_seconds: 0, end_seconds: 3, text: 'First' }, { start_seconds: 2, end_seconds: 5, text: 'Second' }],
+      });
+      expect(rulesFor(overlapping, 'media_cues_overlap')).toHaveLength(1);
+
+      // Touching is NOT overlapping: one caption replaces the other on the same frame.
+      const touching = mediaNode('subtitles', {
+        ...base,
+        cues: [{ start_seconds: 0, end_seconds: 2.4, text: 'First' }, { start_seconds: 2.4, end_seconds: 5, text: 'Second' }],
+      });
+      expect(rulesFor(touching, 'media_cues_overlap')).toHaveLength(0);
+    });
+
+    it('flags a track past the TOTAL character limit, even when every line is within the per-line cap', () => {
+      const cues = Array.from({ length: 600 }, (_, i) => ({
+        start_seconds: i, end_seconds: i + 0.5, text: 'x'.repeat(240),
+      }));
+      expect(rulesFor(mediaNode('subtitles', { video: '{{v}}', cues }), 'media_cues_total_too_long')).toHaveLength(1);
+      // A dense but realistic script must not trip it.
+      const realistic = Array.from({ length: 400 }, (_, i) => ({
+        start_seconds: i * 3, end_seconds: i * 3 + 2.5, text: 'a caption line of about sixty characters, like a real one',
+      }));
+      expect(rulesFor(mediaNode('subtitles', { video: '{{v}}', cues: realistic }), 'media_cues_total_too_long')).toHaveLength(0);
+    });
+
+    it('flags more than 600 cues', () => {
+      const cues = Array.from({ length: 601 }, (_, i) => ({ start_seconds: i, end_seconds: i + 0.5, text: 'line' }));
+      expect(rulesFor(mediaNode('subtitles', { video: '{{v}}', cues }), 'media_too_many_cues')).toHaveLength(1);
+    });
+
+    it('flags font_size_percent outside 1-20 and position_percent outside 0-100', () => {
+      const base = { video: '{{v}}', cues: [{ start_seconds: 0, end_seconds: 2, text: 'Hi' }] };
+      expect(rulesFor(mediaNode('subtitles', { ...base, font_size_percent: 30 }), 'media_font_size_out_of_range')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, font_size_percent: 0.5 }), 'media_font_size_out_of_range')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, font_size_percent: 4.4 }), 'media_font_size_out_of_range')).toHaveLength(0);
+      expect(rulesFor(mediaNode('subtitles', { ...base, position_percent: 140 }), 'media_position_percent_out_of_range')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, position_percent: 72 }), 'media_position_percent_out_of_range')).toHaveLength(0);
+    });
+
+    it('flags a cue with no timings, and treats a BLANK timing as missing', () => {
+      const base = { video: '{{v}}' };
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ text: 'Typed the line, not the timings' }] }), 'media_cue_missing_timing')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: '', end_seconds: '', text: 'Hi' }] }), 'media_cue_missing_timing')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: 0, text: 'Hi' }] }), 'media_cue_missing_timing')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: 0, end_seconds: 2, text: 'Hi' }] }), 'media_cue_missing_timing')).toHaveLength(0);
+      // A start of exactly 0 is a real timing, not an empty one.
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: 0, end_seconds: 2, text: 'Hi' }] }), 'media_cue_missing_timing')).toHaveLength(0);
+    });
+
+    it('accepts cues given as an EXPRESSION, while still checking the look bounds', () => {
+      const templated = mediaNode('subtitles', {
+        video: '{{v}}',
+        cues: '{{core:build_cues.output.result.cues}}',
+      });
+      const ctx = buildContext([templated], []);
+      const mediaIssues = new NodeConfigurationRule().validate(ctx).issues
+        .filter((i) => String(i.context?.rule ?? '').startsWith('media_'));
+      expect(mediaIssues).toHaveLength(0);
+
+      // The expression excuses the CUES from build-time judgement, not the look.
+      expect(rulesFor(mediaNode('subtitles', {
+        video: '{{v}}',
+        cues: '{{core:build_cues.output.result.cues}}',
+        font_size_percent: 30,
+      }), 'media_font_size_out_of_range')).toHaveLength(1);
+    });
+
+    it('judges timings that arrive as STRINGS - the shape an agent-authored plan carries', () => {
+      const base = { video: '{{v}}' };
+      // Narrowing on `typeof === 'number'` silently skipped every check for these.
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [
+        { start_seconds: '0', end_seconds: '3', text: 'First' },
+        { start_seconds: '2', end_seconds: '5', text: 'Overlaps' },
+      ] }), 'media_cues_overlap')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [
+        { start_seconds: '2', end_seconds: '2', text: 'Zero length' },
+      ] }), 'media_cue_end_before_start')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [
+        { start_seconds: '0', end_seconds: '2.4', text: 'Fine' },
+        { start_seconds: '2.4', end_seconds: '5', text: 'Also fine' },
+      ] }), 'media_cues_overlap')).toHaveLength(0);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [
+        { start_seconds: 0, end_seconds: 2, text: 'Hi' }], font_size_percent: '30' }),
+        'media_font_size_out_of_range')).toHaveLength(1);
+    });
+
+    it('flags an unknown style and a colour that is not hex, which fail a run just as hard', () => {
+      const base = { video: '{{v}}', cues: [{ start_seconds: 0, end_seconds: 2, text: 'Hi' }] };
+      expect(rulesFor(mediaNode('subtitles', { ...base, style: 'karaoke' }), 'media_invalid_subtitle_style')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, style: 'classic' }), 'media_invalid_subtitle_style')).toHaveLength(0);
+      expect(rulesFor(mediaNode('subtitles', { ...base, text_color: 'white' }), 'media_invalid_colour')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, outline_color: '#12345' }), 'media_invalid_colour')).toHaveLength(1);
+      expect(rulesFor(mediaNode('subtitles', { ...base, text_color: '#FFEE00', outline_color: '000000' }), 'media_invalid_colour')).toHaveLength(0);
+      // A template resolves at run time and must never trip a build-time check.
+      expect(rulesFor(mediaNode('subtitles', { ...base, style: '{{core:look.output.result.style}}' }), 'media_invalid_subtitle_style')).toHaveLength(0);
+    });
+
+    it('a caption that ends before it starts does not ALSO report the next one as overlapping', () => {
+      const base = { video: '{{v}}' };
+      const issues = rulesFor(mediaNode('subtitles', { ...base, cues: [
+        { start_seconds: 10, end_seconds: 4, text: 'End before start' },
+        { start_seconds: 11, end_seconds: 13, text: 'Perfectly fine' },
+      ] }), 'media_cues_overlap');
+      expect(issues).toHaveLength(0);
+    });
+
+    it('measures the caption length on the TRIMMED text, like the backend does', () => {
+      const base = { video: '{{v}}' };
+      // 236 real characters padded to 241: the padding must not decide the verdict, or
+      // the builder refuses a line the run would happily accept.
+      const padded = `  ${'x'.repeat(236)}   `;
+      expect(padded.length).toBe(241);
+      expect(rulesFor(mediaNode('subtitles', { ...base, cues: [{ start_seconds: 0, end_seconds: 2, text: padded }] }), 'media_cue_text_too_long')).toHaveLength(0);
+    });
+
+    it('never judges cue timings written as {{...}} templates - they resolve at run time', () => {
+      const templated = mediaNode('subtitles', {
+        video: '{{v}}',
+        cues: [
+          { start_seconds: '{{core:timing.output.result.a}}', end_seconds: '{{core:timing.output.result.b}}', text: 'First' },
+          { start_seconds: '{{core:timing.output.result.c}}', end_seconds: '{{core:timing.output.result.d}}', text: 'Second' },
+        ],
+        font_size_percent: '{{core:look.output.result.size}}',
+      });
+      const ctx = buildContext([templated], []);
+      const mediaIssues = new NodeConfigurationRule().validate(ctx).issues
+        .filter((i) => String(i.context?.rule ?? '').startsWith('media_'));
+      expect(mediaIssues).toHaveLength(0);
+    });
+
+    it('fully valid concat, frame, overlay and subtitles configs produce no media_* issues', () => {
       const concat = mediaNode('concat', {
         inputs: [{ source: '{{a}}', speed: 1.5 }, { source: '{{b}}', trim_start_seconds: 1, trim_end_seconds: 9 }],
         transition: 'crossfade', transition_seconds: 1.0,
@@ -903,7 +1166,15 @@ describe('NodeConfigurationRule', () => {
         video: '{{v}}', image: '{{i}}', position: 'top_left',
         margin_px: 48, width_percent: 30, opacity: 0.6, start_seconds: 2, end_seconds: 8,
       });
-      for (const node of [concat, frame, overlay]) {
+      const subtitles = mediaNode('subtitles', {
+        video: '{{v}}', style: 'classic', font_family: 'DejaVu Sans',
+        font_size_percent: 3.4, position_percent: 89, text_color: '#FFFFFF', outline_color: '#000000',
+        cues: [
+          { start_seconds: 0, end_seconds: 2.4, text: 'First' },
+          { start_seconds: 2.6, end_seconds: 5.2, text: 'Second' },
+        ],
+      });
+      for (const node of [concat, frame, overlay, subtitles]) {
         const ctx = buildContext([node], []);
         const mediaIssues = new NodeConfigurationRule().validate(ctx).issues
           .filter((i) => String(i.context?.rule ?? '').startsWith('media_'));

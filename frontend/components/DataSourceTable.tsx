@@ -38,6 +38,7 @@ import { PaginationBar } from '@/components/ui/PaginationBar';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import PublishResourceModal from '@/components/marketplace/PublishResourceModal';
 import { DataSourceCard } from '@/components/data-table/DataSourceCard';
+import { track } from '@/lib/analytics/analytics';
 
 interface DataSourceTableProps {
   className?: string;
@@ -241,6 +242,12 @@ export default function DataSourceTable({
       };
 
       const newDataSource = await orchestratorApi.createDataSource(dataSourceConfig);
+      track('table_created', {
+        data_source_id: newDataSource.id,
+        source: 'blank',
+        has_description: Boolean(descriptionToUse.trim()),
+        inline: isAddingDataSourceInline,
+      });
 
       // Call callback if provided
       if (onDataSourceCreated) {
@@ -443,7 +450,7 @@ export default function DataSourceTable({
           </div>
         )}
         {canMutate && !loading && (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 md:shrink-0">
             {folders.foldersEnabled && (
               <Button variant="outline" size="sm" onClick={() => folders.setShowCreateDialog(true)}>
                 <FolderPlus className="h-4 w-4 mr-1.5" />
@@ -501,7 +508,7 @@ export default function DataSourceTable({
               className="flex w-full rounded-xl border border-theme bg-[var(--bg-primary)] px-4 text-sm text-[var(--text-primary)] ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 pl-11"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={visibilityFilter} onValueChange={(v) => setVisibilityFilter(v as VisibilityFilter)}>
               <SelectTrigger className="w-auto gap-1.5" aria-label={t('common.filterByVisibility')}>
                 <Eye className="h-3.5 w-3.5 opacity-70" />

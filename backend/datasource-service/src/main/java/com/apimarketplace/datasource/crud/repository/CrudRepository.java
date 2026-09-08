@@ -87,6 +87,7 @@ public class CrudRepository {
             Map<String, Object> validatedColumns = new LinkedHashMap<>();
             for (Map.Entry<String, Object> entry : columns.entrySet()) {
                 String safeColumnName = sqlSanitizer.sanitizeColumnName(entry.getKey());
+                sqlSanitizer.rejectReservedWriteColumn(safeColumnName);
                 sqlSanitizer.validateValueLength(entry.getValue());
                 validatedColumns.put(safeColumnName, entry.getValue());
             }
@@ -260,6 +261,7 @@ public class CrudRepository {
                 rawKey = rawKey.substring("data.".length());
             }
             String safeColumnName = sqlSanitizer.sanitizeColumnName(rawKey);
+            sqlSanitizer.rejectReservedWriteColumn(safeColumnName);
             sqlSanitizer.validateValueLength(entry.getValue());
 
             String keyParam = "set_key_" + i;

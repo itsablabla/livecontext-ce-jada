@@ -26,8 +26,9 @@ public class ModelPricingService {
     // (declared in auth-service application.yml); the PROD-effective value is pinned
     // explicitly in deploy/helm/livecontext/values-prod.yaml (services.auth.env) so
     // margin is declared and diff-tracked, not an implicit code default. This constant
-    // is the safety fallback only. See the project docs.
-    private static final BigDecimal DEFAULT_CLOUD_LLM_BILLING_MULTIPLIER = new BigDecimal("1.8");
+    // is the safety fallback only. 1.11 = ~10% gross margin on LLM/conversation billing
+    // (was 1.8 until 2026-09-03). See the project docs.
+    private static final BigDecimal DEFAULT_CLOUD_LLM_BILLING_MULTIPLIER = new BigDecimal("1.11");
     // Default fallback: mid-tier model (~$1/1M input, $4/1M output).
     // Stored token rates are provider USD per 1M tokens. calculateCost returns
     // billable credits after the managed-cloud LLM multiplier when the row is LLM-billed.
@@ -57,7 +58,7 @@ public class ModelPricingService {
     @Autowired
     public ModelPricingService(
             ModelPricingRepository pricingRepository,
-            @Value("${billing.llm.cloud-multiplier:1.8}") BigDecimal cloudLlmBillingMultiplier,
+            @Value("${billing.llm.cloud-multiplier:1.11}") BigDecimal cloudLlmBillingMultiplier,
             @Value("${billing.llm.anthropic-cache-write-multiplier:1.25}") BigDecimal anthropicCacheWriteMultiplier,
             @Value("${billing.llm.anthropic-cache-read-multiplier:0.1}") BigDecimal anthropicCacheReadMultiplier,
             @Value("${billing.llm.openai-cached-multiplier:0.5}") BigDecimal openaiCachedMultiplier,
@@ -209,6 +210,19 @@ public class ModelPricingService {
                 default -> OTHER;
             };
         }
+    }
+
+    /**
+     * The effective managed-cloud billing multiplier.
+     *
+     * <p>Exposed so a pre-flight COST ESTIMATE can be published without any other
+     * layer restating the number: the margin lever has exactly one home
+     * ({@code billing.llm.cloud-multiplier}, pinned per-environment and guarded by
+     * {@code EconomicsConfigPinTest}), and a picker that showed a second, stale copy
+     * of it would quote a price the ledger does not charge.
+     */
+    public BigDecimal getCloudLlmBillingMultiplier() {
+        return cloudLlmBillingMultiplier;
     }
 
     public BigDecimal applyCloudLlmBillingMultiplier(String provider, String model, BigDecimal amount) {

@@ -129,6 +129,13 @@ public record Core(
 ) {
 
     // Valid core types
+    // `generate` is NOT built from here any more: it moved to the AI family and
+    // ExecutionNodeFactory builds it from the plan's agents. It stays in this
+    // list on purpose, because this set decides whether a stored plan PARSES.
+    // Removing it made normalizeType throw, and the plan parser wraps nothing,
+    // so every workflow saved before the move stopped opening at all - the
+    // whole workflow, not the node. Parsing it and building nothing keeps the
+    // damage where it was meant to be: the node is absent from the run.
     private static final Set<String> VALID_TYPES = Set.of(
         "decision", "switch", "loop", "split", "merge", "fork", "transform", "wait", "download_file", "public_link", "media",
         "generate",

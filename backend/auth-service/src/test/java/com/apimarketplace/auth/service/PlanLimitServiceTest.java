@@ -52,6 +52,57 @@ class PlanLimitServiceTest {
         when(editionProvider.isSelfHostedEnterprise()).thenReturn(false);
     }
 
+    /**
+     * Regression: a TEAM account was refused every gated endpoint in production
+     * because the gateway addresses services with the INTERNAL numeric user id
+     * ({@code X-User-ID}) while this service only ever looked the caller up by
+     * Keycloak sub. Nobody matched, so the answer was "no subscription", which
+     * every plan gate reads as "free".
+     */
+    @Test
+    void getPlanCode_resolvesTheGatewaysNumericUserId() {
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(subscriptionRepository.findActiveByUserId(42L)).thenReturn(Optional.of(subscription));
+        when(plan.getCode()).thenReturn("TEAM");
+
+        assertThat(service.getPlanCode("1")).isEqualTo("TEAM");
+    }
+
+    @Test
+    void getPlanCode_stillResolvesAKeycloakSub() {
+        // Services that hold the sub (and CE) must keep working unchanged.
+        when(userRepository.findByProviderId("f1ccda20-a612-4554-935b-45a35636baa9"))
+                .thenReturn(Optional.of(user));
+        when(subscriptionRepository.findActiveByUserId(42L)).thenReturn(Optional.of(subscription));
+        when(plan.getCode()).thenReturn("PRO");
+
+        assertThat(service.getPlanCode("f1ccda20-a612-4554-935b-45a35636baa9")).isEqualTo("PRO");
+    }
+
+    @Test
+    void getPlanCode_fallsBackToProviderIdWhenTheNumericIdMatchesNobody() {
+        // An all-digits value that is not an internal id must not end the lookup:
+        // it may still be a provider id in a deployment that mints them that way.
+        when(userRepository.findById(7L)).thenReturn(Optional.empty());
+        when(userRepository.findByProviderId("7")).thenReturn(Optional.of(user));
+        when(subscriptionRepository.findActiveByUserId(42L)).thenReturn(Optional.of(subscription));
+        when(plan.getCode()).thenReturn("STARTER");
+
+        assertThat(service.getPlanCode("7")).isEqualTo("STARTER");
+    }
+
+    @Test
+    void getLimit_isDeliberatelyLeftOnTheProviderIdPath() {
+        // getLimit fails OPEN on an unknown user (null = unlimited), so teaching it
+        // the numeric id here would switch per-plan resource quotas ON for every
+        // cloud account at once. That is a product decision, not a bug fix, and this
+        // test exists so the omission reads as deliberate rather than forgotten.
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.findByProviderId("1")).thenReturn(Optional.empty());
+
+        assertThat(service.getLimit("1", "WORKFLOW")).isNull();
+    }
+
     @Test
     void getLimit_returnsNullWhenNoUser() {
         when(userRepository.findByProviderId("u1")).thenReturn(Optional.empty());

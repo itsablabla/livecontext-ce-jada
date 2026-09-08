@@ -53,6 +53,13 @@ import java.util.Optional;
 @Service
 public class CreditAttributionService {
 
+    /**
+     * Product-analytics emitter (PostHog). Optional so hand-built test instances and
+     * analytics-less deployments are untouched; a null field emits nothing.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics;
+
     private static final Logger log = LoggerFactory.getLogger(CreditAttributionService.class);
 
     private final CreditService creditService;
@@ -512,6 +519,7 @@ public class CreditAttributionService {
                     userId, tier, sessionId, result.error());
             throw new IllegalStateException("PAYG top-up grant failed: " + result.error());
         }
+        if (analytics != null) analytics.creditsPurchased(userId, amount, tier);
     }
 
     /**

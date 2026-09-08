@@ -114,7 +114,8 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 DisplayMode.WORKFLOW,
                 null,
                 true,
-                true, Map.of());
+                true, Map.of(),
+                null);
 
         assertThat(updated.getShowcaseChosenEpoch()).isNull();
     }
@@ -139,7 +140,8 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 DisplayMode.INTERFACE,
                 null,
                 false,
-                true, Map.of());
+                true, Map.of(),
+                null);
 
         assertThat(updated.getShowcaseChosenEpoch()).isEqualTo(2);
     }
@@ -164,7 +166,8 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 DisplayMode.INTERFACE,
                 5,
                 false,
-                true, Map.of());
+                true, Map.of(),
+                null);
 
         assertThat(updated.getShowcaseChosenEpoch()).isEqualTo(5);
     }
@@ -197,7 +200,8 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 DisplayMode.INTERFACE,
                 4,
                 false,
-                true, Map.of());
+                true, Map.of(),
+                null);
 
         assertThat(updated.getShowcaseChosenEpoch()).isEqualTo(4);
         assertThat(updated.getShowcaseSnapshot()).isSameAs(recaptured);
@@ -224,7 +228,8 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 DisplayMode.INTERFACE,
                 999,
                 false,
-                true, Map.of()))
+                true, Map.of(),
+                null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not exist");
     }
@@ -249,7 +254,8 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 DisplayMode.INTERFACE,
                 -1,
                 false,
-                true, Map.of()))
+                true, Map.of(),
+                null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("zero or greater");
     }
@@ -299,7 +305,7 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 null,
                 DisplayMode.WORKFLOW,
                 null,
-                true, Map.of());
+                true, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> createCaptor = ArgumentCaptor.forClass(Map.class);
@@ -359,7 +365,7 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 null,
                 DisplayMode.WORKFLOW,
                 null,
-                true, Map.of());
+                true, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> createCaptor = ArgumentCaptor.forClass(Map.class);
@@ -392,7 +398,7 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 null,
                 DisplayMode.INTERFACE,
                 999,
-                true, Map.of()))
+                true, Map.of(), null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not exist");
     }
@@ -416,7 +422,7 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 null,
                 DisplayMode.INTERFACE,
                 2,
-                true, Map.of());
+                true, Map.of(), null);
 
         assertThat(published.getShowcaseChosenEpoch()).isEqualTo(2);
     }
@@ -446,7 +452,7 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 null,
                 DisplayMode.WORKFLOW,
                 999,
-                true, Map.of()))
+                true, Map.of(), null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not exist");
     }
@@ -471,7 +477,7 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 null,
                 DisplayMode.INTERFACE,
                 2,
-                true, Map.of());
+                true, Map.of(), null);
 
         @SuppressWarnings("unchecked")
         Map<String, Object> interfaceRenders = (Map<String, Object>) published.getShowcaseSnapshot().get("interfaceRenders");
@@ -525,7 +531,7 @@ class WorkflowPublicationServiceShowcaseEpochClearTest {
                 null,
                 DisplayMode.INTERFACE,
                 4,
-                true, Map.of());
+                true, Map.of(), null);
 
         verify(orchestratorClient).validateShowcaseRun("run-publish", TENANT_ID, organizationId);
         verify(orchestratorClient).captureShowcaseSnapshot("run-publish", TENANT_ID, organizationId, 4);

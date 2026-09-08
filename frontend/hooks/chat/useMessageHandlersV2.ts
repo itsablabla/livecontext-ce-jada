@@ -26,10 +26,59 @@ import { conversationLogger } from '@/lib/logger';
 import { SelectedModel, formatSelectedModel } from '@/hooks/useModels';
 import { consumeDraftChatConfig } from '@/hooks/useChatConfig';
 import { clearDraft } from '@/lib/chat/draftStorage';
+import { track } from '@/lib/analytics/analytics';
 import type { AttachmentRef } from '@/lib/api/attachmentApi';
 
-// Storage key for pending message before login
-const PENDING_MESSAGE_KEY = 'livecontext_pending_chat_message';
+// Storage key for pending message before login. Exported so a test cannot
+// silently go vacuous by hardcoding a name this module later renames.
+export const PENDING_MESSAGE_KEY = 'livecontext_pending_chat_message';
+
+/**
+ * How long a pre-login message stays sendable. Beyond this it is treated as
+ * abandoned rather than auto-sent into a conversation the user forgot about.
+ */
+const PENDING_MESSAGE_MAX_AGE_MS = 5 * 60 * 1000;
+
+interface PendingMessage {
+  message: string;
+  model: string;
+  timestamp: number;
+  returnPath?: string;
+}
+
+/**
+ * The pending message if one is waiting and still fresh, else null. Pure: it
+ * does NOT consume the slot, so several surfaces can ask the question.
+ */
+function readPendingMessage(now: number = Date.now()): PendingMessage | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    const stored = window.sessionStorage.getItem(PENDING_MESSAGE_KEY);
+    if (!stored) return null;
+    const data = JSON.parse(stored) as Partial<PendingMessage> | null;
+    if (!data || typeof data.timestamp !== 'number') return null;
+    if (now - data.timestamp >= PENDING_MESSAGE_MAX_AGE_MS) return null;
+    return data as PendingMessage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Is a pre-login message waiting to be auto-sent right now?
+ *
+ * <p>Read-only on purpose: the hook's own reader CONSUMES the slot, so a second
+ * surface asking through it would swallow the message. Both go through
+ * {@link readPendingMessage}, so "fresh" cannot come to mean two things.
+ *
+ * <p>The caller that needs this is the onboarding first-build proposal: the
+ * pending send clears the composer and opens its own conversation, so writing a
+ * proposal into that composer would lose it and count a delivery that never
+ * happened.
+ */
+export function hasFreshPendingMessage(now: number = Date.now()): boolean {
+  return readPendingMessage(now) !== null;
+}
 
 interface SendMessageOptions {
   keepPendingActions?: boolean;
@@ -116,21 +165,16 @@ export function useMessageHandlersV2(options: UseMessageHandlersV2Options) {
   }, [pathname]);
 
   // Get and clear pending message helper
+  // Reads through the shared predicate, then consumes the slot either way: a
+  // stale entry is dropped rather than left to be reconsidered later.
   const getPendingMessage = useCallback(() => {
+    const data = readPendingMessage();
     try {
-      const stored = sessionStorage.getItem(PENDING_MESSAGE_KEY);
-      if (stored) {
-        sessionStorage.removeItem(PENDING_MESSAGE_KEY);
-        const data = JSON.parse(stored);
-        // Only use if stored within last 5 minutes
-        if (Date.now() - data.timestamp < 5 * 60 * 1000) {
-          return data;
-        }
-      }
+      sessionStorage.removeItem(PENDING_MESSAGE_KEY);
     } catch (e) {
-      console.warn('Failed to get pending message:', e);
+      console.warn('Failed to clear pending message:', e);
     }
-    return null;
+    return data;
   }, []);
 
   /**
@@ -216,6 +260,17 @@ export function useMessageHandlersV2(options: UseMessageHandlersV2Options) {
       // fields. Sending the bare id (never the "provider:" qualified form)
       // is what the backend's pricing lookup + SDK routing both require.
       const draftChatConfig = currentConversationId ? undefined : consumeDraftChatConfig();
+      // Counts and ids only: the message text never leaves the browser here.
+      track('chat_message_sent', {
+        model_id: selectedModel.id,
+        provider: selectedModel.provider,
+        attachment_count: attachments?.length ?? 0,
+        is_new_conversation: !currentConversationId,
+        agent_id: agentId || null,
+        skill_count: defaultSkillIds?.length ?? 0,
+        reasoning_effort: reasoningEffort || null,
+        content_length: currentInput.length,
+      });
       const resultConversationId = await sendMessage(
         {
           message: currentInput,
@@ -232,6 +287,7 @@ export function useMessageHandlersV2(options: UseMessageHandlersV2Options) {
         {
           onConversationCreated: (conversationId: string) => {
             conversationLogger.info('New conversation created', { conversationId });
+            track('chat_conversation_created', { conversation_id: conversationId, agent_id: agentId || null });
 
             conversationIdRef.current = conversationId;
             setCurrentConversationId(conversationId);

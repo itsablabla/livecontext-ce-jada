@@ -57,7 +57,7 @@ export const DragPreviewCard = React.memo(function DragPreviewCard({
       </div>
 
       {count > 1 && (
-        <span className="absolute -top-2 -right-2 min-w-[1.5rem] h-6 px-1.5 rounded-lg bg-[var(--accent-primary)] text-white text-xs font-semibold flex items-center justify-center shadow-lg">
+        <span className="absolute -top-2 -right-2 min-w-[1.5rem] h-6 px-1.5 rounded-lg bg-[var(--accent-primary)] text-[var(--accent-foreground)] text-xs font-semibold flex items-center justify-center shadow-lg">
           {count}
         </span>
       )}

@@ -20,6 +20,8 @@ import { publicationService } from '@/lib/api/orchestrator/publication.service';
 import { AvatarDisplay } from '@/components/agents';
 import { useToast } from './Toast';
 import ToastContainer from './ToastContainer';
+import { BudgetChip } from '@/components/budget/BudgetChip';
+import { agentDisplayPeriodMode, budgetChipHasContent } from '@/components/budget/budgetPeriod';
 import { useTranslations } from 'next-intl';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
@@ -42,6 +44,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import { AgentPanelContent, AGENT_CONFIGURATION_TAB } from '@/components/app/AgentPanelContent';
 import PublishAgentModal from '@/components/marketplace/PublishAgentModal';
+import { track } from '@/lib/analytics/analytics';
 
 export interface AgentRow {
   id: string;
@@ -60,6 +63,12 @@ export interface AgentRow {
   createdAt?: string;
   updatedAt?: string;
   config?: Record<string, unknown>;
+  /** Credit cap, or null/absent when the agent is uncapped (the default). */
+  creditBudget?: number | null;
+  /** Credits consumed in the current budget window. Server-managed. */
+  creditsConsumed?: number | null;
+  /** How creditsConsumed resets. Same union the agent modal edits, so a row can be handed straight to it. */
+  budgetResetMode?: 'cumulative' | 'monthly' | 'weekly';
 }
 
 interface AgentTableProps {
@@ -362,6 +371,7 @@ export function AgentTable({ className = '' }: AgentTableProps) {
   // back at the top level.
   const handleAgentCreated = async (agentId?: string) => {
     if (agentId) await folders.fileNewResource(agentId);
+    if (agentId) track('agent_created', { agent_id: agentId, from_template: Boolean(templateAgent) });
     fetchAgents();
     setShowCreateModal(false);
     setEditingAgent(null);
@@ -390,6 +400,7 @@ export function AgentTable({ className = '' }: AgentTableProps) {
   // scope pattern).
   const openAgentPanel = useCallback((agent: AgentRow) => {
     if (!sidePanel) return;
+    track('agent_opened', { agent_id: agent.id });
     sidePanel.openTab({
       id: `agent-${agent.id}`,
       label: agent.name,
@@ -473,7 +484,7 @@ export function AgentTable({ className = '' }: AgentTableProps) {
           {loading ? (
             <div className="h-8 w-28 bg-theme-tertiary rounded animate-pulse"></div>
           ) : canMutate ? (
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 md:shrink-0">
               {/* Templates sit behind this button rather than in a permanent banner.
                   Selecting a card opens the create modal PREFILLED, it creates
                   nothing: the modal is the preview, and a beginner should see an
@@ -521,7 +532,7 @@ export function AgentTable({ className = '' }: AgentTableProps) {
               className="flex w-full rounded-xl border border-theme bg-[var(--bg-primary)] px-4 text-sm text-[var(--text-primary)] ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 pl-11"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={visibilityFilter} onValueChange={(v) => setVisibilityFilter(v as VisibilityFilter)}>
               <SelectTrigger className="w-auto gap-1.5" aria-label={t('common.filterByVisibility')}>
                 <Eye className="h-3.5 w-3.5 opacity-70" />
@@ -716,6 +727,32 @@ export function AgentTable({ className = '' }: AgentTableProps) {
                         <div className="flex items-center gap-1.5 mt-0.5 text-xs text-theme-muted">
                           {agent.modelProvider && agent.modelName && (
                             <span>{agent.modelProvider}/{agent.modelName}</span>
+                          )}
+                          {/* Budget at a glance. The figures were already on the
+                              agent, but only readable from the metrics tab, so a
+                              runaway agent was invisible from the list it lives in. */}
+                          {budgetChipHasContent(agent.creditsConsumed, agent.creditBudget) && (
+                            <>
+                              {agent.modelProvider && agent.modelName && (
+                                <span className="text-slate-300 dark:text-slate-600">·</span>
+                              )}
+                              <BudgetChip
+                                spent={agent.creditsConsumed}
+                                cap={agent.creditBudget}
+                                // Only a CAPPED agent's stored cadence is true
+                                // of it; see agentDisplayPeriodMode.
+                                periodMode={agentDisplayPeriodMode(agent.creditBudget, agent.budgetResetMode)}
+                                // An agent with no reset mode never resets,
+                                // unlike a workflow, which resets monthly.
+                                fallbackPeriod="cumulative"
+                                // An agent's counter is reset lazily, by the
+                                // resolver that enforces its budget, and that
+                                // only runs when the agent EXECUTES. So this
+                                // figure can be a month old, and nothing here
+                                // may claim the agent is stopped because of it.
+                                spendIsCurrent={false}
+                              />
+                            </>
                           )}
                           {/* Globe (shared) / Clock (in review) / X (rejected) / Lock (private).
                               Status ships with the page envelope, so it is always resolved here. */}

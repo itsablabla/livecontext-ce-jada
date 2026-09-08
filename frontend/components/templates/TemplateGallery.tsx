@@ -6,6 +6,7 @@ import { useCallback, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { track } from '@/lib/analytics/analytics';
 import { getTemplates } from '@/lib/templates';
 import { hydrateAgent, templateCopy } from '@/lib/templates/hydrate';
 import {
@@ -91,12 +92,14 @@ export function TemplateGallery({
           );
           setOpen(false);
           onTableCreated?.(dataSourceId, skippedColumns);
+          track('table_created', { data_source_id: dataSourceId, source: 'template', template_slug: meta.slug });
           return;
         }
 
         const workflowId = await instantiateWorkflowTemplate(template as WorkflowTemplate, t, name);
         setOpen(false);
         onWorkflowCreated?.(workflowId);
+        track('workflow_created', { workflow_id: workflowId, source: 'template', template_slug: meta.slug });
       } catch (err) {
         const message = err instanceof Error ? err.message : t('templates.gallery.createFailed');
         onError?.(message);

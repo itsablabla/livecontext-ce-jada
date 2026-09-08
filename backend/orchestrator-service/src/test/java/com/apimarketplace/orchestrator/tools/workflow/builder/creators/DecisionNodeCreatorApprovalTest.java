@@ -207,4 +207,76 @@ class DecisionNodeCreatorApprovalTest {
         Map<String, Object> stored = (Map<String, Object>) firstApprovalConfig().get("delegation");
         assertThat(stored.get("credentialId")).isEqualTo("not-a-number");
     }
+
+    /**
+     * The half of the parity contract that lives in the creator. {@code PARAM_ALIASES} promises
+     * add_node accepts these spellings; only a call through {@code executeAddApproval} proves the
+     * value actually lands in the approval config instead of being accepted and dropped, which
+     * the parity guard's own javadoc calls the dangerous direction. Delete the
+     * {@code parameters.get("timeoutMs")} line in the creator and the alias tests still pass;
+     * these fail.
+     */
+    @Test
+    @DisplayName("mutation guard: timeoutMs camelCase alias reaches the approval config, it is not dropped")
+    void timeoutMsAliasReachesConfig() {
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("label", "Manager Review");
+        p.put("timeoutMs", 3600000);
+
+        ToolExecutionResult r = creator.executeAddApproval(session, p);
+
+        assertThat(r.success()).isTrue();
+        assertThat(firstApprovalConfig().get("timeoutMs"))
+            .as("the creator reads timeoutMs, so the value must override the 24h default")
+            .isEqualTo(3600000L);
+    }
+
+    @Test
+    @DisplayName("bare timeout alias reaches the approval config")
+    void timeoutAliasReachesConfig() {
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("label", "Manager Review");
+        p.put("timeout", 7200000);
+
+        ToolExecutionResult r = creator.executeAddApproval(session, p);
+
+        assertThat(r.success()).isTrue();
+        assertThat(firstApprovalConfig().get("timeoutMs")).isEqualTo(7200000L);
+    }
+
+    @Test
+    @DisplayName("approverRoles and roles aliases both reach the approval config")
+    void roleAliasesReachConfig() {
+        Map<String, Object> camel = new LinkedHashMap<>();
+        camel.put("label", "Camel Review");
+        camel.put("approverRoles", java.util.List.of("manager"));
+        assertThat(creator.executeAddApproval(session, camel).success()).isTrue();
+        assertThat(firstApprovalConfig().get("approverRoles")).isEqualTo(java.util.List.of("manager"));
+
+        Map<String, Object> bare = new LinkedHashMap<>();
+        bare.put("label", "Bare Review");
+        bare.put("roles", java.util.List.of("admin"));
+        assertThat(creator.executeAddApproval(session, bare).success()).isTrue();
+        assertThat(approvalConfigOf("Bare Review").get("approverRoles")).isEqualTo(java.util.List.of("admin"));
+    }
+
+    @Test
+    @DisplayName("requiredApprovals camelCase alias reaches the approval config")
+    void requiredApprovalsAliasReachesConfig() {
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("label", "Manager Review");
+        p.put("requiredApprovals", 3);
+
+        assertThat(creator.executeAddApproval(session, p).success()).isTrue();
+        assertThat(firstApprovalConfig().get("requiredApprovals")).isEqualTo(3);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> approvalConfigOf(String label) {
+        return (Map<String, Object>) session.getCores().stream()
+            .filter(n -> label.equals(n.get("label")))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("no core node labelled " + label))
+            .get("approval");
+    }
 }

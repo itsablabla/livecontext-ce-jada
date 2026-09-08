@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { CheckCircle, X, Gift, Coins, AlertTriangle, AppWindow, Monitor, Workflow, PackagePlus, Table2, Link2, Bot, Zap, Network, Download, Server } from 'lucide-react';
+import { CheckCircle, X, Gift, Coins, AlertTriangle, AppWindow, Monitor, Workflow, PackagePlus, Table2, Link2, Bot, Zap, Network, Download, Server, Lock } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
@@ -21,6 +21,13 @@ type ModalState =
   | 'success'
   | 'error'
   | 'ce-exclusive'
+  /**
+   * The app uses a capability this workspace's plan does not include, today vector search.
+   * Separate from 'ce-exclusive' because that screen is a dead end by design, while this one has
+   * a route out: upgrade. Reached only from a backend 403 PLAN_UPGRADE_REQUIRED, never
+   * pre-emptively, because only the server knows the workspace's plan.
+   */
+  | 'plan-upgrade-required'
   | 'link-required'
   | 'insufficient-credits';
 
@@ -443,6 +450,55 @@ export default function AcquirePublicationModal({
             <Button onClick={handleClose} variant="outline" className="w-full">
               {t('close')}
             </Button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  }
+
+  // Plan-upgrade state. Reached only from a backend 403 PLAN_UPGRADE_REQUIRED: the card cannot
+  // predict it, because whether this workspace's plan covers the app's capabilities is a server
+  // fact. Unlike the CE screen above this one is NOT a dead end, so it offers the pricing page.
+  if (state === 'plan-upgrade-required') {
+    return createPortal(
+      <div
+        className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[9999] flex items-center justify-center p-4"
+        onClick={handleClose}
+      >
+        <div
+          className="max-w-md w-full bg-theme-primary rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.16)] p-6 animate-in fade-in-0 zoom-in-95 duration-200 border border-theme max-h-[90vh] overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="acquire-publication-plan-title"
+          data-testid="acquire-modal-plan-upgrade"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="text-center">
+            <div className="w-16 h-16 bg-amber-50 dark:bg-amber-950/40 rounded-2xl flex items-center justify-center mx-auto mb-5">
+              <Lock className="h-8 w-8 text-amber-600 dark:text-amber-400" />
+            </div>
+            <h2 id="acquire-publication-plan-title" className="text-xl font-semibold text-theme-primary mb-2">
+              {tMarketplace('planUpgradeTitle')}
+            </h2>
+            <p className="text-sm text-theme-secondary mb-6">
+              {/* The localized sentence, not the backend's: that one is English only, and this
+                  screen is the one place a non-English customer is being asked to spend money. */}
+              {tMarketplace('planUpgradeDescription')}
+            </p>
+            <div className="flex gap-2">
+              <Button onClick={handleClose} variant="outline" className="flex-1">
+                {t('close')}
+              </Button>
+              <Button
+                className="flex-1"
+                // Plain router.push, like every other navigation in this component: the modal is
+                // embedded in many trees and the middleware re-applies the /{locale} prefix.
+                onClick={() => { handleClose(); router.push('/app/settings/pricing'); }}
+              >
+                {tMarketplace('planUpgradeCta')}
+              </Button>
+            </div>
           </div>
         </div>
       </div>,

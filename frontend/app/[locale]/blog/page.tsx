@@ -44,7 +44,11 @@ export async function generateMetadata({ params }: LocaleParams): Promise<Metada
         { url: '/og-image.jpg', width: 1200, height: 630, alt: 'LiveContext: one message in, a working automation out.' },
       ],
     },
-    robots: IS_CE ? { index: false, follow: false } : undefined,
+    // Withheld while the blog is being reworked: unlinked from the landing and
+    // absent from the sitemap, so no crawler should index it in the meantime.
+    // (CE never indexes anything either.) Drop this back to
+    // `IS_CE ? { index: false, follow: false } : undefined` when it ships again.
+    robots: { index: false, follow: false },
   };
 }
 

@@ -21,6 +21,7 @@ import { useNodeExecutionStatus } from '../../contexts/StepByStepContext';
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { getSourceHandleGeometry, getTargetHandleGeometry } from './handleGeometry';
 import { openWorkflowBuilderTab, requestOpenRelatedWorkflow } from '@/lib/sidePanel/openWorkflowBuilderTab';
+import { NodeActivityShimmer } from './NodeActivityShimmer';
 /**
  * WorkflowNode - A specialized node for workflow triggers
  *
@@ -35,14 +36,14 @@ export function WorkflowNode({ data, selected, id }: NodeProps<BuilderNodeData>)
 
   const visuals = getNodeVisual('entry');
   const { targetRef: nodeRef, isVisible: showActions, show } = useHoverVisibility<HTMLDivElement>();
-  const { isRunMode, viewingEpoch } = useWorkflowMode();
+  const { isRunMode, viewingEpoch, workflowId: hostWorkflowId } = useWorkflowMode();
 
   // Get node class to determine family
   const nodeClass = React.useMemo(() => findNodeClassById(data.id || ''), [data.id]);
   const nodeFamily = nodeClass?.family;
 
   // Step-by-step execution status
-  const stepByStepStatus = useNodeExecutionStatus(id, { label: data.label, kind: data.kind });
+  const stepByStepStatus = useNodeExecutionStatus(id, { label: data.label, kind: data.kind, status: data.status });
 
   // Use centralized validation context for error state
   const { hasNodeErrors: checkNodeErrors } = useValidation();
@@ -55,6 +56,12 @@ export function WorkflowNode({ data, selected, id }: NodeProps<BuilderNodeData>)
   const effectiveStatus = React.useMemo((): DerivedNodeStatus | undefined => {
     if (viewingEpoch != null) return data.status;
     if (stepByStepStatus.isStepByStepMode) {
+      // A node parked on a signal is NOT running, but it stays in `runningSteps`:
+      // yielding never rewrites the RUNNING step row, so the two sets overlap and
+      // whichever is tested first wins. Awaiting is the newer, more specific fact,
+      // so it goes first - otherwise the waiting state is unreachable and the node
+      // reads blue "running" while its own badge shows an amber pause chip.
+      if (stepByStepStatus.isAwaitingSignal) return 'awaiting_signal';
       if (stepByStepStatus.isRunning) return 'running';
       if (stepByStepStatus.isFailed) return 'failed';
       if (stepByStepStatus.isSkipped) return 'skipped';
@@ -107,17 +114,7 @@ export function WorkflowNode({ data, selected, id }: NodeProps<BuilderNodeData>)
       }}
       tabIndex={0}
     >
-      {/* Shimmer scan effect for running state */}
-      {isNodeRunning && (
-        <div
-          className="absolute inset-0 pointer-events-none rounded-2xl z-[5]"
-          style={{
-            background: 'linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.15) 50%, transparent 100%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer-scan 2.5s ease-in-out infinite',
-          }}
-        />
-      )}
+      <NodeActivityShimmer status={effectiveStatus} className="rounded-2xl z-[5]" />
       {/* Node content */}
       <div className="p-3 space-y-2">
         <NodeHeader
@@ -153,7 +150,7 @@ export function WorkflowNode({ data, selected, id }: NodeProps<BuilderNodeData>)
               // Same two routes as every other "open that workflow" affordance - see
               // openWorkflowBuilderTab, which is where both now live.
               if (isRunMode) {
-                requestOpenRelatedWorkflow(referencedWorkflowId, referencedWorkflowName, id);
+                requestOpenRelatedWorkflow(referencedWorkflowId, referencedWorkflowName, id, hostWorkflowId ?? undefined);
               } else {
                 openWorkflowBuilderTab(sidePanel, { workflowId: referencedWorkflowId, workflowName: referencedWorkflowName });
               }

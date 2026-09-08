@@ -16,9 +16,11 @@ import type { BuilderNodeData } from '../../../types';
 import type { ConnectionProps } from '../ExpressionField';
 import {
   clampMediaDimension,
+  clampMediaFontSizePercent,
   clampMediaNonNegative,
   clampMediaNormalizeLufs,
   clampMediaOpacity,
+  clampMediaPositionPercent,
   clampMediaSpeed,
   clampMediaTargetFps,
   clampMediaTransitionSeconds,
@@ -29,6 +31,8 @@ import {
   MEDIA_CONCAT_INPUTS_MAX,
   MEDIA_DIMENSION_MAX,
   MEDIA_DIMENSION_MIN,
+  MEDIA_FONT_SIZE_PERCENT_MAX,
+  MEDIA_FONT_SIZE_PERCENT_MIN,
   MEDIA_IMAGE_FORMATS,
   MEDIA_NORMALIZE_LUFS_DEFAULT,
   MEDIA_NORMALIZE_LUFS_MAX,
@@ -36,17 +40,24 @@ import {
   MEDIA_OPACITY_MAX,
   MEDIA_OPACITY_MIN,
   MEDIA_OPERATIONS,
+  MEDIA_OUTLINE_COLOR_DEFAULT,
   MEDIA_OUTPUT_FORMATS,
   MEDIA_OVERLAY_POSITIONS,
+  MEDIA_POSITION_PERCENT_MAX,
+  MEDIA_POSITION_PERCENT_MIN,
   MEDIA_SPEED_DEFAULT,
   MEDIA_SPEED_MAX,
   MEDIA_SPEED_MIN,
+  MEDIA_SUBTITLE_CUES_MAX,
+  MEDIA_SUBTITLE_STYLES,
+  MEDIA_SUBTITLE_TEXT_MAX,
   MEDIA_TARGET_FPS_MAX,
   MEDIA_TARGET_FPS_MIN,
   MEDIA_TRACKS_MAX,
   MEDIA_TRANSITION_SECONDS_DEFAULT,
   MEDIA_TRANSITION_SECONDS_MAX,
   MEDIA_TRANSITION_SECONDS_MIN,
+  MEDIA_TEXT_COLOR_DEFAULT,
   MEDIA_TRANSITIONS,
   MEDIA_VOLUME_DEFAULT,
   MEDIA_VOLUME_MAX,
@@ -55,6 +66,7 @@ import {
   MEDIA_WIDTH_PERCENT_MIN,
   type MediaConcatInput,
   type MediaOperation,
+  type MediaSubtitleCue,
   type MediaTrack,
 } from '../../../utils/mediaParams';
 
@@ -344,6 +356,57 @@ export function MediaParametersForm({
     setParam('inputs', next);
   }, [concatInputs, setParam]);
 
+  // subtitles: the ordered caption track. Like concat clips, cues have no
+  // cross-references, so remove/reorder are plain array ops. Order MATTERS here in a
+  // way it does not for clips: the backend refuses overlapping cues, so moving one
+  // can turn a valid track into an invalid one - the validator flags it in place.
+  const subtitleCues: MediaSubtitleCue[] = Array.isArray(params.cues) ? params.cues : [];
+  // A caption track computed upstream is an EXPRESSION, not a list. The cue editor
+  // cannot show it, and offering an empty editor would let one click replace the
+  // expression with a literal array - so the editor stands aside and says so.
+  const cuesExpression: string | null =
+    typeof params.cues === 'string' && params.cues.trim() !== '' ? params.cues : null;
+
+  const setSubtitleCue = React.useCallback((index: number, patch: Record<string, unknown>) => {
+    const next = subtitleCues.map((cue, i) => {
+      if (i !== index) return cue;
+      const merged: Record<string, unknown> = { ...cue };
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) {
+          delete merged[key];
+        } else {
+          merged[key] = value;
+        }
+      }
+      return merged as unknown as MediaSubtitleCue;
+    });
+    setParam('cues', next);
+  }, [setParam, subtitleCues]);
+
+  const removeSubtitleCue = React.useCallback((index: number) => {
+    setParam('cues', subtitleCues.filter((_, i) => i !== index));
+  }, [setParam, subtitleCues]);
+
+  const moveSubtitleCue = React.useCallback((index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= subtitleCues.length) return;
+    const next = [...subtitleCues];
+    [next[index], next[target]] = [next[target], next[index]];
+    setParam('cues', next);
+  }, [setParam, subtitleCues]);
+
+  /**
+   * Append a cue that starts where the last one ended, so the common case (writing a
+   * track top to bottom) never produces the overlap the backend refuses.
+   */
+  const addSubtitleCue = React.useCallback(() => {
+    const last = subtitleCues[subtitleCues.length - 1];
+    const lastEnd = typeof last?.end_seconds === 'number' ? last.end_seconds : undefined;
+    setParam('cues', [...subtitleCues, lastEnd !== undefined
+      ? { start_seconds: lastEnd, end_seconds: '', text: '' }
+      : { start_seconds: '', end_seconds: '', text: '' }]);
+  }, [setParam, subtitleCues]);
+
   /**
    * The current value of a file param for exprField: the expression STRING, or
    * the LITERAL FileRef object verbatim (so the chip branch below can render
@@ -619,6 +682,7 @@ export function MediaParametersForm({
   const concatOptionsCount = countSet(['transition', 'transition_seconds', 'target_width', 'target_height', 'target_fps', 'fade_in_seconds', 'fade_out_seconds', 'normalize', 'audio_bitrate']);
   const frameOptionsCount = countSet(['at_seconds', 'image_format', 'width']);
   const overlayOptionsCount = countSet(['position', 'margin_px', 'width_percent', 'opacity', 'start_seconds', 'end_seconds']);
+  const subtitlesOptionsCount = countSet(['style', 'font_family', 'font_size_percent', 'position_percent', 'text_color', 'outline_color']);
 
   const toggleOptions = () => setShowOptions((open) => !open);
 
@@ -697,6 +761,12 @@ export function MediaParametersForm({
               <div className="flex flex-col items-start">
                 <span>{t('media.opOverlay')}</span>
                 <span className="text-xs text-slate-400 dark:text-slate-500">{t('media.opOverlayDesc')}</span>
+              </div>
+            </SelectItem>
+            <SelectItem value="subtitles">
+              <div className="flex flex-col items-start">
+                <span>{t('media.opSubtitles')}</span>
+                <span className="text-xs text-slate-400 dark:text-slate-500">{t('media.opSubtitlesDesc')}</span>
               </div>
             </SelectItem>
           </SelectContent>
@@ -1170,6 +1240,186 @@ export function MediaParametersForm({
               clamp={clampMediaNonNegative}
               disabled={isRunMode}
             />
+          </OptionalSection>
+        </>
+      )}
+
+      {operation === 'subtitles' && (
+        <>
+          {exprField('video', fileFieldValue(params.video), (v) => setParam('video', v), {
+            label: t('media.video'),
+            required: true,
+            placeholder: t('media.videoPlaceholder'),
+            hint: t('media.subtitlesVideoHint'),
+          })}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t('media.cues')}</span>
+              <span className="text-sm text-slate-500 dark:text-slate-400">{t('required')}</span>
+            </div>
+            {cuesExpression !== null ? (
+              <div className="flex flex-col gap-1.5 rounded-lg border border-theme bg-[var(--bg-secondary)] px-2.5 py-2">
+                <span className="truncate font-mono text-sm" title={cuesExpression}>{cuesExpression}</span>
+                <span className="text-xs text-slate-400 dark:text-slate-500">{t('media.cuesExpressionHint')}</span>
+              </div>
+            ) : null}
+            {cuesExpression === null && subtitleCues.map((cue, index) => (
+              <div key={index} className="rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                    {t('media.cue', { index: index + 1 })}
+                  </span>
+                  {!isRunMode && (
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => moveSubtitleCue(index, -1)}
+                        disabled={index === 0}
+                        className="inline-flex items-center justify-center rounded-md p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                        aria-label={t('media.moveCueUp')}
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveSubtitleCue(index, 1)}
+                        disabled={index === subtitleCues.length - 1}
+                        className="inline-flex items-center justify-center rounded-md p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                        aria-label={t('media.moveCueDown')}
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeSubtitleCue(index)}
+                        className="inline-flex items-center justify-center rounded-md p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                        aria-label={t('media.removeCue')}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {labelRow(t('media.cueText'), t('required'))}
+                  <Input
+                    value={typeof cue.text === 'string' ? cue.text : ''}
+                    onChange={(e) => setSubtitleCue(index, { text: e.target.value })}
+                    placeholder={t('media.cueTextPlaceholder')}
+                    maxLength={MEDIA_SUBTITLE_TEXT_MAX}
+                    disabled={isRunMode}
+                    className="w-full"
+                  />
+                </div>
+                <NumberRow
+                  label={t('media.cueStartSeconds')}
+                  badge={t('required')}
+                  value={cue.start_seconds}
+                  onCommit={(v) => setSubtitleCue(index, { start_seconds: v })}
+                  clamp={clampMediaNonNegative}
+                  disabled={isRunMode}
+                />
+                <NumberRow
+                  label={t('media.cueEndSeconds')}
+                  badge={t('required')}
+                  value={cue.end_seconds}
+                  onCommit={(v) => setSubtitleCue(index, { end_seconds: v })}
+                  clamp={clampMediaNonNegative}
+                  disabled={isRunMode}
+                />
+              </div>
+            ))}
+            {!isRunMode && cuesExpression === null && (
+              <button
+                type="button"
+                onClick={addSubtitleCue}
+                disabled={subtitleCues.length >= MEDIA_SUBTITLE_CUES_MAX}
+                className="inline-flex items-center gap-1.5 self-start rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t('media.addCue')}
+              </button>
+            )}
+            <span className="text-xs text-slate-400 dark:text-slate-500">{t('media.cuesHint', { max: MEDIA_SUBTITLE_CUES_MAX })}</span>
+          </div>
+
+          <OptionalSection isOpen={showOptions} onToggle={toggleOptions} count={subtitlesOptionsCount}>
+            <div className="flex flex-col gap-1.5">
+              {labelRow(t('media.subtitleStyle'), t('optional'))}
+              <Select
+                value={typeof params.style === 'string' && (MEDIA_SUBTITLE_STYLES as readonly string[]).includes(params.style) ? params.style : 'tiktok'}
+                onValueChange={(v) => setParam('style', v === 'tiktok' ? undefined : v)}
+                disabled={isRunMode}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tiktok">
+                    <div className="flex flex-col items-start">
+                      <span>{t('media.subtitleStyleTiktok')}</span>
+                      <span className="text-xs text-slate-400 dark:text-slate-500">{t('media.subtitleStyleTiktokDesc')}</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="classic">
+                    <div className="flex flex-col items-start">
+                      <span>{t('media.subtitleStyleClassic')}</span>
+                      <span className="text-xs text-slate-400 dark:text-slate-500">{t('media.subtitleStyleClassicDesc')}</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {labelRow(t('media.fontFamily'), t('optional'))}
+              <Input
+                value={typeof params.font_family === 'string' ? params.font_family : ''}
+                onChange={(e) => setParam('font_family', e.target.value === '' ? undefined : e.target.value)}
+                placeholder={t('media.fontFamilyPlaceholder')}
+                disabled={isRunMode}
+                className="w-full"
+              />
+              <span className="text-xs text-slate-400 dark:text-slate-500">{t('media.fontFamilyHint')}</span>
+            </div>
+            <NumberRow
+              label={t('media.fontSizePercent')}
+              hint={t('media.fontSizePercentHint', { min: MEDIA_FONT_SIZE_PERCENT_MIN, max: MEDIA_FONT_SIZE_PERCENT_MAX })}
+              badge={t('optional')}
+              value={params.font_size_percent}
+              onCommit={(v) => setParam('font_size_percent', v)}
+              clamp={clampMediaFontSizePercent}
+              disabled={isRunMode}
+            />
+            <NumberRow
+              label={t('media.positionPercent')}
+              hint={t('media.positionPercentHint', { min: MEDIA_POSITION_PERCENT_MIN, max: MEDIA_POSITION_PERCENT_MAX })}
+              badge={t('optional')}
+              value={params.position_percent}
+              onCommit={(v) => setParam('position_percent', v)}
+              clamp={clampMediaPositionPercent}
+              disabled={isRunMode}
+            />
+            <div className="flex flex-col gap-1.5">
+              {labelRow(t('media.textColor'), t('optional'))}
+              <Input
+                value={typeof params.text_color === 'string' ? params.text_color : ''}
+                onChange={(e) => setParam('text_color', e.target.value === '' ? undefined : e.target.value)}
+                placeholder={MEDIA_TEXT_COLOR_DEFAULT}
+                disabled={isRunMode}
+                className="w-full"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {labelRow(t('media.outlineColor'), t('optional'))}
+              <Input
+                value={typeof params.outline_color === 'string' ? params.outline_color : ''}
+                onChange={(e) => setParam('outline_color', e.target.value === '' ? undefined : e.target.value)}
+                placeholder={MEDIA_OUTLINE_COLOR_DEFAULT}
+                disabled={isRunMode}
+                className="w-full"
+              />
+              <span className="text-xs text-slate-400 dark:text-slate-500">{t('media.outlineColorHint')}</span>
+            </div>
           </OptionalSection>
         </>
       )}

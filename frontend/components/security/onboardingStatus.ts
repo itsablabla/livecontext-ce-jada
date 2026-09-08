@@ -11,6 +11,11 @@ export interface OnboardingStatus {
   interests?: string[];
   useCases?: string[];
   experienceLevel?: string;
+  // Persona questionnaire (bounded option values, see the onboarding page)
+  primaryGoal?: string | null;
+  toolsUsed?: string[];
+  previousTool?: string | null;
+  referralSource?: string | null;
 }
 
 export const CE_COMPLETE_API_PATH = '/ce/complete';

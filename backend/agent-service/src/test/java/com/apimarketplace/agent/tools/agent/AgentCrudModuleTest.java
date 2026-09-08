@@ -965,6 +965,32 @@ class AgentCrudModuleTest {
         }
 
         @Test
+        @DisplayName("memory_access_mode is forwarded as memoryAccessMode - an agent can let a child READ the workspace's memory without writing to it")
+        void memoryAccessModeForwardedFromAgentTool() {
+            AgentEntity existing = agentWithResources();
+            when(agentService.getAgent(AGENT_ID, TENANT)).thenReturn(Optional.of(existing));
+            stubUpdateReturns(existing);
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("action", "update");
+            params.put("agent_id", AGENT_ID.toString());
+            params.put("memory_access_mode", "read");
+
+            module.execute("update", params, TENANT, ctx());
+
+            // The read/write axis is the whole point of the mode: a delegate that
+            // can read the workspace's facts but not add to it. Dropped here, the
+            // child silently gets the default (write), which is the permissive
+            // direction - the failure nobody sees until an agent has edited a fact
+            // it was only meant to consult.
+            Map<String, Object> patch = capturePatch();
+            assertThat(patch.get("memoryAccessMode")).isEqualTo("read");
+            // Only the memory mode is forwarded - no unrelated access-mode keys leak in.
+            assertThat(patch.containsKey("fileAccessMode")).isFalse();
+            assertThat(patch.containsKey("tableAccessMode")).isFalse();
+        }
+
+        @Test
         @DisplayName("Empty list [] in params is forwarded as [] (caller intent: clear access)")
         void emptyListForwardedExplicitly() {
             AgentEntity existing = agentWithResources();

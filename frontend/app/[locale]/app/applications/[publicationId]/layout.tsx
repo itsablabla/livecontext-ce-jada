@@ -12,6 +12,7 @@ import { WorkflowLoadingState } from '@/components/views/workflow/WorkflowLoadin
 import { checkMissingCredentialsAsync } from '@/lib/credentials/checkMissingCredentialsAsync';
 import { useCeCloudLinkStatus } from '@/hooks/useCeCloudLinkStatus';
 import { IS_CE } from '@/lib/edition';
+import { track } from '@/lib/analytics/analytics';
 import { resolveApplicationPublication } from './resolvePublication';
 import type {
   MissingCredentialsResult,
@@ -51,10 +52,11 @@ interface SetupGateState {
   targetWorkflowId: string;
   plan: WorkflowPlanLike;
   missing: MissingCredentialsResult;
-  // The setup gate only fires for genuine acquisitions, but carry the editable
-  // mode explicitly so createRunAndReady records it after the wizard.
+  // The setup gate only fires for genuine acquisitions, but carry the three flags
+  // explicitly so createRunAndReady records them after the wizard.
   canEdit: boolean;
   canPublish: boolean;
+  isInstalledClone: boolean;
 }
 
 // Exported for unit testing the gating/threading (canEdit/canPublish derivation +
@@ -78,15 +80,20 @@ export function ApplicationLayoutInner({ publicationId, children }: { publicatio
     publisherName?: string;
     publisherId?: string;
     publication: WorkflowPublication;
-    // canEdit: the resolved workflow is editable in place by the caller, either
-    //   their OWN acquired clone (acquirer, bound to the clone) OR their own
-    //   publication's SOURCE workflow (publisher, bound to the source). The run/
-    //   edit toggle is surfaced and the standard save-on-run persists via PUT /plan.
+    // canEdit: the resolved workflow is editable in place by the caller, which is
+    //   only ever their own publication's SOURCE workflow (publisher, bound to the
+    //   source, no install of their own). The run/edit toggle is surfaced and the
+    //   standard save-on-run persists via PUT /plan. An INSTALLED application is
+    //   never editable: the backend freezes its clone.
     // canPublish: the caller owns the publication (publisher) and may push their
     //   edited source to the live snapshot via "Publish update" (updatePublication).
     // Both false for the anonymous preview, which stays read-only.
     canEdit: boolean;
     canPublish: boolean;
+    // isInstalledClone: the bound workflow is the caller's own APPLICATION clone,
+    //   which is what the reset-data endpoint resolves. Independent of canEdit:
+    //   that clone is frozen (not editable) and is still the one on screen.
+    isInstalledClone: boolean;
   } | null>(null);
   const [setupGate, setSetupGate] = useState<SetupGateState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -108,7 +115,8 @@ export function ApplicationLayoutInner({ publicationId, children }: { publicatio
     targetWorkflowId: string,
     plan: WorkflowPlanLike,
     canEdit: boolean,
-    canPublish: boolean
+    canPublish: boolean,
+    isInstalledClone: boolean
   ) => {
     try {
       const result = await workflowService.executeWorkflow({
@@ -124,6 +132,13 @@ export function ApplicationLayoutInner({ publicationId, children }: { publicatio
         setPhase('error');
         return;
       }
+      track('application_run_started', {
+        publication_id: publicationId,
+        workflow_id: targetWorkflowId,
+        run_id: result.runId,
+        can_edit: canEdit,
+        can_publish: canPublish,
+      });
       setData({
         workflowId: targetWorkflowId,
         runId: result.runId,
@@ -133,6 +148,7 @@ export function ApplicationLayoutInner({ publicationId, children }: { publicatio
         publication: pub,
         canEdit,
         canPublish,
+        isInstalledClone,
       });
       setPhase('ready');
     } catch (err) {
@@ -221,6 +237,7 @@ export function ApplicationLayoutInner({ publicationId, children }: { publicatio
           publication: pub,
           canEdit,
           canPublish,
+          isInstalledClone: isClonedAcquisition,
         });
         setPhase('ready');
         return;
@@ -248,13 +265,14 @@ export function ApplicationLayoutInner({ publicationId, children }: { publicatio
             missing,
             canEdit,
             canPublish,
+            isInstalledClone: isClonedAcquisition,
           });
           setPhase('setup');
           return;
         }
       }
 
-      await createRunAndReady(pub, targetWorkflowId, workflowPlan, canEdit, canPublish);
+      await createRunAndReady(pub, targetWorkflowId, workflowPlan, canEdit, canPublish, isClonedAcquisition);
     } catch (err) {
       console.error('[ApplicationLayout] Failed to initialize:', err);
       setError(t('loadFailed'));
@@ -300,7 +318,7 @@ export function ApplicationLayoutInner({ publicationId, children }: { publicatio
       const gate = setupGate;
       setSetupGate(null);
       try {
-        await createRunAndReady(gate.publication, gate.targetWorkflowId, gate.plan, gate.canEdit, gate.canPublish);
+        await createRunAndReady(gate.publication, gate.targetWorkflowId, gate.plan, gate.canEdit, gate.canPublish, gate.isInstalledClone);
       } finally {
         runCreationInFlightRef.current = false;
       }
@@ -321,7 +339,7 @@ export function ApplicationLayoutInner({ publicationId, children }: { publicatio
     const gate = setupGate;
     setSetupGate(null);
     try {
-      await createRunAndReady(gate.publication, gate.targetWorkflowId, gate.plan, gate.canEdit, gate.canPublish);
+      await createRunAndReady(gate.publication, gate.targetWorkflowId, gate.plan, gate.canEdit, gate.canPublish, gate.isInstalledClone);
     } finally {
       runCreationInFlightRef.current = false;
     }
@@ -363,6 +381,7 @@ export function ApplicationLayoutInner({ publicationId, children }: { publicatio
           publication={data.publication}
           canEdit={data.canEdit}
           canPublish={data.canPublish}
+          isInstalledClone={data.isInstalledClone}
           remote={remote}
         />
         {children}

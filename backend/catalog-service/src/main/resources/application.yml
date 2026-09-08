@@ -1,3 +1,11 @@
+# PostHog server-side product analytics. OFF by default (CE / local / unconfigured
+# emit nothing); cloud prod turns it on through the same POSTHOG_* env the other
+# services read. EU host for GDPR.
+posthog:
+  enabled: ${POSTHOG_ENABLED:false}
+  api-key: ${POSTHOG_API_KEY:}
+  host: ${POSTHOG_HOST:https://eu.i.posthog.com}
+
 spring:
   application:
     name: catalog-service
@@ -33,7 +41,38 @@ spring:
         applicationName: catalog-service
   
   
+  mvc:
+    async:
+      # The public bundle download returns a StreamingResponseBody, which moves
+      # the write onto the async path where the CONTAINER's timeout applies
+      # (Tomcat default: 30s), measured from the moment the request thread
+      # returns. Real CE polls over thin links were measured at 198s and 252s,
+      # so the default would abort exactly the downloads this endpoint exists
+      # for, and the client would see a truncated body rather than an error.
+      # This is an ABSOLUTE deadline for the whole async phase, not an idle
+      # timeout: it includes executor queue wait and is NOT reset by write
+      # progress. At 900s a 32 MB bundle needs to average only ~36 KB/s, well
+      # under the slowest poll seen (252s), with room for the bundle to keep
+      # growing. Nothing is held for the duration except the payload array and
+      # one mvc-stream executor thread.
+      # orchestrator-service sets this for the same reason.
+      request-timeout: 900000
   jpa:
+    # OFF: with open-in-view=true (Spring default) the JPA Session stays open
+    # for the whole request, so a query issued OUTSIDE a transaction (during
+    # response rendering) holds a pooled connection until the response is
+    # written. The bundle download's own read is fully transactional, so this
+    # flag is not by itself the cause of the 198-252s Hikari leak warnings
+    # observed on that endpoint; it is turned off because streaming a large
+    # body to a slow client must never be able to pin a connection, and
+    # because nothing in this service lazy-loads during rendering. Verified:
+    # the only LAZY associations are MappingDefinitionEntity.versions and
+    # MappingVersionEntity.mappingDefinition, neither getter is called
+    # anywhere in the service, and the one response type that could carry such
+    # an entity (ToolResponseController.MappingResolutionResponse) is built
+    # with null at all four of its construction sites.
+    # orchestrator-service and conversation-service already run it off.
+    open-in-view: false
     hibernate:
       ddl-auto: none
     show-sql: false
@@ -242,6 +281,24 @@ ce-catalog-relay:
 # The catalog-import Job presents the same token (importer.catalog.admin-token).
 catalog:
   admin-token: ${CATALOG_ADMIN_TOKEN:}
+  # Retry of a provider's rate-limit refusal (ErrorPolicyEngine). These defaults are also the
+  # contract seed authors are validated against: scripts/api-migrations/validate_apis.py refuses
+  # a rule whose waitMs exceeds max-wait-ms, using the same 10000 as a literal
+  # (ERROR_POLICY_MAX_WAIT_MS). Lowering it here therefore makes already-validated rules stop
+  # waiting, silently: change both, or neither.
+  error-policy:
+    # 0 disables every retry, built-in and declared. The kill switch.
+    max-retries: ${CATALOG_ERROR_POLICY_MAX_RETRIES:2}
+    # Total time ONE call may spend sleeping, across its retries. Bounds the sleeping only: a
+    # retried call also pays for the extra request it makes.
+    max-wait-ms: ${CATALOG_ERROR_POLICY_MAX_WAIT_MS:10000}
+  attachments:
+    # Ceiling on the attachments of ONE call, measured on the encoded payload
+    # (base64 inflates by a third). It is the platform's own limit and always
+    # applies: a seed may declare a LOWER one for a provider that documents one,
+    # never a higher one. Raising this raises how much of a mail this service
+    # holds in heap while assembling it.
+    max-total-bytes: ${CATALOG_ATTACHMENTS_MAX_TOTAL_BYTES:20971520}
 
 # Generation tool (image / video / audio / voice / music, resolved per model by
 # the generation registry). Every create debits the customer's credits, so the

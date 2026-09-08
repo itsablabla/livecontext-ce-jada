@@ -93,7 +93,6 @@ function renderCeUserSection() {
       user={{ name: 'CE Owner', email: 'ce@example.com' }}
       avatarUrl={null}
       numericUserId={1}
-      hasActiveSubscription={false}
       planCode="COMMUNITY"
       isSubscriptionLoading={false}
       themePreference="auto"
@@ -139,6 +138,9 @@ describe('AppSidebar user menu in CE edition', () => {
     // Refer & earn is edition-agnostic: it points at the rewards page, available in CE too
     // (CE reads its bound cloud account), so the menu line shows here as well.
     expect(screen.getByRole('button', { name: 'Refer & earn' })).toBeInTheDocument();
+    // No Pricing row in either edition. The label is still in the mock above, so
+    // this fails the moment the row comes back rather than passing vacuously.
+    expect(screen.queryByRole('button', { name: 'Pricing' })).not.toBeInTheDocument();
   });
 
   it('unlinked CE (no governing cloud plan) routes Create workspace to the WORKSPACE upgrade gate', async () => {

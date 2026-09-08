@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -162,7 +163,7 @@ public class SplitAggregateHandler {
         if (splitContextOpt.isEmpty()) {
             logger.warn("[SplitAggregate] No SplitContext found for aggregate: nodeId={}, workflowItem={}",
                 nodeId, workflowItemIndex);
-            return createEmptyAggregateResult(nodeId, context);
+            return createEmptyAggregateResult(nodeId, context, nodeMap);
         }
 
         SplitContext splitContext = splitContextOpt.get();
@@ -257,6 +258,12 @@ public class SplitAggregateHandler {
         // Build aggregate result
         Map<String, Object> output = new HashMap<>();
         output.put("node_type", "AGGREGATE");
+        // The aggregate reached through a split is built HERE, not by
+        // AggregateNode.execute, and this path reported no resolved_params at all -
+        // so the run-mode Params column was empty for the way an aggregate is
+        // normally used (after a split), with nothing saying the node had been
+        // configured at all.
+        output.put("resolved_params", buildAggregateResolvedParams(nodeId, nodeMap));
         output.put("split_aggregate", true);
         output.put("split_id", splitNodeId);
         // aggregated_count = filtered (matches `urgent_lines.size()` and the
@@ -834,9 +841,16 @@ public class SplitAggregateHandler {
     /**
      * Creates an empty aggregate result when no SplitContext is found.
      */
-    private NodeExecutionResult createEmptyAggregateResult(String nodeId, ExecutionContext context) {
+    /**
+     * The empty result still reports WHICH fields the aggregate was configured
+     * with: "no split context found" is precisely when a reader needs to see the
+     * configuration.
+     */
+    private NodeExecutionResult createEmptyAggregateResult(String nodeId, ExecutionContext context,
+                                                           Map<String, ExecutionNode> nodeMap) {
         Map<String, Object> output = new HashMap<>();
         output.put("node_type", "AGGREGATE");
+        output.put("resolved_params", buildAggregateResolvedParams(nodeId, nodeMap));
         output.put("split_aggregate", false);
         output.put("aggregated_count", 0);
         output.put("item_count", 0);
@@ -851,5 +865,56 @@ public class SplitAggregateHandler {
             Map.of(),
             0
         );
+    }
+
+    /**
+     * The aggregate's configured fields, reported under the plan's own key
+     * ({@code fields}) so the Params column shows what the node was set up to
+     * collect. The per-field VALUES are already in the output under their own
+     * labels; this is the configuration behind them.
+     */
+    private Map<String, Object> buildAggregateResolvedParams(String nodeId,
+                                                             Map<String, ExecutionNode> nodeMap) {
+        Map<String, Object> resolvedParams = new LinkedHashMap<>();
+        ExecutionNode node = nodeMap != null ? nodeMap.get(nodeId) : null;
+        if (!(node instanceof AggregateNode aggregateNode)) {
+            return resolvedParams;
+        }
+        List<AggregateNode.AggregateField> fields = aggregateNode.getFields();
+        if (fields == null || fields.isEmpty()) {
+            return resolvedParams;
+        }
+        List<Map<String, Object>> declared = new ArrayList<>();
+        for (AggregateNode.AggregateField field : fields) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("label", field.label());
+            entry.put("expression", field.expression());
+            declared.add(entry);
+        }
+        resolvedParams.put("fields", declared);
+        // One key per author label as well, so this producer and AggregateNode
+        // describe the same node with the same VOCABULARY. Without it, whether
+        // {{core:<agg>.input.<label>}} resolves depended on whether the aggregate
+        // happened to sit downstream of a split, with no error either way - and
+        // the split path is how an aggregate is normally reached.
+        //
+        // The value is the configured EXPRESSION, not a resolved one: this row is
+        // built after the fan-in, from the collected results, and there is no
+        // per-item context left to resolve against. Same key, honest value for
+        // this moment - the same trade-off SplitNode/SplitNodeExecutor make for
+        // a split's `list`.
+        for (AggregateNode.AggregateField field : fields) {
+            if ("fields".equals(field.label())) {
+                // Same collision, same loss, same warning as AggregateNode: the
+                // declaration wins and this one field's expression is not reported.
+                // Logged on BOTH producers, because a diagnostic that depends on
+                // which path the aggregate was reached through is no diagnostic.
+                logger.warn("Aggregate field labelled 'fields' collides with the declaration "
+                    + "key; its expression is not reported: nodeId={}", nodeId);
+                continue;
+            }
+            resolvedParams.put(field.label(), field.expression());
+        }
+        return resolvedParams;
     }
 }

@@ -2,12 +2,11 @@
 /**
  * What a generated asset can do FROM the Files page.
  *
- * <p>Two things, and both are wiring this page owns: looking back at what has been generated (the
- * same list the dialog shows, in the place the assets actually live), and opening the form again on
- * the recipe of one of them. The list and the dialog have their own suites; what is pinned here is
- * the plumbing between them, which is where the mistakes are - a recipe left behind so the NEXT
- * "Generate" opens on someone else's prompt, a Regenerate control offered where the dialog cannot
- * be opened, a selection left standing over a list the bulk actions cannot address.
+ * <p>Two things, and both are wiring this page owns: looking back at what has been generated (in
+ * the place the assets actually live), and running one of them again. The history list and the
+ * dialog have their own suites; what is pinned here is the plumbing between them, which is where
+ * the mistakes are - a recipe that never reaches the dialog, a Regenerate control offered to a
+ * reader who cannot generate, a selection left standing over a list the bulk actions cannot address.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
@@ -15,6 +14,14 @@ import { act, render, cleanup, fireEvent, screen, waitFor } from '@testing-libra
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { StorageExplorerEntry } from '@/lib/api/storage-api';
 
+// next-intl's navigation module cannot resolve 'next/navigation' under vitest, so it is stood in
+// for. The spy doubles as the proof that reusing a recipe takes nobody off this page.
+const nav = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock('@/i18n/navigation', () => ({
+  useRouter: () => ({ push: nav.push, replace: () => undefined, prefetch: () => undefined }),
+  usePathname: () => '/app/files',
+  Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+}));
 vi.mock('next-intl', () => ({
   useTranslations: () => (key: string) => key,
 }));
@@ -142,17 +149,25 @@ vi.mock('@/components/generation/GenerationHistoryList', () => ({
   ),
 }));
 
+/**
+ * The dialog, reduced to what this suite is about: the recipe it was handed.
+ *
+ * <p>Recorded as PROPS rather than read off the screen, because the recipe is what a replay RUNS -
+ * a dialog that opens empty looks identical to one that opened on the right asset, and only one of
+ * the two spares the reader retyping a prompt from memory.
+ */
 const modalProps = vi.hoisted(() => vi.fn());
 vi.mock('@/components/chat/CreateGenerationModal', () => ({
   CreateGenerationModal: (props: Record<string, unknown>) => {
     modalProps(props);
-    return props.isOpen
-      ? <div data-testid="generation-modal">
-          <button type="button" onClick={props.onClose as () => void}>modal-close</button>
-        </div>
-      : null;
+    return <div data-testid="generation-modal" />;
   },
 }));
+
+/** What the dialog was last opened with. */
+function lastModalProps(): Record<string, unknown> {
+  return modalProps.mock.calls[modalProps.mock.calls.length - 1][0];
+}
 
 import { FileBrowser } from '../FileBrowser';
 
@@ -165,10 +180,6 @@ function renderBrowser() {
   );
 }
 
-function lastModalProps(): Record<string, unknown> {
-  return modalProps.mock.calls[modalProps.mock.calls.length - 1][0];
-}
-
 function lastDetailProps(): Record<string, unknown> {
   return detailProps.mock.calls[detailProps.mock.calls.length - 1][0];
 }
@@ -177,6 +188,7 @@ beforeEach(() => {
   gate.canMutate = true;
   refresh.mockClear();
   modalProps.mockClear();
+  nav.push.mockClear();
   detailProps.mockClear();
   api.getModels.mockReset();
   api.getModels.mockResolvedValue({
@@ -220,22 +232,34 @@ describe('FileBrowser - the generated assets', () => {
     expect(screen.getByTestId('file-grid')).toBeDefined();
   });
 
-  it('opens the dialog on a reused recipe, and forgets it once the dialog closes', async () => {
-    // The forgetting is the half that bites: kept, the next plain "Generate" would open on the
-    // last asset's prompt, and the reader would generate a variant of something they did not pick.
+  it('reuses a recipe in the dialog, on the page the asset was reused from', async () => {
+    // The recipe is handed over directly, so it cannot be truncated on the way and the reader is
+    // not moved off the history they were reading to see it applied.
     renderBrowser();
 
     fireEvent.click(await screen.findByText('generatedAssets'));
     fireEvent.click(screen.getByText('history-reuse'));
 
-    // The dialog is lazy: it arrives one tick after the click, which is the whole point of
-    // warming it on hover.
+    await screen.findByTestId('generation-modal');
+    expect(lastModalProps().initialRecipe).toEqual(RECIPE);
+    expect(nav.push).not.toHaveBeenCalled();
+  });
+
+  it('forgets the recipe on close, so the NEXT Generate opens an empty form', async () => {
+    // The dialog is mounted once for both ways in. Left standing, the recipe of the last asset
+    // reused would prefill "make something new" with a prompt the reader had already run, and
+    // pressing Create would charge them for it a second time.
+    renderBrowser();
+
+    fireEvent.click(await screen.findByText('generatedAssets'));
+    fireEvent.click(screen.getByText('history-reuse'));
     await screen.findByTestId('generation-modal');
     expect(lastModalProps().initialRecipe).toEqual(RECIPE);
 
-    fireEvent.click(screen.getByText('modal-close'));
+    act(() => (lastModalProps().onClose as () => void)());
     fireEvent.click(screen.getByText('generate'));
 
+    await screen.findByTestId('generation-modal');
     expect(lastModalProps().initialRecipe).toBeNull();
   });
 
@@ -248,7 +272,7 @@ describe('FileBrowser - the generated assets', () => {
     expect(screen.getByTestId('file-detail').getAttribute('data-entry-id')).toBe('gen-1');
   });
 
-  it('lets the viewer offer Regenerate, and routes it to the dialog', async () => {
+  it("lets the viewer offer Regenerate, and opens the dialog on that asset's recipe", async () => {
     renderBrowser();
 
     fireEvent.click(await screen.findByText('generatedAssets'));
@@ -260,6 +284,7 @@ describe('FileBrowser - the generated assets', () => {
 
     await screen.findByTestId('generation-modal');
     expect(lastModalProps().initialRecipe).toEqual(RECIPE);
+    expect(nav.push).not.toHaveBeenCalled();
   });
 
   it('offers a read-only member no history, and asks the catalogue nothing on their behalf', async () => {

@@ -326,10 +326,52 @@ public class AggregateNode extends BaseNode {
     private Map<String, Object> buildAggregatedOutput(String batchKey, ExecutionContext context) {
         Map<String, Object> output = new HashMap<>();
 
-        // Build resolved_params snapshot for inspector visibility (resolved values)
+        // Build resolved_params snapshot for inspector visibility.
+        // `fields`, under the plan's own key: without it a reader sees collected
+        // values but nothing saying which fields were configured, and an aggregate
+        // whose expressions all resolve to nothing looks like one that was never
+        // set up.
         Map<String, Object> resolvedParams = new LinkedHashMap<>();
+        List<Map<String, Object>> declaredFields = new ArrayList<>();
         for (AggregateField field : fields) {
-            resolvedParams.put(field.label(), resolveTemplateString(field.expression(), context));
+            Map<String, Object> declared = new LinkedHashMap<>();
+            declared.put("label", field.label());
+            declared.put("expression", field.expression());
+            declaredFields.add(declared);
+        }
+        resolvedParams.put("fields", declaredFields);
+        // One key per author label as well: `StepOutputService` publishes every
+        // reported key as `input.<key>`, so dropping them would silently break
+        // `{{core:<agg>.input.<label>}}` in workflows that already address them.
+        //
+        // The VALUE under those keys changes with this: it used to be a resolved
+        // string, it is now the expression. A workflow reading
+        // `{{core:agg.input.total}}` gets the template text where it used to get
+        // resolved text. That is deliberate (see below) and it is a behaviour
+        // change, not just a restoration.
+        //
+        // The value is the configured EXPRESSION, not a resolved one, and that is
+        // deliberate on both counts. Resolving here used the NODE context while
+        // the values were actually collected against
+        // EvalContextBuilder.buildAggregateEvalContext, so a per-item expression
+        // reported something the node never aggregated - and resolveTemplateString
+        // coerces to String, so `input.<label>` was a String while
+        // `output.<label>` is a typed List. Reporting the expression is honest,
+        // and it is what SplitAggregateHandler reports on the path an aggregate is
+        // normally reached through, so the two producers now agree.
+        for (AggregateField field : fields) {
+            if ("fields".equals(field.label())) {
+                // A field the author labelled "fields" collides with the declaration
+                // above, and the declaration wins: without it the reader gets values
+                // and no way to tell which expression produced them. The cost is real
+                // and is stated rather than hidden - THAT ONE field's resolved value
+                // is not reported, and {{core:<agg>.input.fields}} addresses the
+                // declaration list. Every other field is unaffected.
+                logger.warn("Aggregate field labelled 'fields' collides with the declaration "
+                    + "key; its resolved value is not reported: nodeId={}", nodeId);
+                continue;
+            }
+            resolvedParams.put(field.label(), field.expression());
         }
         output.put("resolved_params", resolvedParams);
 

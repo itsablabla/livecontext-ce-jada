@@ -21,6 +21,7 @@ import { useSearchParams } from 'next/navigation';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
 import { orchestratorApi } from '@/lib/api';
 import { conversationApi } from '@/lib/api/conversationApi';
+import { useConversationSurfaceRedirect } from '@/hooks/useConversationSurfaceRedirect';
 import type { ChatConfig } from '@/hooks/useChatConfig';
 import { useToast } from '@/components/Toast';
 import ToastContainer from '@/components/ToastContainer';
@@ -137,9 +138,6 @@ export function ChatPageV2({ conversationIdFromParams, enableDataSource = false 
 
   // Destructure for easier access
   const {
-    sidebarOpen,
-    setSidebarOpen,
-    sidebarCollapsed,
     selectedModel,
     setSelectedModel,
     showModelSelector,
@@ -186,6 +184,12 @@ export function ChatPageV2({ conversationIdFromParams, enableDataSource = false 
   useEffect(() => {
     compactionRefreshRef.current = loadConversationAndMessages;
   }, [loadConversationAndMessages]);
+
+  // A studio conversation opened at a chat URL belongs on the studio surface, and this page cannot
+  // serve it: its messages are generation envelopes, which the chat renderer suppresses, and its
+  // composer would send the next one to a chat model. The rule lives in its own hook so it can be
+  // proved - inside this component it was a five-line effect that no test could reach.
+  useConversationSurfaceRedirect(currentConversation, effectiveConvId, router.replace);
 
   // ===== Chat Config state (per-conversation, general chat only) =====
   const [chatConfig, setChatConfig] = useState<ChatConfig>({});

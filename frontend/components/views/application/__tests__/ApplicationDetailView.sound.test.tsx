@@ -158,7 +158,7 @@ function renderView(props: Partial<React.ComponentProps<typeof ApplicationDetail
   cogProps.length = 0;
   panelContent.node = null;
   const result = render(
-    <ApplicationDetailView workflowId="wf-1" runId="run-1" publication={pub()} {...props} />,
+    <ApplicationDetailView workflowId="wf-1" runId="run-1" publication={pub()} isInstalledClone {...props} />,
   );
   if (panelContent.node) {
     act(() => { render(panelContent.node as React.ReactElement); });
@@ -209,9 +209,9 @@ describe('ApplicationDetailView - the sound no longer hangs off the settings cog
   });
 
   it('keeps the sound reachable for a visitor who gets no cog at all', () => {
-    // The publisher's own view: no clone to copy, so no cog. Pre-fix that was
-    // exactly the view whose sound could never be turned on.
-    renderView({ publication: pub({ publisherId: '42' }) });
+    // Nothing installed, so no copy to offer and no cog. Pre-fix that was exactly
+    // the view whose sound could never be turned on.
+    renderView({ isInstalledClone: false });
 
     expect(cog()).toBeNull();
     expect(carouselProps.toggleSound).not.toBeNull();
@@ -225,5 +225,17 @@ describe('ApplicationDetailView - the sound no longer hangs off the settings cog
 
     expect(cog()).not.toBeNull();
     expect(cogProps.at(-1)?.canCreateEditableCopy).toBe(true);
+  });
+
+  it('offers no copy to a visitor who installed nothing, whose copy call would be refused', () => {
+    // The page is bound to the publisher's preview clone here. Offering the copy
+    // on "this publication is an application and I am not its publisher" produced
+    // a button whose endpoint answers "Application is not installed in this
+    // workspace".
+    renderView({ isInstalledClone: false });
+
+    // The cog is not merely told "no copy", it is not mounted at all - which is
+    // what an assertion on the prop alone would also accept.
+    expect(cog()).toBeNull();
   });
 });

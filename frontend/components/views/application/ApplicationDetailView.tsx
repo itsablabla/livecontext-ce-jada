@@ -68,20 +68,33 @@ interface ApplicationDetailViewProps {
    */
   publicPreviewMode?: boolean;
   /**
-   * The caller owns this acquired clone (isClonedAcquisition) and may edit it in
-   * place. When true, the embedded workflow canvas surfaces the standard run/edit
-   * toggle so the owner edits like any workflow and persists via the normal save
-   * (PUT /plan, which the backend now accepts for an owned APPLICATION instance).
-   * False for the publisher-self-view fallback and anonymous preview, which stay
-   * run-locked / read-only.
+   * This page is bound to a workflow the caller may CHANGE, which is only ever the
+   * publisher's own SOURCE workflow (`isOwnerSource` in ApplicationLayout). When
+   * true the embedded canvas surfaces the run/edit toggle and persists through the
+   * normal save. False for an INSTALLED application - its clone is frozen and the
+   * backend refuses the plan write (409) - and false for a preview, which is
+   * read-only. The side panel derives the same answer the same way.
    */
   canEdit?: boolean;
   /**
-   * The caller owns this publication (publisher). Surfaces "Publish update": save
-   * the edited source workflow, then re-snapshot it into the live publication
-   * (updatePublication). Acquirers (canEdit but not canPublish) never see it.
+   * The caller owns this publication (publisher). It surfaces nothing today: the
+   * "Publish update" button was removed and only its logic is kept (see the note
+   * on the render). The layout sets it from the same `isOwnerSource` as canEdit,
+   * so the two move together; it stays separate because publishing is a different
+   * right from editing, and a caller could hold one without the other.
    */
   canPublish?: boolean;
+  /**
+   * This page is bound to the caller's INSTALLED clone rather than to a source
+   * workflow. Only the caller's own install answers it, so only the layout - which
+   * did the acquired lookup - can: a publication being an application, or being
+   * someone else's, says nothing about whether THIS workspace installed it. It
+   * decides one thing: whether "reset the data", which always targets that clone,
+   * has a target on this screen. Omitted (false) by the preview and by the
+   * shared-link page: that page CAN bind an install, but it binds the OWNER's, and
+   * its visitor must not be handed a button that wipes someone else's data.
+   */
+  isInstalledClone?: boolean;
   /**
    * The publication is sourced from the CLOUD marketplace (a cloud-linked CE
    * rendering remote content): publisher / reviewer ids are then CLOUD user ids
@@ -122,8 +135,8 @@ function TabContentDebugWrapper({ children, tabContentKey }: { children: React.R
   return <>{children}</>;
 }
 
-export function ApplicationDetailView({ workflowId, runId, title, publisherName, publisherId, planOverride, publication, showInfoPanel = true, publicPreviewMode = false, canEdit = false, canPublish = false, remote }: ApplicationDetailViewProps) {
-  const { isAuthenticated, isAuthChecking, numericUserId } = useAuthGuard();
+export function ApplicationDetailView({ workflowId, runId, title, publisherName, publisherId, planOverride, publication, showInfoPanel = true, publicPreviewMode = false, canEdit = false, canPublish = false, isInstalledClone = false, remote }: ApplicationDetailViewProps) {
+  const { isAuthenticated, isAuthChecking } = useAuthGuard();
   const { setRunId: setContextRunId, isPreviewOnly } = useWorkflowMode();
   const sidePanel = useSidePanelSafe();
   const t = useTranslations('common');
@@ -523,22 +536,27 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
   // is useful to anyone looking at a data-less run - the publisher very much included:
   // their own page opens just as empty as an acquirer's.
   //
-  // Resetting the data is different. The publisher's page binds to the editable SOURCE
-  // workflow (see ApplicationLayout), while the reset endpoint always resolves the
-  // APPLICATION clone - for a publisher that is their preview clone, whose tables this
-  // page does not show. Offering it here would write to data the user cannot see while
-  // the screen stays unchanged, so it stays withheld until the endpoint can target the
-  // bound workflow.
+  // Resetting the data is different: the endpoint always resolves the caller's own
+  // INSTALLED clone, so the button belongs on the page exactly when that clone is what
+  // this page is bound to. On a SOURCE workflow it would write to tables the screen
+  // does not show, and with no install at all it has nothing to resolve (404).
+  //
+  // Ownership is NOT that question, and reading it as one was wrong in both directions:
+  // it withheld the reset from a publisher who installed their own app - the clone on
+  // screen being theirs - and offered it to a visitor who installed nothing. The layout
+  // already knows which of the two it bound, and says so through `isInstalledClone`.
   const templateSource = !publicPreviewMode && publication?.id
     ? {
         publicationId: publication.id,
         remote: effectiveRemote,
-        canReset: !publication?.ownedByMe,
+        canReset: isInstalledClone,
       }
     : undefined;
 
-  // The application's own clone, when this page is showing a genuine acquisition.
-  // Public previews never load auth'd user state, so they get nothing.
+  // The workflow id to hand the Info panel for its credential-setup block. Shaped on
+  // the publication rather than on the install: it is a READ, and it is wanted on the
+  // publisher's own page too. Not evidence of an acquisition - `isInstalledClone` is
+  // the only thing that answers that.
   const acquiredWorkflowId =
     !publicPreviewMode && publication?.displayMode === 'APPLICATION' && workflowId
       ? workflowId
@@ -546,12 +564,16 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
 
   // "Create an editable copy" lives in the bottom-right settings cog, not in the Info
   // panel: making a copy is an action on the application, not part of reading its
-  // description. Only an ACQUIRED application has a copy to make - the publisher of
-  // the app owns the source workflow directly (no APPLICATION clone), so offering it
-  // to them would only ever produce "Application is not installed in this workspace".
-  const isPublisher =
-    numericUserId != null && publication?.publisherId === String(numericUserId);
-  const canCreateEditableCopy = !!acquiredWorkflowId && !isPublisher;
+  // description. The endpoint copies the caller's INSTALLED clone and refuses with
+  // "Application is not installed in this workspace" when there is none, so the offer
+  // follows `isInstalledClone` - the same answer the reset uses, for the same reason.
+  //
+  // Who PUBLISHED it is not part of that question: the endpoint resolves the caller's
+  // install and never looks at the publisher. Asking it offered the copy to a visitor
+  // who had installed nothing - page bound to the publisher's preview clone, endpoint
+  // refuses - and would deny it to anyone holding an install the publisher happens to
+  // be, which the ownership test cannot tell apart.
+  const canCreateEditableCopy = isInstalledClone && !!acquiredWorkflowId;
 
   return (
     <div className="absolute inset-0 overflow-hidden flex flex-col">
@@ -560,9 +582,9 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
           on purpose; only its UI trigger is removed. */}
 
       {/* Publication info panel (hidden when ChatHeader hosts it) */}
-      {/* The acquired-workflow id is forwarded ONLY for genuine acquisitions
-          (APPLICATION display mode + non-preview). Public previews never
-          load auth'd user creds. */}
+      {/* The workflow id is forwarded for any non-preview application page, the
+          publisher's own included: it drives a credential-setup READ, not an
+          acquisition-only action. Public previews never load auth'd user creds. */}
       {(() => {
         if (!showInfoPanel) return null;
         if (isPreviewOnly) {
@@ -603,8 +625,8 @@ export function ApplicationDetailView({ workflowId, runId, title, publisherName,
       })()}
 
       {/* Application settings - bottom right, opposite the Info panel. Renders
-          nothing at all when there is no action to take (marketplace previews,
-          publisher self-views, non-application publications). */}
+          nothing at all when there is no install to copy - a marketplace preview,
+          or anyone who has not installed this application. */}
       {publication && canCreateEditableCopy && (
         <div className="absolute bottom-4 right-4 z-[40]">
           <ApplicationSettingsMenu

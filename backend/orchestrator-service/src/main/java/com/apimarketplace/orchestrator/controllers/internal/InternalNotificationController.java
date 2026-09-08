@@ -50,9 +50,10 @@ public class InternalNotificationController {
 
     private static final Logger logger = LoggerFactory.getLogger(InternalNotificationController.class);
 
-    /** V176 allow-list. */
+    /** Mirrors the DB check {@code chk_notif_subject_type_v1} (V176, widened by V232 + V459). */
     private static final Set<String> SUBJECT_TYPES = Set.of(
-            "WORKFLOW", "APPLICATION", "AGENT_TASK", "CREDENTIAL", "TRIGGER", "ORG_INVITATION");
+            "WORKFLOW", "APPLICATION", "AGENT_TASK", "CREDENTIAL", "TRIGGER", "ORG_INVITATION",
+            "BADGE");
 
     private static final Set<String> SEVERITIES = Set.of("info", "warning", "error");
 

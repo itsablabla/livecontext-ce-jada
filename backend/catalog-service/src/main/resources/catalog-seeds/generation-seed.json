@@ -1,9 +1,9 @@
 {
-  "version": 2028,
+  "version": 2033,
   "generatedFrom": "scripts/api-migrations/*.json",
   "generator": "scripts/api-migrations/generate_generation_seed.py",
-  "endpointCount": 21,
-  "modelCount": 59,
+  "endpointCount": 41,
+  "modelCount": 115,
   "endpoints": [
     {
       "apiToolId": "d2d25686-a86b-41de-a654-27c382f19a9f",
@@ -16,7 +16,12 @@
         "paramMap": {
           "prompt": "input.prompt",
           "duration_seconds": "input.duration",
-          "seed": "input.seed"
+          "seed": "input.seed",
+          "input_audio": {
+            "path": "input.input_audio",
+            "encoding": "data_url",
+            "role": "reference"
+          }
         },
         "models": [
           {
@@ -50,7 +55,8 @@
             "capabilities": [
               "prompt",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_audio"
             ],
             "required": [
               "prompt",
@@ -62,6 +68,7 @@
                 "max": 300
               }
             },
+            "priceBasis": "The rate this model shipped with, unchanged. Two things it does not capture: Replicate bills prediction RUNTIME (GPU-seconds) while this sells generated seconds, which are not proportional and have a fixed boot cost that makes the shortest clips the thinnest margin; and input_audio lengthens the prediction while the price is computed from duration_seconds alone, so a long reference track is provider time nobody is billed for. Re-derive from Replicate's hardware rate before selling on a platform key.",
             "price": {
               "unit": "second",
               "unitCredits": 10
@@ -89,6 +96,32 @@
             "price": {
               "unit": "second",
               "unitCredits": 8
+            }
+          },
+          {
+            "id": "musicgen-melody-large",
+            "upstream": "melody-large",
+            "label": "MusicGen Melody Large (mono)",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "seed",
+              "input_audio"
+            ],
+            "required": [
+              "prompt",
+              "duration_seconds"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "min": 1,
+                "max": 300
+              }
+            },
+            "priceBasis": "Same rate as musicgen-stereo-melody-large, which is the safe direction: mono melody is the SAME Replicate model family doing less work than the stereo variant it is priced from. Replicate bills prediction RUNTIME (GPU-seconds), not generated audio seconds, and the two are not proportional: there is a fixed boot cost, so the shortest clips are the thinnest margin on every per-second model on this API. Re-derive from Replicate's hardware rate and a timed prediction before selling on a platform key. Note also that input_audio lengthens the prediction while the price is computed from duration_seconds alone, so a long reference track is provider time nobody is billed for.",
+            "price": {
+              "unit": "second",
+              "unitCredits": 10
             }
           }
         ]
@@ -221,6 +254,68 @@
               "prompt",
               "voice"
             ],
+            "priceBasis": "0.1 credits per character. ElevenLabs bills the whole Flash and Turbo family at 0.5 of ITS credits per character, which at Creator rates is about $0.00011/char. A credit COSTS $0.001 and SELLS for $0.0007 at the subscription floor, so 0.1 credits returns about $0.00007 against $0.00011 of provider cost: this is sold at a LOSS at the floor and near break-even on pay-as-you-go, well short of the 1.4x the rest of this catalogue clears. Kept as the shipped rate because changing a published price is the platform owner's decision, and the three models that quote this one are priced alike so that choosing between them is never a choice about margin. It is one decision for the whole Flash and Turbo family, and eleven-multilingual-v2 at 0.2 credits against 1 EL credit per character carries exactly the same exposure.",
+            "price": {
+              "unit": "character",
+              "unitCredits": 0.1,
+              "minCredits": 1
+            }
+          },
+          {
+            "id": "eleven-turbo-v2-5",
+            "upstream": "eleven_turbo_v2_5",
+            "label": "ElevenLabs Turbo v2.5",
+            "capabilities": [
+              "prompt",
+              "voice",
+              "seed",
+              "language"
+            ],
+            "required": [
+              "prompt",
+              "voice"
+            ],
+            "priceBasis": "Same rate as eleven-flash-v2-5: ElevenLabs bills these models at the same characters-per-credit rate as Flash v2.5, so they are sold at the rate already published for it.",
+            "price": {
+              "unit": "character",
+              "unitCredits": 0.1,
+              "minCredits": 1
+            }
+          },
+          {
+            "id": "eleven-flash-v2",
+            "upstream": "eleven_flash_v2",
+            "label": "ElevenLabs Flash v2 (English only)",
+            "capabilities": [
+              "prompt",
+              "voice",
+              "seed"
+            ],
+            "required": [
+              "prompt",
+              "voice"
+            ],
+            "priceBasis": "Same rate as eleven-flash-v2-5: ElevenLabs bills these models at the same characters-per-credit rate as Flash v2.5, so they are sold at the rate already published for it.",
+            "price": {
+              "unit": "character",
+              "unitCredits": 0.1,
+              "minCredits": 1
+            }
+          },
+          {
+            "id": "eleven-turbo-v2",
+            "upstream": "eleven_turbo_v2",
+            "label": "ElevenLabs Turbo v2 (English only)",
+            "capabilities": [
+              "prompt",
+              "voice",
+              "seed"
+            ],
+            "required": [
+              "prompt",
+              "voice"
+            ],
+            "priceBasis": "Same rate as eleven-flash-v2-5: ElevenLabs bills these models at the same characters-per-credit rate as Flash v2.5, so they are sold at the rate already published for it.",
             "price": {
               "unit": "character",
               "unitCredits": 0.1,
@@ -446,6 +541,7 @@
         "assetPath": "$base64:candidates[0].content.parts[*].inlineData.data",
         "paramMap": {
           "prompt": "contents[0].parts[0].text",
+          "aspect_ratio": "generationConfig.imageConfig.aspectRatio",
           "input_image": {
             "path": "contents[0].parts[1].inlineData.data",
             "encoding": "base64",
@@ -458,6 +554,20 @@
           "contents[0].role": "user",
           "generationConfig.responseModalities[0]": "IMAGE"
         },
+        "nonGenerationModelValues": [
+          "gemini-3.5-flash",
+          "gemini-3.1-pro-preview",
+          "gemini-3-pro-preview",
+          "gemini-3-flash-preview",
+          "gemini-2.5-pro",
+          "gemini-2.5-flash",
+          "gemini-2.5-flash-lite",
+          "gemini-2.0-flash",
+          "gemini-2.0-flash-lite",
+          "gemini-1.5-pro",
+          "gemini-1.5-flash",
+          "gemini-1.5-flash-8b"
+        ],
         "models": [
           {
             "id": "gemini-2.5-flash-image",
@@ -465,14 +575,32 @@
             "label": "Gemini 2.5 Flash Image (Nano Banana)",
             "capabilities": [
               "prompt",
-              "input_image"
+              "input_image",
+              "aspect_ratio"
             ],
             "required": [
               "prompt"
             ],
+            "priceBasis": "Google's published price for one Gemini 2.5 Flash image is $0.039, doubled to 78 credits. Aspect ratio does not move it: Google bills the image, and every ratio it accepts is the same image. imageConfig.imageSize WOULD move it, and this descriptor deliberately does not map it. What a caller CAN still move is the input: input_image takes up to three source images and Google bills their tokens by area, so a call with three large sources costs more than this flat price was computed for. It is a FLOOR on any editing use.",
             "price": {
               "unit": "call",
               "baseCredits": 78
+            },
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "1:1",
+                  "2:3",
+                  "3:2",
+                  "3:4",
+                  "4:3",
+                  "4:5",
+                  "5:4",
+                  "9:16",
+                  "16:9",
+                  "21:9"
+                ]
+              }
             }
           },
           {
@@ -481,15 +609,779 @@
             "label": "Gemini 3 Pro Image",
             "capabilities": [
               "prompt",
-              "input_image"
+              "input_image",
+              "aspect_ratio"
             ],
             "required": [
               "prompt"
             ],
+            "priceBasis": "Google's published price for one Gemini 3 Pro image at 1K or 2K is $0.134, doubled to 268 credits. Its 4K tier costs $0.24 and is NOT offered here: it would need a model of its own at its own price, the way the OpenAI quality tiers are. Aspect ratio does not move the price; imageConfig.imageSize would, and is not mapped. The input does move it: up to three source images, billed by area, against a flat price. It is a FLOOR on any editing use.",
             "price": {
               "unit": "call",
               "baseCredits": 268
+            },
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "1:1",
+                  "2:3",
+                  "3:2",
+                  "3:4",
+                  "4:3",
+                  "4:5",
+                  "5:4",
+                  "9:16",
+                  "16:9",
+                  "21:9"
+                ]
+              }
             }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "879191cf-64ac-4b13-bb2d-8c6d5f6820bc",
+      "endpointName": "create_video",
+      "sourceFile": "heygen.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video_url",
+        "paramMap": {
+          "prompt": "video_inputs[0].voice.input_text",
+          "voice": "video_inputs[0].voice.voice_id",
+          "style": "video_inputs[0].character.avatar_id"
+        },
+        "constants": {
+          "video_inputs[0].character.type": "avatar",
+          "video_inputs[0].voice.type": "text"
+        },
+        "models": [
+          {
+            "id": "heygen-avatar",
+            "label": "HeyGen Avatar",
+            "capabilities": [
+              "prompt",
+              "voice",
+              "style"
+            ],
+            "price": {
+              "unit": "character",
+              "unitCredits": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "4b94c2be-fd69-4bce-880e-4b6c7f67176e",
+      "endpointName": "create_seedance_v1_lite_text_to_video",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt",
+          "duration_seconds": "duration",
+          "aspect_ratio": "aspect_ratio"
+        },
+        "models": [
+          {
+            "id": "hf-seedance-1-lite",
+            "label": "Seedance 1.0 Lite (720p)",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "aspect_ratio"
+            ],
+            "required": [
+              "duration_seconds"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "9:16",
+                  "4:3",
+                  "3:4",
+                  "1:1",
+                  "21:9"
+                ]
+              },
+              "duration_seconds": {
+                "min": 2,
+                "max": 12
+              }
+            },
+            "constants": {
+              "resolution": "720"
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 78
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Seedance Lite bills $1.80 per million video tokens; 720p at 24fps is 21,600 tokens per second = $0.0389/s, doubled to 78 credits per second. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "e033af7e-5c92-4203-959f-d0f7164fdfc0",
+      "endpointName": "create_seedance_v1_pro_fast_text_to_video",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt",
+          "duration_seconds": "duration",
+          "aspect_ratio": "aspect_ratio"
+        },
+        "models": [
+          {
+            "id": "hf-seedance-1-pro-fast",
+            "label": "Seedance 1.0 Pro Fast (720p)",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "aspect_ratio"
+            ],
+            "required": [
+              "duration_seconds"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "9:16",
+                  "4:3",
+                  "3:4",
+                  "1:1",
+                  "21:9"
+                ]
+              },
+              "duration_seconds": {
+                "min": 2,
+                "max": 12
+              }
+            },
+            "constants": {
+              "resolution": "720"
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 108
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Seedance Pro bills $2.50 per million video tokens; 720p at 24fps is 21,600 tokens per second = $0.054/s, doubled to 108 credits per second. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "b8a3db63-c392-4134-95fc-d851980c5040",
+      "endpointName": "create_flux_pro_kontext_max_text_to_image",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "image",
+        "assetPath": "images[0].url",
+        "paramMap": {
+          "prompt": "prompt",
+          "seed": "seed",
+          "aspect_ratio": "aspect_ratio"
+        },
+        "models": [
+          {
+            "id": "hf-flux-kontext-max",
+            "label": "FLUX.1 Kontext [max]",
+            "capabilities": [
+              "prompt",
+              "seed",
+              "aspect_ratio"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "4:3",
+                  "1:1",
+                  "3:4",
+                  "9:16",
+                  "2:3",
+                  "1:2",
+                  "2:1",
+                  "4:5",
+                  "3:2"
+                ]
+              }
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 160
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. FLUX.1 Kontext [max] lists at $0.08 per image, doubled to 160 credits. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "b918f3d4-8379-4aab-a662-897d8a237b5b",
+      "endpointName": "create_soul_standard",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "image",
+        "assetPath": "images[0].url",
+        "paramMap": {
+          "prompt": "prompt",
+          "aspect_ratio": "aspect_ratio"
+        },
+        "models": [
+          {
+            "id": "hf-soul",
+            "label": "Higgsfield Soul (2K)",
+            "capabilities": [
+              "prompt",
+              "aspect_ratio"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "1:1",
+                  "4:3",
+                  "3:4",
+                  "3:2",
+                  "2:3",
+                  "5:4",
+                  "4:5",
+                  "16:9",
+                  "9:16",
+                  "21:9"
+                ]
+              }
+            },
+            "constants": {
+              "resolution": "2K"
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 188
+            },
+            "priceBasis": "Higgsfield's own billing documentation prices one Soul standard image at 1.500 Higgsfield credits = $0.094, doubled to 188 credits. Its 4K tier is not priced publicly and is not offered here. This is the only model here whose basis is a Higgsfield figure rather than the underlying vendor's; the vendor calls it an illustration, so confirm it with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention before selling on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "01f87f9d-9ad3-4f94-bd3d-8e5aa7feb096",
+      "endpointName": "create_kling_video_v2_1_master_text_to_video",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt",
+          "negative_prompt": "negative_prompt",
+          "duration_seconds": "duration",
+          "aspect_ratio": "aspect_ratio"
+        },
+        "models": [
+          {
+            "id": "hf-kling-2.1-master",
+            "label": "Kling 2.1 Master",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "duration_seconds",
+              "aspect_ratio"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  5,
+                  10
+                ]
+              },
+              "aspect_ratio": {
+                "allowed": [
+                  "1:1",
+                  "16:9",
+                  "9:16"
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 560
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Kling 2.1 Master lists at $0.28 per second ($1.40 for 5s), doubled to 560 credits per second. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "4db81c6d-37e6-4193-ada9-17940ecc4582",
+      "endpointName": "create_kling_video_v2_5_turbo_pro_text_to_video",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt",
+          "negative_prompt": "negative_prompt",
+          "duration_seconds": "duration"
+        },
+        "models": [
+          {
+            "id": "hf-kling-2.5-turbo-pro",
+            "label": "Kling 2.5 Turbo Pro",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "duration_seconds"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  5,
+                  10
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 140
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Kling 2.5 Turbo Pro lists at $0.07 per second ($0.35 for 5s), doubled to 140 credits per second. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "9aa77efc-0615-4336-99a1-1d83614349c3",
+      "endpointName": "create_hailuo_02_pro_text_to_video",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt"
+        },
+        "models": [
+          {
+            "id": "hf-hailuo-02-pro",
+            "label": "MiniMax Hailuo 02 Pro (1080p, 6s)",
+            "capabilities": [
+              "prompt"
+            ],
+            "price": {
+              "unit": "call",
+              "baseCredits": 960
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Hailuo 02 Pro lists at $0.08 per second, and this endpoint exposes no duration parameter, so it is priced as one clip at the 6s reference take MiniMax quotes ($0.48), doubled to 960 credits. If Higgsfield renders it longer this is under-priced even as a floor. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "48be5adb-5baa-401d-b20e-6c6e9c3c3145",
+      "endpointName": "create_hailuo_02_standard_text_to_video",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt",
+          "duration_seconds": "duration"
+        },
+        "models": [
+          {
+            "id": "hf-hailuo-02-standard",
+            "label": "MiniMax Hailuo 02 Standard (768p)",
+            "capabilities": [
+              "prompt",
+              "duration_seconds"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  6,
+                  10
+                ]
+              }
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 90
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Hailuo 02 Standard lists at $0.045 per second ($0.27 for 6s), doubled to 90 credits per second. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "7387d270-95f9-464c-bd7c-a6c2acc7c587",
+      "endpointName": "create_hailuo_2_3_pro_text_to_video",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt"
+        },
+        "models": [
+          {
+            "id": "hf-hailuo-2.3-pro",
+            "label": "MiniMax Hailuo 2.3 Pro",
+            "capabilities": [
+              "prompt"
+            ],
+            "price": {
+              "unit": "call",
+              "baseCredits": 980
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Hailuo 2.3 Pro lists at $0.49 per generation, doubled to 980 credits. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "2dad969c-68b8-4c63-bb64-7c01073be055",
+      "endpointName": "create_hailuo_2_3_standard_text_to_video",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt"
+        },
+        "models": [
+          {
+            "id": "hf-hailuo-2.3-standard",
+            "label": "MiniMax Hailuo 2.3 Standard (6s)",
+            "capabilities": [
+              "prompt"
+            ],
+            "constants": {
+              "duration": 6
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 560
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Hailuo 2.3 Standard lists $0.28 for a 6s video, doubled to 560 credits. Its 10s tier is priced separately ($0.56) rather than per second, so the 6s take is pinned here and the 10s one stays available through the tool itself. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "af6399c0-d5a7-4a50-9a15-7c97e7856ffb",
+      "endpointName": "create_nano_banana",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "image",
+        "assetPath": "images[0].url",
+        "paramMap": {
+          "prompt": "prompt",
+          "aspect_ratio": "aspect_ratio"
+        },
+        "models": [
+          {
+            "id": "hf-nano-banana",
+            "label": "Nano Banana",
+            "capabilities": [
+              "prompt",
+              "aspect_ratio"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "auto",
+                  "1:1",
+                  "4:3",
+                  "3:4",
+                  "3:2",
+                  "2:3",
+                  "5:4",
+                  "4:5",
+                  "16:9",
+                  "9:16",
+                  "21:9"
+                ]
+              }
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 80
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Nano Banana lists at $0.0398 per image, doubled to 80 credits. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "ba05aab6-4d16-4292-9017-ce5a41107165",
+      "endpointName": "create_reve_text_to_image",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "image",
+        "assetPath": "images[0].url",
+        "paramMap": {
+          "prompt": "prompt"
+        },
+        "models": [
+          {
+            "id": "hf-reve",
+            "label": "Reve",
+            "capabilities": [
+              "prompt"
+            ],
+            "price": {
+              "unit": "call",
+              "baseCredits": 80
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Reve lists at $0.04 per image, doubled to 80 credits. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "4038e0c1-b896-48ef-b8d5-2e4b45c81b8b",
+      "endpointName": "create_sora_2_text_to_video",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt",
+          "duration_seconds": "duration",
+          "aspect_ratio": "aspect_ratio"
+        },
+        "models": [
+          {
+            "id": "hf-sora-2",
+            "label": "Sora 2 (720p)",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "aspect_ratio"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  4,
+                  8,
+                  12
+                ]
+              },
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "9:16"
+                ]
+              }
+            },
+            "constants": {
+              "resolution": "720p"
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 200
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Sora 2 lists at $0.10 per second, doubled to 200 credits per second. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "6928f1b3-fcb0-4177-96e2-af7a92b87efc",
+      "endpointName": "create_sora_2_text_to_video_pro",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt",
+          "duration_seconds": "duration",
+          "aspect_ratio": "aspect_ratio"
+        },
+        "models": [
+          {
+            "id": "hf-sora-2-pro",
+            "label": "Sora 2 Pro (720p)",
+            "capabilities": [
+              "prompt",
+              "duration_seconds",
+              "aspect_ratio"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  4,
+                  8,
+                  12
+                ]
+              },
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "9:16"
+                ]
+              }
+            },
+            "constants": {
+              "resolution": "720p"
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 600
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Sora 2 Pro lists at $0.30 per second at 720p, doubled to 600 credits per second. Its 1080p tiers cost $0.50 to $0.70 per second and are not offered here. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "368f8c06-6a10-419b-8323-9c6a69a7c95f",
+      "endpointName": "create_veo3_1",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt",
+          "aspect_ratio": "aspect_ratio",
+          "resolution": "resolution"
+        },
+        "models": [
+          {
+            "id": "hf-veo-3.1",
+            "label": "Veo 3.1 (6s, with audio)",
+            "capabilities": [
+              "prompt",
+              "aspect_ratio",
+              "resolution"
+            ],
+            "required": [
+              "aspect_ratio",
+              "resolution"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "9:16"
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "720",
+                  "1080"
+                ]
+              }
+            },
+            "constants": {
+              "duration": "6",
+              "generate_audio": true
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 4800
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Veo 3.1 with audio lists at $0.40 per second; the pinned 6s take is $2.40, doubled to 4800 credits. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "1e3bb6e6-f53b-413d-a858-4cc7771214a7",
+      "endpointName": "create_veo3_1_fast",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt",
+          "aspect_ratio": "aspect_ratio",
+          "resolution": "resolution"
+        },
+        "models": [
+          {
+            "id": "hf-veo-3.1-fast",
+            "label": "Veo 3.1 Fast (6s, with audio)",
+            "capabilities": [
+              "prompt",
+              "aspect_ratio",
+              "resolution"
+            ],
+            "required": [
+              "aspect_ratio",
+              "resolution"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "16:9",
+                  "9:16"
+                ]
+              },
+              "resolution": {
+                "allowed": [
+                  "720",
+                  "1080"
+                ]
+              }
+            },
+            "constants": {
+              "duration": "6",
+              "generate_audio": true
+            },
+            "price": {
+              "unit": "call",
+              "baseCredits": 1800
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Veo 3.1 Fast with audio lists at $0.15 per second; the pinned 6s take is $0.90, doubled to 1800 credits. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "f4a8808a-d010-4329-84e0-4c3a988e4c08",
+      "endpointName": "create_wan_25_preview_text_to_video",
+      "sourceFile": "higgsfield.json",
+      "generationSpec": {
+        "kind": "video",
+        "assetPath": "video.url",
+        "paramMap": {
+          "prompt": "prompt",
+          "negative_prompt": "negative_prompt",
+          "seed": "seed",
+          "duration_seconds": "duration"
+        },
+        "models": [
+          {
+            "id": "hf-wan-2.5-preview",
+            "label": "Wan 2.5 Preview (720p)",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "seed",
+              "duration_seconds"
+            ],
+            "constraints": {
+              "duration_seconds": {
+                "allowed": [
+                  5,
+                  10
+                ]
+              }
+            },
+            "constants": {
+              "resolution": "720p"
+            },
+            "price": {
+              "unit": "second",
+              "unitCredits": 200
+            },
+            "priceBasis": "FLOOR, not a verified Higgsfield rate. Wan 2.5 lists at $0.10 per second at 720p ($0.05 at 480p, $0.15 at 1080p), doubled to 200 credits per second. Higgsfield publishes no rate card of its own and resells at its own margin, so treat this as a FLOOR rather than a verified cost: confirm the real figure with the account-specific estimate endpoint Higgsfield documents at docs.higgsfield.ai/docs/concepts/billing-and-retention (it answers {credits, usd}; its route is not derivable from the generation route, which is why it is not shipped here) and raise the price in Settings > Platform Keys before selling this model on a platform key."
           }
         ]
       }
@@ -510,6 +1402,55 @@
           "style": "style_type"
         },
         "models": [
+          {
+            "id": "ideogram-v3-flash",
+            "upstream": "FLASH",
+            "label": "Ideogram V3 Flash",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "aspect_ratio",
+              "seed",
+              "style"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "1x3",
+                  "3x1",
+                  "1x2",
+                  "2x1",
+                  "9x16",
+                  "16x9",
+                  "10x16",
+                  "16x10",
+                  "2x3",
+                  "3x2",
+                  "3x4",
+                  "4x3",
+                  "4x5",
+                  "5x4",
+                  "1x1"
+                ]
+              },
+              "style": {
+                "allowed": [
+                  "AUTO",
+                  "GENERAL",
+                  "REALISTIC",
+                  "DESIGN"
+                ]
+              }
+            },
+            "priceBasis": "Deliberately the TURBO rate, not a derived FLASH rate. Ideogram publishes v3 Turbo at $0.03 per image (doubled to 60 credits) but no figure this reader could verify for FLASH. FLASH is the cheaper tier upstream, so pricing it at TURBO can only over-charge, never sell below cost; lower it in Settings > Platform Keys once the published FLASH rate is confirmed.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 60
+            }
+          },
           {
             "id": "ideogram-v3-turbo",
             "upstream": "TURBO",
@@ -694,6 +1635,56 @@
             }
           },
           {
+            "id": "openai-gpt-image-2-low-portrait",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 (low) portrait",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1024x1536"
+            },
+            "priceBasis": "12 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 18
+            }
+          },
+          {
+            "id": "openai-gpt-image-2-low-landscape",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 (low) landscape",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1536x1024"
+            },
+            "priceBasis": "12 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 18
+            }
+          },
+          {
             "id": "openai-gpt-image-2-medium",
             "upstream": "gpt-image-2",
             "label": "OpenAI GPT Image 2 (medium)",
@@ -715,6 +1706,56 @@
             "price": {
               "unit": "call",
               "baseCredits": 106
+            }
+          },
+          {
+            "id": "openai-gpt-image-2-medium-portrait",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 (medium) portrait",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1024x1536"
+            },
+            "priceBasis": "106 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 159
+            }
+          },
+          {
+            "id": "openai-gpt-image-2-medium-landscape",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 (medium) landscape",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1536x1024"
+            },
+            "priceBasis": "106 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 159
             }
           },
           {
@@ -742,6 +1783,56 @@
             }
           },
           {
+            "id": "openai-gpt-image-2-high-portrait",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 (high) portrait",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1024x1536"
+            },
+            "priceBasis": "422 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 633
+            }
+          },
+          {
+            "id": "openai-gpt-image-2-high-landscape",
+            "upstream": "gpt-image-2",
+            "label": "OpenAI GPT Image 2 (high) landscape",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1536x1024"
+            },
+            "priceBasis": "422 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 633
+            }
+          },
+          {
             "id": "openai-gpt-image-1-5-low",
             "upstream": "gpt-image-1.5",
             "label": "OpenAI GPT Image 1.5 (low)",
@@ -763,6 +1854,56 @@
             "price": {
               "unit": "call",
               "baseCredits": 18
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-5-low-portrait",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 (low) portrait",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1024x1536"
+            },
+            "priceBasis": "18 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 27
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-5-low-landscape",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 (low) landscape",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1536x1024"
+            },
+            "priceBasis": "18 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 27
             }
           },
           {
@@ -790,6 +1931,56 @@
             }
           },
           {
+            "id": "openai-gpt-image-1-5-medium-portrait",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 (medium) portrait",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1024x1536"
+            },
+            "priceBasis": "68 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 102
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-5-medium-landscape",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 (medium) landscape",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1536x1024"
+            },
+            "priceBasis": "68 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 102
+            }
+          },
+          {
             "id": "openai-gpt-image-1-5-high",
             "upstream": "gpt-image-1.5",
             "label": "OpenAI GPT Image 1.5 (high)",
@@ -811,6 +2002,56 @@
             "price": {
               "unit": "call",
               "baseCredits": 266
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-5-high-portrait",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 (high) portrait",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1024x1536"
+            },
+            "priceBasis": "266 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 399
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-5-high-landscape",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 (high) landscape",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1536x1024"
+            },
+            "priceBasis": "266 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 399
             }
           },
           {
@@ -838,6 +2079,56 @@
             }
           },
           {
+            "id": "openai-gpt-image-1-mini-low-portrait",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini (low) portrait",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1024x1536"
+            },
+            "priceBasis": "10 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 15
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-mini-low-landscape",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini (low) landscape",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1536x1024"
+            },
+            "priceBasis": "10 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 15
+            }
+          },
+          {
             "id": "openai-gpt-image-1-mini-medium",
             "upstream": "gpt-image-1-mini",
             "label": "OpenAI GPT Image 1 mini (medium)",
@@ -862,6 +2153,56 @@
             }
           },
           {
+            "id": "openai-gpt-image-1-mini-medium-portrait",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini (medium) portrait",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1024x1536"
+            },
+            "priceBasis": "22 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 33
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-mini-medium-landscape",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini (medium) landscape",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1536x1024"
+            },
+            "priceBasis": "22 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 33
+            }
+          },
+          {
             "id": "openai-gpt-image-1-mini-high",
             "upstream": "gpt-image-1-mini",
             "label": "OpenAI GPT Image 1 mini (high)",
@@ -883,6 +2224,56 @@
             "price": {
               "unit": "call",
               "baseCredits": 72
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-mini-high-portrait",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini (high) portrait",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1024x1536"
+            },
+            "priceBasis": "72 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 108
+            }
+          },
+          {
+            "id": "openai-gpt-image-1-mini-high-landscape",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini (high) landscape",
+            "capabilities": [
+              "prompt"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1536x1024"
+            },
+            "priceBasis": "72 credits (the same tier at 1024x1024) x1.5: what OpenAI bills an image by is its OUTPUT TOKENS, and those are exactly 1.5x for 1024x1536 and 1536x1024 at every quality tier (272/1056/4160 square against 408/1584/6240), so the square tier's rate is scaled by that ratio rather than re-derived. Read the token counts rather than the published dollar figures: those are rounded to two decimals, so each family's ratio reads slightly differently on the page while the tokens are exactly 1.5x for all of them.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 108
             }
           }
         ]
@@ -926,6 +2317,7 @@
               "quality": "low",
               "size": "1024x1024"
             },
+            "priceBasis": "The rate this tier carried before edits were split by orientation, kept unchanged. An edit is NOT priced like a generation: OpenAI bills the returned image PLUS the caller's input image, whose token count scales with its area, so this flat price is a FLOOR. The exposure is largest on the low tiers, where the input can cost more than the output: a 1024x1024 source is between ~320 and ~1024 image-input tokens depending on the model's tiling, i.e. $0.003 to $0.010 at $10 per million, against a $0.006 low-quality output. Settle it with one POST to the edits endpoint and read usage.input_tokens_details back. Raise it in Settings > Platform Keys before selling edits of big images on a platform key. Only the square tiers are sold here for that reason: an orientation tier would multiply the same uncapped input cost across three times as many ids, and an edit normally keeps the shape of the image it was given.",
             "price": {
               "unit": "call",
               "baseCredits": 12
@@ -952,6 +2344,7 @@
               "quality": "medium",
               "size": "1024x1024"
             },
+            "priceBasis": "The rate this tier carried before edits were split by orientation, kept unchanged. An edit is NOT priced like a generation: OpenAI bills the returned image PLUS the caller's input image, whose token count scales with its area, so this flat price is a FLOOR. The exposure is largest on the low tiers, where the input can cost more than the output: a 1024x1024 source is between ~320 and ~1024 image-input tokens depending on the model's tiling, i.e. $0.003 to $0.010 at $10 per million, against a $0.006 low-quality output. Settle it with one POST to the edits endpoint and read usage.input_tokens_details back. Raise it in Settings > Platform Keys before selling edits of big images on a platform key. Only the square tiers are sold here for that reason: an orientation tier would multiply the same uncapped input cost across three times as many ids, and an edit normally keeps the shape of the image it was given.",
             "price": {
               "unit": "call",
               "baseCredits": 106
@@ -978,9 +2371,172 @@
               "quality": "high",
               "size": "1024x1024"
             },
+            "priceBasis": "The rate this tier carried before edits were split by orientation, kept unchanged. An edit is NOT priced like a generation: OpenAI bills the returned image PLUS the caller's input image, whose token count scales with its area, so this flat price is a FLOOR. The exposure is largest on the low tiers, where the input can cost more than the output: a 1024x1024 source is between ~320 and ~1024 image-input tokens depending on the model's tiling, i.e. $0.003 to $0.010 at $10 per million, against a $0.006 low-quality output. Settle it with one POST to the edits endpoint and read usage.input_tokens_details back. Raise it in Settings > Platform Keys before selling edits of big images on a platform key. Only the square tiers are sold here for that reason: an orientation tier would multiply the same uncapped input cost across three times as many ids, and an edit normally keeps the shape of the image it was given.",
             "price": {
               "unit": "call",
               "baseCredits": 422
+            }
+          },
+          {
+            "id": "openai-edit-gpt-image-1-5-low",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 edit (low)",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1024x1024"
+            },
+            "priceBasis": "Same OUTPUT rate as the identical quality tier of this family on create_image: OpenAI charges the same per returned image. An edit is NOT priced like a generation: OpenAI bills the returned image PLUS the caller's input image, whose token count scales with its area, so this flat price is a FLOOR. The exposure is largest on the low tiers, where the input can cost more than the output: a 1024x1024 source is between ~320 and ~1024 image-input tokens depending on the model's tiling, i.e. $0.003 to $0.010 at $10 per million, against a $0.006 low-quality output. Settle it with one POST to the edits endpoint and read usage.input_tokens_details back. Raise it in Settings > Platform Keys before selling edits of big images on a platform key. Only the square tiers are sold here for that reason: an orientation tier would multiply the same uncapped input cost across three times as many ids, and an edit normally keeps the shape of the image it was given.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 18
+            }
+          },
+          {
+            "id": "openai-edit-gpt-image-1-5-medium",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 edit (medium)",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1024x1024"
+            },
+            "priceBasis": "Same OUTPUT rate as the identical quality tier of this family on create_image: OpenAI charges the same per returned image. An edit is NOT priced like a generation: OpenAI bills the returned image PLUS the caller's input image, whose token count scales with its area, so this flat price is a FLOOR. The exposure is largest on the low tiers, where the input can cost more than the output: a 1024x1024 source is between ~320 and ~1024 image-input tokens depending on the model's tiling, i.e. $0.003 to $0.010 at $10 per million, against a $0.006 low-quality output. Settle it with one POST to the edits endpoint and read usage.input_tokens_details back. Raise it in Settings > Platform Keys before selling edits of big images on a platform key. Only the square tiers are sold here for that reason: an orientation tier would multiply the same uncapped input cost across three times as many ids, and an edit normally keeps the shape of the image it was given.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 68
+            }
+          },
+          {
+            "id": "openai-edit-gpt-image-1-5-high",
+            "upstream": "gpt-image-1.5",
+            "label": "OpenAI GPT Image 1.5 edit (high)",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1024x1024"
+            },
+            "priceBasis": "Same OUTPUT rate as the identical quality tier of this family on create_image: OpenAI charges the same per returned image. An edit is NOT priced like a generation: OpenAI bills the returned image PLUS the caller's input image, whose token count scales with its area, so this flat price is a FLOOR. The exposure is largest on the low tiers, where the input can cost more than the output: a 1024x1024 source is between ~320 and ~1024 image-input tokens depending on the model's tiling, i.e. $0.003 to $0.010 at $10 per million, against a $0.006 low-quality output. Settle it with one POST to the edits endpoint and read usage.input_tokens_details back. Raise it in Settings > Platform Keys before selling edits of big images on a platform key. Only the square tiers are sold here for that reason: an orientation tier would multiply the same uncapped input cost across three times as many ids, and an edit normally keeps the shape of the image it was given.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 266
+            }
+          },
+          {
+            "id": "openai-edit-gpt-image-1-mini-low",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini edit (low)",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "low",
+              "size": "1024x1024"
+            },
+            "priceBasis": "Same OUTPUT rate as the identical quality tier of this family on create_image: OpenAI charges the same per returned image. An edit is NOT priced like a generation: OpenAI bills the returned image PLUS the caller's input image, whose token count scales with its area, so this flat price is a FLOOR. The exposure is largest on the low tiers, where the input can cost more than the output: a 1024x1024 source is between ~320 and ~1024 image-input tokens depending on the model's tiling, i.e. $0.003 to $0.010 at $10 per million, against a $0.006 low-quality output. Settle it with one POST to the edits endpoint and read usage.input_tokens_details back. Raise it in Settings > Platform Keys before selling edits of big images on a platform key. Only the square tiers are sold here for that reason: an orientation tier would multiply the same uncapped input cost across three times as many ids, and an edit normally keeps the shape of the image it was given.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 10
+            }
+          },
+          {
+            "id": "openai-edit-gpt-image-1-mini-medium",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini edit (medium)",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "medium",
+              "size": "1024x1024"
+            },
+            "priceBasis": "Same OUTPUT rate as the identical quality tier of this family on create_image: OpenAI charges the same per returned image. An edit is NOT priced like a generation: OpenAI bills the returned image PLUS the caller's input image, whose token count scales with its area, so this flat price is a FLOOR. The exposure is largest on the low tiers, where the input can cost more than the output: a 1024x1024 source is between ~320 and ~1024 image-input tokens depending on the model's tiling, i.e. $0.003 to $0.010 at $10 per million, against a $0.006 low-quality output. Settle it with one POST to the edits endpoint and read usage.input_tokens_details back. Raise it in Settings > Platform Keys before selling edits of big images on a platform key. Only the square tiers are sold here for that reason: an orientation tier would multiply the same uncapped input cost across three times as many ids, and an edit normally keeps the shape of the image it was given.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 22
+            }
+          },
+          {
+            "id": "openai-edit-gpt-image-1-mini-high",
+            "upstream": "gpt-image-1-mini",
+            "label": "OpenAI GPT Image 1 mini edit (high)",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constraints": {
+              "prompt": {
+                "maxLength": 32000
+              }
+            },
+            "constants": {
+              "quality": "high",
+              "size": "1024x1024"
+            },
+            "priceBasis": "Same OUTPUT rate as the identical quality tier of this family on create_image: OpenAI charges the same per returned image. An edit is NOT priced like a generation: OpenAI bills the returned image PLUS the caller's input image, whose token count scales with its area, so this flat price is a FLOOR. The exposure is largest on the low tiers, where the input can cost more than the output: a 1024x1024 source is between ~320 and ~1024 image-input tokens depending on the model's tiling, i.e. $0.003 to $0.010 at $10 per million, against a $0.006 low-quality output. Settle it with one POST to the edits endpoint and read usage.input_tokens_details back. Raise it in Settings > Platform Keys before selling edits of big images on a platform key. Only the square tiers are sold here for that reason: an orientation tier would multiply the same uncapped input cost across three times as many ids, and an edit normally keeps the shape of the image it was given.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 72
             }
           }
         ]
@@ -1458,7 +3014,17 @@
           "prompt": "content[0].text",
           "aspect_ratio": "ratio",
           "duration_seconds": "duration",
-          "seed": "seed"
+          "seed": "seed",
+          "input_image": {
+            "path": "content[1].image_url.url",
+            "encoding": "data_url",
+            "role": "reference",
+            "maxItems": 4,
+            "itemConstants": {
+              "content[1].type": "image_url",
+              "content[1].role": "reference_image"
+            }
+          }
         },
         "constants": {
           "content[0].type": "text"
@@ -1472,7 +3038,8 @@
               "prompt",
               "aspect_ratio",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_image"
             ],
             "constraints": {
               "duration_seconds": {
@@ -1529,7 +3096,8 @@
               "prompt",
               "aspect_ratio",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_image"
             ],
             "constraints": {
               "duration_seconds": {
@@ -1586,7 +3154,8 @@
               "prompt",
               "aspect_ratio",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_image"
             ],
             "constraints": {
               "duration_seconds": {
@@ -1643,7 +3212,8 @@
               "prompt",
               "aspect_ratio",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_image"
             ],
             "constraints": {
               "duration_seconds": {
@@ -1685,7 +3255,8 @@
               "prompt",
               "aspect_ratio",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_image"
             ],
             "constraints": {
               "duration_seconds": {
@@ -1727,7 +3298,8 @@
               "prompt",
               "aspect_ratio",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_image"
             ],
             "constraints": {
               "duration_seconds": {
@@ -1769,7 +3341,8 @@
               "prompt",
               "aspect_ratio",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_image"
             ],
             "constraints": {
               "duration_seconds": {
@@ -1811,7 +3384,8 @@
               "prompt",
               "aspect_ratio",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_image"
             ],
             "constraints": {
               "duration_seconds": {
@@ -1853,7 +3427,8 @@
               "prompt",
               "aspect_ratio",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_image"
             ],
             "constraints": {
               "duration_seconds": {
@@ -1895,7 +3470,8 @@
               "prompt",
               "aspect_ratio",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_image"
             ],
             "constraints": {
               "duration_seconds": {
@@ -1937,7 +3513,8 @@
               "prompt",
               "aspect_ratio",
               "duration_seconds",
-              "seed"
+              "seed",
+              "input_image"
             ],
             "constraints": {
               "duration_seconds": {
@@ -1986,7 +3563,12 @@
           "prompt": "prompt",
           "negative_prompt": "negative_prompt",
           "aspect_ratio": "aspect_ratio",
-          "seed": "seed"
+          "seed": "seed",
+          "input_image": {
+            "path": "image",
+            "encoding": "file_ref",
+            "role": "source"
+          }
         },
         "models": [
           {
@@ -2028,7 +3610,6 @@
             "label": "Stable Diffusion 3.5 Large Turbo",
             "capabilities": [
               "prompt",
-              "negative_prompt",
               "aspect_ratio",
               "seed"
             ],
@@ -2083,6 +3664,77 @@
                 ]
               }
             },
+            "price": {
+              "unit": "call",
+              "baseCredits": 70
+            }
+          },
+          {
+            "id": "sd3.5-large-img2img",
+            "upstream": "sd3.5-large",
+            "label": "Stable Diffusion 3.5 Large (image to image)",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "seed",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constants": {
+              "mode": "image-to-image",
+              "strength": 0.5
+            },
+            "priceBasis": "Same rate as sd3.5-large: Stability charges per generated image on this endpoint, and mode 'image-to-image' is the same upstream model doing the same amount of work.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 130
+            }
+          },
+          {
+            "id": "sd3.5-large-turbo-img2img",
+            "upstream": "sd3.5-large-turbo",
+            "label": "Stable Diffusion 3.5 Large Turbo (image to image)",
+            "capabilities": [
+              "prompt",
+              "seed",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constants": {
+              "mode": "image-to-image",
+              "strength": 0.5
+            },
+            "priceBasis": "Same rate as sd3.5-large-turbo: Stability charges per generated image on this endpoint, and mode 'image-to-image' is the same upstream model doing the same amount of work.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 80
+            }
+          },
+          {
+            "id": "sd3.5-medium-img2img",
+            "upstream": "sd3.5-medium",
+            "label": "Stable Diffusion 3.5 Medium (image to image)",
+            "capabilities": [
+              "prompt",
+              "negative_prompt",
+              "seed",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "constants": {
+              "mode": "image-to-image",
+              "strength": 0.5
+            },
+            "priceBasis": "Same rate as sd3.5-medium: Stability charges per generated image on this endpoint, and mode 'image-to-image' is the same upstream model doing the same amount of work.",
             "price": {
               "unit": "call",
               "baseCredits": 70
@@ -2198,6 +3850,241 @@
       }
     },
     {
+      "apiToolId": "6ff4a548-880b-4efe-84d9-8aed2ae66b60",
+      "endpointName": "generate_image",
+      "sourceFile": "xai.json",
+      "generationSpec": {
+        "kind": "image",
+        "modelParam": "model",
+        "assetPath": "data[0].url",
+        "paramMap": {
+          "prompt": "prompt",
+          "aspect_ratio": "aspect_ratio"
+        },
+        "models": [
+          {
+            "id": "grok-imagine-image",
+            "upstream": "grok-imagine-image",
+            "label": "Grok Imagine Image (1k)",
+            "capabilities": [
+              "prompt",
+              "aspect_ratio"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "auto",
+                  "1:1",
+                  "16:9",
+                  "9:16",
+                  "4:3",
+                  "3:4",
+                  "3:2",
+                  "2:3",
+                  "2:1",
+                  "1:2",
+                  "19.5:9",
+                  "9:19.5",
+                  "20:9",
+                  "9:20"
+                ]
+              }
+            },
+            "constants": {
+              "resolution": "1k"
+            },
+            "priceBasis": "xAI's published price for grok-imagine-image is $0.02 per image, doubled to 40 credits, the same 2x basis as the Grok Imagine video models on this API ($0.05/s sold at 100 credits/s). The resolution is PINNED rather than offered, so the size the price was computed for is the size that runs.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 40
+            }
+          },
+          {
+            "id": "grok-imagine-image-2k",
+            "upstream": "grok-imagine-image",
+            "label": "Grok Imagine Image (2k)",
+            "capabilities": [
+              "prompt",
+              "aspect_ratio"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "auto",
+                  "1:1",
+                  "16:9",
+                  "9:16",
+                  "4:3",
+                  "3:4",
+                  "3:2",
+                  "2:3",
+                  "2:1",
+                  "1:2",
+                  "19.5:9",
+                  "9:19.5",
+                  "20:9",
+                  "9:20"
+                ]
+              }
+            },
+            "constants": {
+              "resolution": "2k"
+            },
+            "priceBasis": "xAI's published price for grok-imagine-image is $0.02 per image, doubled to 40 credits, the same 2x basis as the Grok Imagine video models on this API ($0.05/s sold at 100 credits/s). The 2k tier is priced at TWICE the 1k tier deliberately: xAI publishes one figure per model and does not say what the larger size costs, and a resolution a caller can change for free is the one way this endpoint could bill less than it costs. It can only over-charge; lower it in Settings > Platform Keys once the real 2k rate is known.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 80
+            }
+          },
+          {
+            "id": "grok-imagine-image-quality",
+            "upstream": "grok-imagine-image-quality",
+            "label": "Grok Imagine Image Quality (1k)",
+            "capabilities": [
+              "prompt",
+              "aspect_ratio"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "auto",
+                  "1:1",
+                  "16:9",
+                  "9:16",
+                  "4:3",
+                  "3:4",
+                  "3:2",
+                  "2:3",
+                  "2:1",
+                  "1:2",
+                  "19.5:9",
+                  "9:19.5",
+                  "20:9",
+                  "9:20"
+                ]
+              }
+            },
+            "constants": {
+              "resolution": "1k"
+            },
+            "priceBasis": "xAI's published price for grok-imagine-image-quality is $0.05 per image, doubled to 100 credits, the same 2x basis as the Grok Imagine video models on this API ($0.08/s sold at 160 credits/s). The resolution is PINNED rather than offered, so the size the price was computed for is the size that runs.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 100
+            }
+          },
+          {
+            "id": "grok-imagine-image-quality-2k",
+            "upstream": "grok-imagine-image-quality",
+            "label": "Grok Imagine Image Quality (2k)",
+            "capabilities": [
+              "prompt",
+              "aspect_ratio"
+            ],
+            "required": [
+              "prompt"
+            ],
+            "constraints": {
+              "aspect_ratio": {
+                "allowed": [
+                  "auto",
+                  "1:1",
+                  "16:9",
+                  "9:16",
+                  "4:3",
+                  "3:4",
+                  "3:2",
+                  "2:3",
+                  "2:1",
+                  "1:2",
+                  "19.5:9",
+                  "9:19.5",
+                  "20:9",
+                  "9:20"
+                ]
+              }
+            },
+            "constants": {
+              "resolution": "2k"
+            },
+            "priceBasis": "xAI's published price for grok-imagine-image-quality is $0.05 per image, doubled to 100 credits, the same 2x basis as the Grok Imagine video models on this API ($0.08/s sold at 160 credits/s). The 2k tier is priced at TWICE the 1k tier deliberately: xAI publishes one figure per model and does not say what the larger size costs, and a resolution a caller can change for free is the one way this endpoint could bill less than it costs. It can only over-charge; lower it in Settings > Platform Keys once the real 2k rate is known.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 200
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiToolId": "84941f29-0f71-4c2e-a726-6566a7f9e12d",
+      "endpointName": "edit_image",
+      "sourceFile": "xai.json",
+      "generationSpec": {
+        "kind": "image",
+        "modelParam": "model",
+        "assetPath": "data[0].url",
+        "paramMap": {
+          "prompt": "prompt",
+          "input_image": {
+            "path": "image.url",
+            "encoding": "data_url",
+            "role": "source"
+          }
+        },
+        "models": [
+          {
+            "id": "grok-imagine-edit",
+            "upstream": "grok-imagine-image",
+            "label": "Grok Imagine Edit",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "priceBasis": "Same published per-image rate as grok-imagine-image on generate_image ($0.02, doubled to 40 credits). A FLOOR for an edit: xAI publishes no separate rate for the source image an edit sends, so if it is billed on top this flat price does not cover it. Confirm before selling edits of large images on a platform key. The endpoint accepts up to three source images; exactly ONE is offered here, because a flat price multiplied by a caller-chosen count is the one way this endpoint could bill less than it costs.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 40
+            }
+          },
+          {
+            "id": "grok-imagine-edit-quality",
+            "upstream": "grok-imagine-image-quality",
+            "label": "Grok Imagine Edit Quality",
+            "capabilities": [
+              "prompt",
+              "input_image"
+            ],
+            "required": [
+              "prompt",
+              "input_image"
+            ],
+            "priceBasis": "Same published per-image rate as grok-imagine-image-quality on generate_image ($0.05, doubled to 100 credits). A FLOOR for an edit: xAI publishes no separate rate for the source image an edit sends, so if it is billed on top this flat price does not cover it. Confirm before selling edits of large images on a platform key. The endpoint accepts up to three source images; exactly ONE is offered here, because a flat price multiplied by a caller-chosen count is the one way this endpoint could bill less than it costs.",
+            "price": {
+              "unit": "call",
+              "baseCredits": 100
+            }
+          }
+        ],
+        "constants": {
+          "image.type": "image_url"
+        }
+      }
+    },
+    {
       "apiToolId": "fddb5a87-aa56-448e-bdb4-1a4e4882531e",
       "endpointName": "generate_video",
       "sourceFile": "xai.json",
@@ -2251,6 +4138,7 @@
                 ]
               }
             },
+            "priceBasis": "xAI's published price for this model is $0.05 per second of output, doubled to 100 credits per second. The per-second figures are the ones this endpoint's own 'model' parameter documents, so the number is re-derivable without leaving the file. Resolution is offered rather than pinned because xAI publishes one rate per model per second and none per resolution; if that ever stops being true, 480p and 720p become separate models the way the image tiers are.",
             "price": {
               "unit": "second",
               "unitCredits": 100
@@ -2290,6 +4178,7 @@
                 ]
               }
             },
+            "priceBasis": "xAI's published price for this model is $0.08 per second of output, doubled to 160 credits per second. The per-second figures are the ones this endpoint's own 'model' parameter documents, so the number is re-derivable without leaving the file. Resolution is offered rather than pinned because xAI publishes one rate per model per second and none per resolution; if that ever stops being true, 480p and 720p become separate models the way the image tiers are.",
             "price": {
               "unit": "second",
               "unitCredits": 160

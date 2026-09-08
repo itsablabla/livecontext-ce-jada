@@ -122,6 +122,7 @@ export function FormTriggerOutput({
           stepAlias={stepAlias}
           dataType="output"
           isDraggable={false}
+          node={currentNode}
         />
       ) : (
         <div className="space-y-1">

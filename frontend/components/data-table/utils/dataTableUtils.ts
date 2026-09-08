@@ -1,3 +1,4 @@
+import { resolveColumnType } from '@/utils/columnSpec';
 import type { DataSourceItemRow, PaginationState } from '../types';
 
 /**
@@ -187,6 +188,111 @@ export function extractCallId(rowData: any, rowId: any): any {
 }
 
 /**
+ * A rendered row's data with the identity {@link normalizeRow} added to it removed.
+ *
+ * `normalizeRow` writes `_callId` into every row's data (and `id`, when the row carried none) so
+ * the grid can display them. That is display state, not the user's data, and anything that writes
+ * a row's data back to the server has to undo it first: a row PERSISTED with `_callId` is read
+ * back through `extractCallId` on the next fetch and reports the id of the row it was copied from.
+ * The copy then shares its source's identity everywhere the grid keys on `row.id` - selection,
+ * inline edit, delete, and the "here is your copy" highlight - so it is invisible and the original
+ * takes the writes meant for it.
+ *
+ * Only the keys normalizeRow actually wrote are removed (it records them as it goes). A user
+ * column named `id` was left alone on the way in and survives the round trip, even when its value
+ * happens to equal the row's own id.
+ *
+ * `_callId` goes unconditionally on top of that. It is a reserved internal key that
+ * {@link extractCallId} reads back as the row's identity, so it is never legitimate stored data -
+ * and a table built before this function existed can hold one that no normalizer recorded, which
+ * would otherwise survive every future copy of that row.
+ */
+export function stripInjectedIdentity(row: DataSourceItemRow): Record<string, any> {
+  const rest: Record<string, any> = { ...(row.data ?? {}) };
+  for (const key of row._injectedDataKeys ?? []) {
+    delete rest[key];
+  }
+  delete rest._callId;
+  return rest;
+}
+
+/**
+ * A row's data as it should be WRITTEN BACK: the user's fields, and nothing the read path added.
+ *
+ * Two things get added on the way in and must not be persisted by anything that copies a row.
+ * {@link stripInjectedIdentity} covers the display identity. The other is the vector columns:
+ * despite the name, the server's "vector preview" is the WHOLE embedding rendered as text
+ * (`embedding::text`, no truncation) merged into the row's data, so a 1536-dimension column adds
+ * roughly 18 KB of numbers to every row it fetches. Written back it becomes a literal string in
+ * JSONB - invisible in the grid, since the vector cell renders `vec(N)` whatever the value holds,
+ * and carried forward into every later copy of that row. The real embedding lives in its own table
+ * and is not reproduced here at all: a copy is simply absent from similarity search until it is
+ * re-embedded.
+ */
+export function toWritableRowData(
+  row: DataSourceItemRow,
+  columns?: Array<{ field: string; type?: string }>,
+): Record<string, any> {
+  const data = stripInjectedIdentity(row);
+  for (const column of columns ?? []) {
+    if (!column.type || resolveColumnType(column.type) !== 'vector') continue;
+    delete data[column.field.startsWith('data.') ? column.field.slice('data.'.length) : column.field];
+  }
+  return data;
+}
+
+/**
+ * The id a row SHOWS: its own `id` field when it has one, else the synthetic row id.
+ *
+ * Mirrors what the grid renders for the ID lane, so anything that reports a row's identity
+ * elsewhere (CSV export, for one) names the same row the user is looking at rather than the
+ * expansion counter underneath it.
+ */
+export function displayIdOf(row: DataSourceItemRow): string | number {
+  // Where the grid reads the identity out of `row.data` - nested navigation, and workflow rows,
+  // whose ID lane renders `row.data.id ?? row.id` at every level - so does this. At a plain
+  // datasource root it does NOT: `data.id` there is either the id this code injected or a user
+  // column that happens to be called `id`, while the grid shows the row's own id, and preferring
+  // the field would make the export disagree with the screen.
+  if (!row._jsonPath && !row._isWorkflowStep) return row.id;
+  const own = row.data?.id;
+  const injected = row._injectedDataKeys?.includes('id');
+  // PRESENT, not truthy - `0` and `''` are ids a CRUD or agent step really can return, and showing
+  // the expansion counter in their place is the very substitution this whole change removes. Only a
+  // missing id (or a non-scalar, which React cannot render) falls back to the row's own.
+  const isScalar = typeof own === 'string' || typeof own === 'number';
+  return !injected && own !== undefined && own !== null && isScalar ? own : row.id;
+}
+
+/**
+ * Give an item a display identity WITHOUT overwriting the one it already has.
+ *
+ * Used by the nested-navigation normalizers, which expand one stored row into N grid rows and need
+ * a per-row id for React keys and selection. That id is a FALLBACK: an item that carries its own
+ * `id` (table rows returned by a CRUD or agent step) must keep the real value, or the grid shows a
+ * 1..N counter where the user came to read the database ids.
+ *
+ * Fills in only an ABSENT id - the same rule {@link normalizeRow} applies on the backend nested
+ * routes. `data.id` is the item's own field, and `0` or `''` are values a CRUD or agent step really
+ * returns: overwriting one destroys real data, because `stripInjectedIdentity` then takes the key
+ * back out and the value is gone from every copy of the row too.
+ *
+ * The injected key is reported so {@link stripInjectedIdentity} removes exactly what was written
+ * and nothing else.
+ */
+export function withDisplayIdentity(
+  itemData: Record<string, any>,
+  fallbackId: number,
+): { data: Record<string, any>; injectedDataKeys: string[] } {
+  const data: Record<string, any> = { ...itemData };
+  if (data.id !== undefined && data.id !== null) {
+    return { data, injectedDataKeys: [] };
+  }
+  data.id = fallbackId;
+  return { data, injectedDataKeys: ['id'] };
+}
+
+/**
  * Normalize a single row from API response to DataSourceItemRow format
  * This pattern was duplicated 9+ times with slight variations.
  */
@@ -219,12 +325,23 @@ export function normalizeRow(
     }
   }
 
-  // Ensure callId is in the data for display
-  if (callId && !rowData.id) {
+  // Ensure callId is in the data for display. What gets written is recorded on the row
+  // (`_injectedDataKeys`) so a writer can take exactly these keys back out - see
+  // stripInjectedIdentity. Inferring it afterwards means comparing values, which cannot tell a
+  // user column named `id` that happens to hold this row's id from one we wrote ourselves.
+  //
+  // PRESENT, not truthy, for the same reason as {@link withDisplayIdentity}: with `extractPath`
+  // this `rowData` IS the navigated item, and `0` / `''` are ids a CRUD or agent step really
+  // returns. Overwriting one and then declaring it injected destroys it - stripInjectedIdentity
+  // takes the key back out and the value is gone from every copy of the row.
+  const injectedDataKeys: string[] = [];
+  if (callId && (rowData.id === undefined || rowData.id === null)) {
     rowData.id = callId;
+    injectedDataKeys.push('id');
   }
   if (callId && !rowData._callId) {
     rowData._callId = callId;
+    injectedDataKeys.push('_callId');
   }
 
   const result: DataSourceItemRow = {
@@ -236,6 +353,7 @@ export function normalizeRow(
     created_at: row.created_at ?? row.createdAt ?? row.updated_at ?? row.updatedAt ?? new Date().toISOString(),
     updated_at: row.updated_at ?? row.updatedAt ?? null,
     row_index: row.row_index ?? row.rowIndex,
+    _injectedDataKeys: injectedDataKeys,
   };
 
   // Add optional fields

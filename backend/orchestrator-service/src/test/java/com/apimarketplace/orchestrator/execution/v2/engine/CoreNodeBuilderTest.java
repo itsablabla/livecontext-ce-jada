@@ -7,7 +7,6 @@ import com.apimarketplace.orchestrator.execution.v2.nodes.DecisionNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.ExecutionNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.FilterNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.ForkNode;
-import com.apimarketplace.orchestrator.execution.v2.nodes.GenerateNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.LimitNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.MergeNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.MediaNode;
@@ -739,69 +738,86 @@ class CoreNodeBuilderTest {
         }
     }
 
-    @Nested
-    @DisplayName("createGenerateNodes() - generic params map passthrough")
-    class CreateGenerateNodesTests {
+    /**
+     * A generate core must STOP the run rather than quietly vanish from it.
+     *
+     * <p>{@code createGenerateNodes} was deleted when the node joined the AI
+     * family, and a plan saved before the move still parses (the type stays in
+     * {@code Core.VALID_TYPES}, so the workflow can still be opened and fixed).
+     * Left there, the node simply produced nothing, which is far worse than it
+     * sounds: no node means no key in the map, so the wiring pass drops every
+     * edge that touches it, so every node after it is unreachable, and the run
+     * finishes COMPLETED having executed a fraction of the workflow with nothing
+     * anywhere saying why.
+     *
+     * <p>So the assertion is not "it built nothing" - that was the bug - but
+     * "it refused, and said what to change".
+     */
+    @Test
+    @DisplayName("Should refuse to build a plan holding a generate core, naming the move")
+    void shouldRefuseAGenerateCore() {
+        WorkflowPlan plan = createPlanWithCore("generate", "Make Clip");
+        Map<String, ExecutionNode> nodeMap = new HashMap<>();
 
-        private WorkflowPlan planWithGenerateCore(String label, Map<String, Object> params) {
-            Map<String, Object> data = createBasePlanData();
-            Map<String, Object> coreData = new HashMap<>();
-            coreData.put("id", "g1");
-            coreData.put("type", "generate");
-            coreData.put("label", label);
-            if (params != null) {
-                coreData.put("params", params);
-            }
-            data.put("cores", List.of(coreData));
-            return WorkflowPlan.fromMap(data);
-        }
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+            () -> builder.createCoreNodes(nodeMap, plan, Map.of()));
 
-        @Test
-        @DisplayName("Should create generate node carrying the FULL params map verbatim (validated against the model at execute time)")
-        void shouldCreateGenerateNodeWithParamsMap() {
-            Map<String, Object> params = Map.of(
-                "model", "seedance-2.0-fast",
-                "prompt", "a paper boat in a rain gutter",
-                "duration_seconds", 5,
-                "credential_source", "platform");
-            WorkflowPlan plan = planWithGenerateCore("Make Clip", params);
-            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+        assertTrue(thrown.getMessage().contains("agent:make_clip"),
+            "the message has to name the key the node gets, since that is what every "
+            + "reference to it must be rewritten to: " + thrown.getMessage());
+        assertTrue(nodeMap.isEmpty(),
+            "and it must refuse before building a partial graph");
+    }
 
-            builder.createGenerateNodes(nodeMap, plan);
+    /**
+     * The key in the message comes from the LABEL, and survives a plan that
+     * has none.
+     *
+     * <p>A core with no label falls back to its id, and an id in a stored plan
+     * is routinely already prefixed. Read naively that gives
+     * {@code agent:core_make_clip}: the one thing the message exists to hand
+     * the reader, the key to rewrite every reference to, would be wrong, which
+     * is worse than the silence the refusal replaced.
+     */
+    @Test
+    @DisplayName("Should name the right key even when the core has no label and an already-prefixed id")
+    void shouldDeriveTheKeyFromAnAlreadyPrefixedId() {
+        Map<String, Object> data = createBasePlanData();
+        Map<String, Object> core = new HashMap<>();
+        // No label, and an id that already carries the prefix: exactly the
+        // shape a plan written by the builder frontend has.
+        core.put("id", "core:make_clip");
+        core.put("type", "generate");
+        data.put("cores", List.of(core));
+        WorkflowPlan plan = WorkflowPlan.fromMap(data);
+        Map<String, ExecutionNode> nodeMap = new HashMap<>();
 
-            assertTrue(nodeMap.containsKey("core:make_clip"));
-            assertInstanceOf(GenerateNode.class, nodeMap.get("core:make_clip"));
-            GenerateNode node = (GenerateNode) nodeMap.get("core:make_clip");
-            assertEquals("seedance-2.0-fast", node.getParams().get("model"));
-            // Numbers must survive the plan round trip: a stringified duration would
-            // change what the platform bills the run on.
-            assertEquals(5, node.getParams().get("duration_seconds"));
-            assertEquals("platform", node.getParams().get("credential_source"));
-        }
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+            () -> builder.createCoreNodes(nodeMap, plan, Map.of()));
 
-        @Test
-        @DisplayName("Should create node with empty params when the params map is absent (fails at runtime, not build time)")
-        void shouldCreateNodeWithEmptyParamsWhenAbsent() {
-            WorkflowPlan plan = planWithGenerateCore("Make Clip", null);
-            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+        assertTrue(thrown.getMessage().contains("agent:make_clip"),
+            "the message must name the key the node actually gets: " + thrown.getMessage());
+        assertFalse(thrown.getMessage().contains("agent:core_"),
+            "and must not fold the old prefix into it: " + thrown.getMessage());
+    }
 
-            builder.createGenerateNodes(nodeMap, plan);
+    /**
+     * The refusal is scoped to generate: a plan of ordinary cores still builds.
+     *
+     * <p>A guard that runs before every core node is built is one line away from
+     * failing runs it has no business failing, and that failure would look like
+     * the platform breaking rather than like this change.
+     */
+    @Test
+    @DisplayName("Should still build an ordinary core, so the refusal is not a blanket one")
+    void shouldStillBuildAnOrdinaryCore() {
+        WorkflowPlan plan = createPlanWithCore("wait", "Pause");
+        Map<String, ExecutionNode> nodeMap = new HashMap<>();
 
-            assertTrue(nodeMap.containsKey("core:make_clip"));
-            GenerateNode node = (GenerateNode) nodeMap.get("core:make_clip");
-            assertTrue(node.getParams().isEmpty());
-        }
+        builder.createCoreNodes(nodeMap, plan, Map.of());
 
-        @Test
-        @DisplayName("Should ignore cores that are not generate")
-        void shouldIgnoreNonGenerateCores() {
-            WorkflowPlan plan = createPlanWithCore("download_file", "DL");
-            Map<String, ExecutionNode> nodeMap = new HashMap<>();
-
-            builder.createGenerateNodes(nodeMap, plan);
-
-            assertTrue(nodeMap.isEmpty());
-        }
+        assertTrue(nodeMap.containsKey("core:pause"),
+            "an unrelated core must be unaffected by the generate guard");
     }
 
     // ===== Helper methods =====

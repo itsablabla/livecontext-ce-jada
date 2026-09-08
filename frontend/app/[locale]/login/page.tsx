@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { apiClient } from '@/lib/api';
 import { CE_STATUS_API_PATH } from '@/components/security/onboardingStatus';
 import { isCeFirstRun, type CeFirstRunStatus } from '@/lib/auth/ceFirstRun';
+import { track } from '@/lib/analytics/analytics';
 
 export default function LoginPage() {
   const t = useTranslations('auth.login');
@@ -73,13 +74,17 @@ export default function LoginPage() {
     const result = await embeddedLogin(email, password);
 
     if (result.success) {
+      // Tracked before the reload, which would drop a later call.
+      track('auth_login_succeeded', { method: 'password', has_return_to: !!searchParams.get('returnTo') });
       // Force full page reload so EmbeddedAuthProvider picks up tokens
       window.location.href = returnTo;
     } else {
+      // Bounded reason only: the server message is free text.
+      track('auth_login_failed', { method: 'password', reason: result.error ? 'rejected' : 'unknown' });
       setError(result.error || t('error'));
       setLoading(false);
     }
-  }, [email, password, returnTo, t]);
+  }, [email, password, returnTo, t, searchParams]);
 
   if (IS_CLOUD) {
     return (

@@ -16,12 +16,14 @@ import { orchestratorApi } from '@/lib/api';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
 import { isEventForWorkflow } from '@/lib/workflow/workflowEventScope';
 import { useWorkflowRunContext } from '@/contexts/WorkflowRunContext';
+import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { useWorkflowEventBridge } from '@/components/views/workflow/hooks';
 import { streamDebug } from '@/contexts/workflow-run/streamingDebug';
 import {
   makeEmptyRunPanelData,
   publishRunPanelData,
   RUN_PANEL_ACTION_EVENT,
+  type RunPanelAction,
   type RunPanelActionDetail,
 } from '@/components/workflow/run-panel/runPanelBus';
 import { useDefaultEpochSelection } from '@/components/workflow/run-panel/useDefaultEpochSelection';
@@ -93,9 +95,10 @@ export function WorkflowRunCanvas({
   applicationActionRef: externalApplicationActionRef,
   nodesRef: externalNodesRef,
 }: WorkflowRunCanvasProps) {
-  const t = useTranslations('common');
+  const tRoot = useTranslations();
   const { mode: workflowMode, isPreviewOnly, viewingEpoch, setViewingEpoch, runId: contextRunId } = useWorkflowMode();
   const runContext = useWorkflowRunContext();
+  const canMutate = useCanMutateInCurrentOrg();
 
   // ── Diagnostic: confirm whether this component renders on the marketplace
   // preview route. If MOUNT log fires but no WorkflowBuilder MOUNT follows,
@@ -177,51 +180,79 @@ export function WorkflowRunCanvas({
     });
   }, [onRunInfoChange]);
 
-  // ── Handle graceful stop (RUNNING/PAUSED → WAITING_TRIGGER) ──
-  const handleStopRun = useCallback(async () => {
-    const activeRunId = currentRunInfo?.runId || currentRunInfo?.id || runId;
-    if (!activeRunId || !runContext) return;
-    try {
-      await runContext.cancelRun(activeRunId);
-    } catch (err) {
-      console.error('[WorkflowRunCanvas] Failed to stop workflow:', err);
-      window.dispatchEvent(new CustomEvent('workflowToast', {
-        detail: { type: 'error', message: 'Failed to stop workflow' },
-      }));
+  // ── Run actions (stop / hard cancel / reactivate) ──
+  //
+  // Two call shapes on purpose. `runAction` REJECTS, so a caller that has its own
+  // way of reporting (the panel surfaces, whose button shows the failure on
+  // itself) can see what went wrong. The `handle*` wrappers below add the toast
+  // and are what the canvas pill uses, since a pill click has nowhere else to
+  // put an error.
+  // The SAME run this canvas publishes to the bus, `contextRunId` included: a run
+  // bound only through the mode context was published and then not claimable, so
+  // actions on it silently took the REST path instead of the run manager the
+  // whole delegation exists to keep in sync.
+  const actionableRunId = currentRunInfo?.runId || currentRunInfo?.id || runId || contextRunId || null;
+  const canRunAction = !!actionableRunId && !!runContext;
+  const runAction = useCallback(async (action: RunPanelAction, requestedRunId?: string | null) => {
+    // The CALLER's run wins. A panel binds the run the user just picked before
+    // asking the page to rebind this canvas, so for that window the canvas is
+    // still on the previous one - and acting on it would stop a different run
+    // from the bar the button sits in.
+    const targetRunId = requestedRunId || currentRunInfo?.runId || currentRunInfo?.id || runId || contextRunId;
+    if (!targetRunId || !runContext) {
+      // Never silently: a stop that does nothing and says nothing is the whole
+      // bug. Callers turn this into a visible failure; `canRunAction` keeps the
+      // bus from claiming a request this canvas could not have taken anyway.
+      throw new Error('This canvas has no run bound to it');
     }
-  }, [currentRunInfo, runId, runContext]);
+    if (action === 'stop') await runContext.cancelRun(targetRunId);
+    else if (action === 'cancel') await runContext.hardCancelRun(targetRunId);
+    else await runContext.reactivateRun(targetRunId);
+  }, [currentRunInfo, runId, contextRunId, runContext]);
 
-  // ── Handle hard cancel (WAITING_TRIGGER → terminal CANCELLED) ──
-  const handleCancelRun = useCallback(async () => {
-    const activeRunId = currentRunInfo?.runId || currentRunInfo?.id || runId;
-    if (!activeRunId || !runContext) return;
-    try {
-      await runContext.hardCancelRun(activeRunId);
-    } catch (err) {
-      console.error('[WorkflowRunCanvas] Failed to cancel workflow:', err);
-      window.dispatchEvent(new CustomEvent('workflowToast', {
-        detail: { type: 'error', message: 'Failed to cancel workflow' },
-      }));
-    }
-  }, [currentRunInfo, runId, runContext]);
+  // What the PILL shows while it works: same spinner and same "it failed" mark as
+  // every other surface carrying this control, so the most-used stop of the
+  // product is not the one that looks dead while it runs.
+  /** The run on screen right now, for callbacks that settle after a rebind. */
+  const actionableRunIdRef = useRef<string | null>(actionableRunId);
+  useEffect(() => { actionableRunIdRef.current = actionableRunId; }, [actionableRunId]);
+  const [pillAction, setPillAction] = useState<RunPanelAction | null>(null);
+  /**
+   * The run a failure was raised on, or `undefined` when nothing has failed.
+   *
+   * Three-valued on purpose: a stop pressed with NO run bound fails too, and it
+   * fails on `null` - which a two-valued flag would read as "no failure" and
+   * swallow, reintroducing the silent dead click.
+   */
+  const [pillFailed, setPillFailed] = useState<string | null | undefined>(undefined);
+  const toastRunAction = useCallback((action: RunPanelAction) => {
+    // Remembered up front: by the time this settles the canvas may be bound to
+    // another run, and a failure mark belongs to the run it was raised on.
+    const attemptedRunId = actionableRunIdRef.current;
+    setPillFailed(undefined);
+    setPillAction(action);
+    runAction(action)
+      .catch((err: unknown) => {
+        console.error(`[WorkflowRunCanvas] Failed to ${action} workflow:`, err);
+        setPillFailed(attemptedRunId);
+        // Through next-intl like every other user-facing string: these three
+        // messages were hardcoded English, and this is the pass that moved them.
+        window.dispatchEvent(new CustomEvent('workflowToast', {
+          detail: { type: 'error', message: tRoot('workflow.runAction.failed') },
+        }));
+      })
+      // Run-keyed like the failure mark: a late settle must not stop the spinner
+      // of a run this canvas has since rebound to.
+      .finally(() => { if (actionableRunIdRef.current === attemptedRunId) setPillAction(null); });
+  }, [runAction, tRoot]);
 
-  // ── Handle reactivate (CANCELLED → WAITING_TRIGGER) ──
-  const handleReactivateRun = useCallback(async () => {
-    const activeRunId = currentRunInfo?.runId || currentRunInfo?.id || runId;
-    if (!activeRunId || !runContext) return;
-    try {
-      await runContext.reactivateRun(activeRunId);
-    } catch (err) {
-      console.error('[WorkflowRunCanvas] Failed to reactivate workflow:', err);
-      window.dispatchEvent(new CustomEvent('workflowToast', {
-        detail: { type: 'error', message: 'Failed to reactivate workflow' },
-      }));
-    }
-  }, [currentRunInfo, runId, runContext]);
+  const handleStopRun = useCallback(() => toastRunAction('stop'), [toastRunAction]);
+  const handleCancelRun = useCallback(() => toastRunAction('cancel'), [toastRunAction]);
+  const handleReactivateRun = useCallback(() => toastRunAction('reactivate'), [toastRunAction]);
 
   // ── The run the surfaces are bound to (URL run, in-place run, or the one the
   // run info itself reports) ──
-  const activeRunId = currentRunInfo?.runId || currentRunInfo?.id || runId || contextRunId || null;
+  const activeRunId = actionableRunId;
 
   // ── Publish the run snapshot to the side-panel Run tab ──
   // The panel lives in the app-layout tree (no shared provider), so the state
@@ -257,15 +288,34 @@ export function WorkflowRunCanvas({
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<RunPanelActionDetail>).detail;
       if (!detail) return;
-      if (detail.workflowId && workflowId && detail.workflowId !== workflowId) return;
-      if (isPreviewOnly) return;
-      if (detail.action === 'stop') handleStopRun();
-      else if (detail.action === 'cancel') handleCancelRun();
-      else if (detail.action === 'reactivate') handleReactivateRun();
+      // Both sides must name the same workflow. `workflowId` is required, so the
+      // first term guards a shape the type system already rules out - kept
+      // because CLAIMING is now a promise to act: a canvas that answered for a
+      // workflow it does not own would suppress the caller's fallback.
+      if (!workflowId || (detail.workflowId && detail.workflowId !== workflowId)) return;
+      // Already taken by another canvas of the same workflow (a self-referencing
+      // sub-workflow mounts two): one action, not two identical REST calls.
+      if (detail.handled) return;
+
+      // Declining is an ANSWER: a marketplace preview claims the request and does
+      // nothing, so the caller does not fall back to the REST call and work around
+      // a surface that is read-only by contract.
+      if (isPreviewOnly) { detail.handled = true; return; }
+
+      // Only claim what this canvas can actually carry out. Claiming
+      // unconditionally re-created the very bug this protocol exists to kill: a
+      // canvas with no bound run swallowed the request, suppressed the fallback,
+      // and the click did nothing at all.
+      if (!canRunAction) return;
+      detail.handled = true;
+      // The promise goes back to the caller, so `pending` is real and a failure
+      // reaches the button that was pressed - not only the canvas' own toast,
+      // which the application page and the share link do not even host.
+      detail.result = runAction(detail.action, detail.runId);
     };
     window.addEventListener(RUN_PANEL_ACTION_EVENT, handler);
     return () => window.removeEventListener(RUN_PANEL_ACTION_EVENT, handler);
-  }, [workflowId, isPreviewOnly, handleStopRun, handleCancelRun, handleReactivateRun]);
+  }, [workflowId, isPreviewOnly, canRunAction, runAction]);
 
   // ── Entering run mode shows ALL epochs ──
   //
@@ -290,9 +340,15 @@ export function WorkflowRunCanvas({
         showReadOnlyBadge={isPreviewOnly}
         currentRunInfo={currentRunInfo}
         isStepByStep={isStepByStep}
-        onStop={isPreviewOnly ? undefined : handleStopRun}
-        onCancel={isPreviewOnly || hideToggle ? undefined : handleCancelRun}
-        onReactivate={isPreviewOnly ? undefined : handleReactivateRun}
+        /* The workspace role gates these three like every other run control: a
+           VIEWER may watch a workspace, not stop, cancel or re-arm its runs. */
+        onStop={isPreviewOnly || !canMutate ? undefined : handleStopRun}
+        onCancel={isPreviewOnly || hideToggle || !canMutate ? undefined : handleCancelRun}
+        onReactivate={isPreviewOnly || !canMutate ? undefined : handleReactivateRun}
+        actionPending={pillAction}
+        /* Keyed on the RUN it was raised on: rebinding the canvas to another run
+           must not paint that run's control as having failed. */
+        actionFailed={pillFailed !== undefined && pillFailed === activeRunId}
         epochCount={epochTimestamps.length}
         pinnedVersion={pinnedVersion}
         isSettingsOpen={isSettingsOpen}

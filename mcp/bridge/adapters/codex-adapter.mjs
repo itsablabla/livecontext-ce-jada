@@ -39,6 +39,32 @@ export class CodexAdapter {
   }
 
   /**
+   * Per-MCP-call timeout written into the generated config.toml, in seconds.
+   *
+   * Codex stops waiting on one `tools/call` after `tool_timeout_sec` and does NOT cancel
+   * it (the server keeps running; the model reads a timeout error). Its built-in default
+   * moved from 60 s to 120 s to 300 s across releases and the binary is installed
+   * unpinned, so the bridge WRITES the value instead of guessing which one applies:
+   * `[mcp_servers.<name>] tool_timeout_sec` is a documented per-server key
+   * (developers.openai.com/codex/config-reference) and `codex mcp list --json` reads the
+   * written value back (verified 2026-09-06 against codex-cli 0.117.0: a config.toml written
+   * by writeMcpConfig into a scratch CODEX_HOME lists `"tool_timeout_sec": 700.0`). server.mjs
+   * derives the backend's hold on a parked call from it.
+   *
+   * This widens codex's tolerance for EVERY call on the platform server, not only parked
+   * ones, so it is set above the largest tool the platform runs synchronously (web_search
+   * agent_browse, 640 s; the gateway allows 660 s on those routes): the written value must
+   * never be what cuts a real tool. Whether such a tool actually completes on a bridge run
+   * is a separate question, answered by the run's inactivity watchdog (a CLI sitting on a
+   * call prints nothing), not by this number.
+   */
+  static TOOL_TIMEOUT_SEC = 700;
+
+  getToolCallTimeoutSeconds() {
+    return CodexAdapter.TOOL_TIMEOUT_SEC;
+  }
+
+  /**
    * Resolve spawn command for the Codex CLI.
    */
   getCommand() {
@@ -157,6 +183,7 @@ export class CodexAdapter {
 type = "stdio"
 command = "${mcpServerConfig.command}"
 args = [${argsArray}]
+tool_timeout_sec = ${CodexAdapter.TOOL_TIMEOUT_SEC}
 
 [mcp_servers.${mcpServerConfig.serverName}.env]
 ${envEntries}

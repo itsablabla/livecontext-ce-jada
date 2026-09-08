@@ -349,7 +349,9 @@ export interface BuilderNodeData {
   maxItems?: number; // Maximum number of items to process from the list
   splitStrategy?: string; // Strategy for error handling ('continue-anyway' ou 'stop-on-error')
   // Agent-specific fields
-  agentType?: 'agent' | 'guardrail' | 'classify' | 'browser_agent';  // Type of agent node
+  // Type of AI node. `generate` is one of them: it shares the family's key
+  // (`agent:<label>`) and its plan array, and the importer writes it here.
+  agentType?: 'agent' | 'guardrail' | 'classify' | 'browser_agent' | 'generate';
   prompt?: string;
   // Browser Agent fields (agent:browser_agent)
   // task        - natural-language goal (config-time, e.g. "go to gmail.com and read inbox")
@@ -728,19 +730,6 @@ export function getFieldTypeColor(type: string | undefined): string {
   return FIELD_TYPE_COLORS[type as FieldType] || FIELD_TYPE_DEFAULT_COLOR;
 }
 
-/**
- * Same palette as {@link getFieldTypeColor}, without the filled chip background.
- *
- * Used where a type label sits inside an already dense list (the Input column's variable
- * rows), where a coloured block per line is noise rather than information. Derived from the
- * chip classes rather than duplicated, so the two can never drift apart.
- */
-export function getFieldTypeTextColor(type: string | undefined): string {
-  return getFieldTypeColor(type)
-    .split(' ')
-    .filter((cls) => !/(^|:)bg-/.test(cls))
-    .join(' ');
-}
 
 /**
  * Map legacy/alternative type names to unified FieldType.

@@ -36,12 +36,44 @@ function mockMarketplace(publications: unknown[] = [], truncated = false) {
   }));
 }
 
+/** An integration shaped like the public read path returns it. */
+function integration(overrides: Record<string, unknown> = {}) {
+  return {
+    slug: 'slack',
+    name: 'Slack',
+    description: 'Post messages, manage channels and read conversations.',
+    iconSlug: 'slack',
+    iconUrl: null,
+    toolCount: 45,
+    authType: 'oauth2',
+    ...overrides,
+  };
+}
+
+/**
+ * Stub the integration read path, for the same reason as the marketplace one.
+ * Declared by every test rather than chained onto `mockMarketplace`: `vi.doMock`
+ * keeps the FIRST registration for a path, so a helper registering the empty
+ * default would win over a test asking for its own integrations, and that test
+ * would pass on nothing.
+ */
+function mockIntegrations(integrations: unknown[] = [], truncated = false) {
+  vi.doMock('@/lib/integrations/publicIntegrations', () => ({
+    fetchAllIntegrations: vi.fn().mockResolvedValue({
+      integrations,
+      totalElements: integrations.length,
+      truncated,
+    }),
+  }));
+}
+
 describe('sitemap - cloud edition', () => {
   beforeEach(() => vi.resetModules());
 
   it('emits one entry per live docs page, with the Overview at a higher priority', async () => {
     vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
     mockMarketplace();
+    mockIntegrations();
     const { default: sitemap } = await import('../sitemap');
     const entries = await sitemap();
     const urls = entries.map((e) => e.url);
@@ -61,6 +93,7 @@ describe('sitemap - cloud edition', () => {
   it('emits the landing page ONCE at the apex (locale duplicates canonicalize there, not sitemap entries)', async () => {
     vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
     mockMarketplace();
+    mockIntegrations();
     const { default: sitemap } = await import('../sitemap');
     const { routing } = await import('@/i18n/routing');
     const urls = (await sitemap()).map((e) => e.url);
@@ -76,6 +109,7 @@ describe('sitemap - cloud edition', () => {
   it('emits the /compare hub and one entry per comparison page', async () => {
     vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
     mockMarketplace();
+    mockIntegrations();
     const { default: sitemap } = await import('../sitemap');
     const { COMPARISONS } = await import('../compare/_lib/comparisons');
     const entries = await sitemap();
@@ -89,33 +123,25 @@ describe('sitemap - cloud edition', () => {
     expect(entries.find((e) => e.url === `${SITE}/compare/n8n-alternative`)?.priority).toBe(0.8);
   });
 
-  it('emits the blog index and one entry per post, each with a full hreflang cluster', async () => {
+  it('withholds the blog while the section is being reworked', async () => {
     vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
     mockMarketplace();
+    mockIntegrations();
     const { default: sitemap } = await import('../sitemap');
     const { getAllPosts } = await import('@/lib/blog/posts');
-    const entries = await sitemap();
-    const urls = entries.map((e) => e.url);
+    const urls = (await sitemap()).map((e) => e.url);
 
-    // The index plus every post (enumerated from the registry) is present.
-    expect(urls).toContain(`${SITE}/blog`);
+    // The blog routes still render but send `noindex, nofollow`. Advertising
+    // them here would point crawlers at URLs that then refuse indexing.
+    expect(urls).not.toContain(`${SITE}/blog`);
     const posts = getAllPosts();
+    expect(posts.length).toBeGreaterThan(0); // the registry is non-empty, so this is a real exclusion
     for (const post of posts) {
-      expect(urls).toContain(`${SITE}/blog/${post.slug}`);
+      expect(urls).not.toContain(`${SITE}/blog/${post.slug}`);
     }
-
-    // Each blog entry carries a reciprocal hreflang cluster (x-default + en + 5 locales).
-    const indexEntry = entries.find((e) => e.url === `${SITE}/blog`);
-    expect(Object.keys(indexEntry?.alternates?.languages ?? {}).sort()).toEqual([
-      'de', 'en', 'es', 'fr', 'pt', 'x-default', 'zh',
-    ]);
-    expect(indexEntry?.alternates?.languages?.fr).toBe(`${SITE}/fr/blog`);
-    expect(indexEntry?.alternates?.languages?.['x-default']).toBe(`${SITE}/blog`);
-
-    // An article's alternates point at the localized article URLs.
-    const articleEntry = entries.find((e) => e.url === `${SITE}/blog/${posts[0].slug}`);
-    expect(articleEntry?.alternates?.languages?.de).toBe(`${SITE}/de/blog/${posts[0].slug}`);
+    expect(urls.some((url) => url.includes('/blog'))).toBe(false);
   });
+
 });
 
 describe('sitemap - marketplace listings', () => {
@@ -124,6 +150,7 @@ describe('sitemap - marketplace listings', () => {
   it('emits the marketplace hub plus one entry per indexable listing', async () => {
     vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
     mockMarketplace([listing(), listing({ id: 'pub-2', publicSlug: 'expense-sorter' })]);
+    mockIntegrations();
     const { default: sitemap } = await import('../sitemap');
     const entries = await sitemap();
     const urls = entries.map((e) => e.url);
@@ -136,6 +163,7 @@ describe('sitemap - marketplace listings', () => {
   it('uses the listing updatedAt as lastModified so crawlers see real freshness', async () => {
     vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
     mockMarketplace([listing()]);
+    mockIntegrations();
     const { default: sitemap } = await import('../sitemap');
     const entry = (await sitemap()).find((e) => e.url === `${SITE}/marketplace/invoice-bot`);
 
@@ -145,6 +173,7 @@ describe('sitemap - marketplace listings', () => {
   it('omits a listing whose description is too thin to index', async () => {
     vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
     mockMarketplace([listing({ publicSlug: 'thin-app', description: 'too short' })]);
+    mockIntegrations();
     const { default: sitemap } = await import('../sitemap');
     const urls = (await sitemap()).map((e) => e.url);
 
@@ -156,6 +185,7 @@ describe('sitemap - marketplace listings', () => {
   it('omits a listing that has no slug yet', async () => {
     vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
     mockMarketplace([listing({ publicSlug: null })]);
+    mockIntegrations();
     const { default: sitemap } = await import('../sitemap');
     const urls = (await sitemap()).map((e) => e.url);
 
@@ -165,13 +195,69 @@ describe('sitemap - marketplace listings', () => {
   it('still emits the in-repo sections when the marketplace read fails', async () => {
     vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
     mockMarketplace([], true);
+    mockIntegrations();
     const { default: sitemap } = await import('../sitemap');
     const urls = (await sitemap()).map((e) => e.url);
 
-    // A gateway blip must not empty the sitemap of the landing, docs and blog.
+    // A gateway blip must not empty the sitemap of the landing and docs.
     expect(urls).toContain(SITE);
-    expect(urls).toContain(`${SITE}/blog`);
+    expect(urls).toContain('https://docs.livecontext.ai');
     expect(urls).toContain(`${SITE}/marketplace`);
+  });
+});
+
+describe('sitemap - integrations', () => {
+  beforeEach(() => vi.resetModules());
+
+  it('emits the directory plus one entry per indexable integration', async () => {
+    vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
+    mockMarketplace();
+    mockIntegrations([integration(), integration({ slug: 'github', name: 'GitHub' })]);
+    const { default: sitemap } = await import('../sitemap');
+    const urls = (await sitemap()).map((e) => e.url);
+
+    expect(urls).toContain(`${SITE}/integrations`);
+    expect(urls).toContain(`${SITE}/integrations/slack`);
+    expect(urls).toContain(`${SITE}/integrations/github`);
+  });
+
+  it('omits an integration too thin to index', async () => {
+    vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
+    mockMarketplace();
+    mockIntegrations([integration({ slug: 'tiny', toolCount: 1, description: 'An API.' })]);
+    const { default: sitemap } = await import('../sitemap');
+    const urls = (await sitemap()).map((e) => e.url);
+
+    // The sitemap and the page's robots meta read the SAME predicate. Listing a
+    // noindex URL here would advertise a page that then refuses indexing.
+    expect(urls).not.toContain(`${SITE}/integrations/tiny`);
+    // The directory itself stays, whatever the catalog holds.
+    expect(urls).toContain(`${SITE}/integrations`);
+  });
+
+  it('omits an integration whose slug is not the shape the page accepts', async () => {
+    vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
+    mockMarketplace();
+    mockIntegrations([integration({ slug: 'Not A Slug' }), integration({ slug: 'github' })]);
+    const { default: sitemap } = await import('../sitemap');
+    const urls = (await sitemap()).map((e) => e.url);
+
+    // `fetchIntegration` rejects a malformed slug locally, before any gateway call,
+    // so advertising one here would be a sitemap entry whose own page 404s.
+    expect(urls).toContain(`${SITE}/integrations/github`);
+    expect(urls.some((url) => url.includes('Not A Slug'))).toBe(false);
+    expect(urls.filter((url) => url.startsWith(`${SITE}/integrations/`))).toHaveLength(1);
+  });
+
+  it('still emits the in-repo sections when the catalog read fails', async () => {
+    vi.doMock('@/lib/edition', () => ({ IS_CE: false }));
+    mockMarketplace();
+    mockIntegrations([], true);
+    const { default: sitemap } = await import('../sitemap');
+    const urls = (await sitemap()).map((e) => e.url);
+
+    expect(urls).toContain(SITE);
+    expect(urls).toContain(`${SITE}/integrations`);
   });
 });
 
@@ -181,6 +267,7 @@ describe('sitemap - community edition', () => {
   it('is empty on a self-hosted edition (never indexed)', async () => {
     vi.doMock('@/lib/edition', () => ({ IS_CE: true }));
     mockMarketplace([listing()]);
+    mockIntegrations();
     const { default: sitemap } = await import('../sitemap');
 
     // Even with a full catalog available, a self-hosted install advertises

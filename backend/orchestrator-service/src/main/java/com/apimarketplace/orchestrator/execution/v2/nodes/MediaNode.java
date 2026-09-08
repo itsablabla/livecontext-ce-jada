@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Media node - audio/video processing on the optional renderer component.
@@ -26,7 +27,8 @@ import java.util.Set;
  * tracks, optionally onto a video), {@code extract_audio} (pull the audio track out of
  * a video), {@code concat} (glue 1-8 videos back to back, with optional per-clip
  * trim/speed and cut/crossfade transitions), {@code frame} (extract ONE still image,
- * default the middle of the video), {@code overlay} (burn an image onto a video).</p>
+ * default the middle of the video), {@code overlay} (burn an image onto a video),
+ * {@code subtitles} (burn timed captions into the picture).</p>
  *
  * <p>Config lives in Core's generic {@code params} map. Every param accepts
  * {@code {{...}}} template expressions resolved at run time; file params
@@ -43,17 +45,37 @@ public class MediaNode extends BaseNode {
     private static final Logger logger = LoggerFactory.getLogger(MediaNode.class);
 
     static final Set<String> OPERATIONS = Set.of(
-        "probe", "mux_audio", "mix", "extract_audio", "concat", "frame", "overlay");
+        "probe", "mux_audio", "mix", "extract_audio", "concat", "frame", "overlay", "subtitles");
     static final String OPERATIONS_LIST =
-        "probe, mux_audio, mix, extract_audio, concat, frame, overlay";
+        "probe, mux_audio, mix, extract_audio, concat, frame, overlay, subtitles";
     static final Set<String> AUDIO_FITS = Set.of("pad", "shortest", "loop");
     static final Set<String> AUDIO_FORMATS = Set.of("mp3", "wav", "aac");
     static final Set<String> TRANSITIONS = Set.of("cut", "crossfade");
     static final Set<String> IMAGE_FORMATS = Set.of("jpeg", "png");
     static final Set<String> OVERLAY_POSITIONS = Set.of(
         "top_left", "top_right", "bottom_left", "bottom_right", "center");
+    /** PUBLIC so the build-time layers refuse the same values the run refuses. */
+    public static final Set<String> SUBTITLE_STYLES = Set.of("tiktok", "classic");
     static final int MAX_TRACKS = 8;
     static final int MAX_CONCAT_INPUTS = 8;
+    /**
+     * PUBLIC because the build-time layers (node creator, set_plan validation, error
+     * checker) enforce the same cap and must not each carry their own copy of the
+     * number: the run-time refusal and the build-time refusal have to agree.
+     */
+    public static final int MAX_SUBTITLE_CUES = 600;
+    /** PUBLIC for the same reason as {@link #MAX_SUBTITLE_CUES}: the build-time layers enforce it too. */
+    public static final int MAX_SUBTITLE_TEXT_CHARS = 240;
+    /**
+     * The whole caption track, not one line. A per-line cap is not enough: 600 legal
+     * lines in a script where each character costs 3 UTF-8 bytes serialise past the
+     * renderer's request cap, where the document is TRUNCATED in transit rather than
+     * refused, and the caller is told their JSON is malformed.
+     */
+    public static final int MAX_SUBTITLE_TOTAL_CHARS = 40000;
+    /** Letters, digits, spaces, dot, underscore, dash - what a font family name can be. */
+    public static final Pattern SUBTITLE_FONT_PATTERN = Pattern.compile("^[A-Za-z0-9 ._-]{1,64}$");
+    public static final Pattern SUBTITLE_COLOUR_PATTERN = Pattern.compile("^#?[0-9A-Fa-f]{6}$");
 
     static final String RENDERER_UNAVAILABLE_MESSAGE =
         "This media operation cannot run: the media renderer component is not enabled on this "
@@ -121,6 +143,7 @@ public class MediaNode extends BaseNode {
                 case "concat" -> buildConcatPlan(resolved, errors);
                 case "frame" -> buildFramePlan(resolved, errors);
                 case "overlay" -> buildOverlayPlan(resolved, errors);
+                case "subtitles" -> buildSubtitlesPlan(resolved, errors);
                 default -> null; // unreachable - operation validated above
             };
             if (!errors.isEmpty()) {
@@ -129,6 +152,14 @@ public class MediaNode extends BaseNode {
             }
 
             resolvedParams.putAll(plan.options());
+            // A caption track carries up to MAX_SUBTITLE_CUES entries. Echoing every one of
+            // them into the run's stored output would multiply the step data by the length of
+            // the script while telling the reader nothing the node's own params do not already
+            // say, so the echo is a count. Every OTHER option stays verbatim.
+            if (resolvedParams.get("cues") instanceof List<?> cueList) {
+                resolvedParams.remove("cues");
+                resolvedParams.put("cue_count", cueList.size());
+            }
 
             String workflowId = context.plan() != null ? context.plan().getId() : null;
             MediaResult result = mediaRenderService.render(
@@ -250,7 +281,7 @@ public class MediaNode extends BaseNode {
         if (!(tracksValue instanceof List<?> trackList) || trackList.isEmpty()) {
             errors.add("tracks is required for mix: a non-empty array of 1-" + MAX_TRACKS
                 + " tracks, each with a source FileRef expression "
-                + "(e.g. tracks: [{source: '{{core:voice.output.file}}'}])");
+                + "(e.g. tracks: [{source: '{{agent:voice.output.file}}'}])");
             return new RenderPlan(new LinkedHashMap<>(), inputs);
         }
         if (trackList.size() > MAX_TRACKS) {
@@ -545,6 +576,149 @@ public class MediaNode extends BaseNode {
         return new RenderPlan(options, inputs);
     }
 
+    /**
+     * subtitles: burn timed captions into the picture of a video.
+     *
+     * <p>The caller hands over timed TEXT and picks a look from a preset; it never
+     * authors a subtitle file. That is deliberate: a subtitle style block the renderer
+     * does not understand is ignored SILENTLY, so a caller-authored file would fail by
+     * producing a video captioned in the wrong face rather than by reporting an error.</p>
+     */
+    private RenderPlan buildSubtitlesPlan(Map<String, Object> resolved, List<String> errors) {
+        List<MediaInput> inputs = new ArrayList<>();
+        Map<String, Object> video = requireFileRef(resolved, "video", errors);
+        if (video != null) {
+            inputs.add(new MediaInput("input0", "video", null, video));
+        }
+
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("cues", buildSubtitleCues(resolved.get("cues"), rawTemplateFor("cues"), errors));
+        options.put("style", enumOrDefault(resolved, "style", "tiktok", SUBTITLE_STYLES,
+            "style must be one of: tiktok, classic", errors));
+        // font_family, font_size_percent, position_percent and the two colours are OMITTED
+        // when absent instead of being defaulted here: the preset is what defines the look,
+        // and a default copied into this layer would silently drift from the one that renders.
+        putPatternOption(options, resolved, "font_family", SUBTITLE_FONT_PATTERN,
+            "font_family must be a font family name (letters, digits, spaces, dot, underscore or dash)", errors);
+        Double fontSizePercent = optionalNumber(resolved, "font_size_percent", 1d, 20d,
+            "font_size_percent must be a number between 1 and 20 (percent of the video HEIGHT)", errors);
+        if (fontSizePercent != null) {
+            options.put("font_size_percent", fontSizePercent);
+        }
+        Double positionPercent = optionalNumber(resolved, "position_percent", 0d, 100d,
+            "position_percent must be a number between 0 and 100 (percent from the TOP of the video)", errors);
+        if (positionPercent != null) {
+            options.put("position_percent", positionPercent);
+        }
+        putPatternOption(options, resolved, "text_color", SUBTITLE_COLOUR_PATTERN,
+            "text_color must be a hex colour like '#FFFFFF'", errors);
+        putPatternOption(options, resolved, "outline_color", SUBTITLE_COLOUR_PATTERN,
+            "outline_color must be a hex colour like '#000000'", errors);
+        return new RenderPlan(options, inputs);
+    }
+
+    /**
+     * Validate and normalise the caption track. Every cue must carry when it appears,
+     * when it disappears, and what it says; the track must run forward without two cues
+     * sharing an instant.
+     */
+    private static List<Map<String, Object>> buildSubtitleCues(Object cuesValue, String rawTemplate,
+                                                              List<String> errors) {
+        List<Map<String, Object>> cues = new ArrayList<>();
+        if (!(cuesValue instanceof List<?> cueList) || cueList.isEmpty()) {
+            if (rawTemplate != null) {
+                // The param WAS mapped - "is required" would send the agent to fix the
+                // wrong thing. The expression resolved to no caption track, so the
+                // upstream node that was meant to produce one is the problem.
+                errors.add("cues ('" + rawTemplate + "') resolved to no caption track - the upstream node it "
+                    + "references may have failed, been skipped, or produced something other than an array of "
+                    + "{start_seconds, end_seconds, text}. Check that node's run output, fix it, then run again");
+            } else {
+                errors.add("cues is required for subtitles: a non-empty array of {start_seconds, end_seconds, text}, "
+                    + "e.g. cues: [{start_seconds: 0, end_seconds: 2.4, text: 'Ninety metres below the surface'}]");
+            }
+            return cues;
+        }
+        if (cueList.size() > MAX_SUBTITLE_CUES) {
+            errors.add("cues accepts at most " + MAX_SUBTITLE_CUES + " entries (got " + cueList.size()
+                + ") - caption a shorter section, or split the video and caption each part");
+            return cues;
+        }
+
+        Double previousEnd = null;
+        int totalChars = 0;
+        for (int i = 0; i < cueList.size(); i++) {
+            String label = "cues[" + i + "]";
+            if (!(cueList.get(i) instanceof Map<?, ?> rawCue)) {
+                errors.add(label + " must be an object with start_seconds, end_seconds and text");
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> cue = (Map<String, Object>) rawCue;
+
+            Double start = optionalNumber(cue, "start_seconds", 0d, null,
+                label + ".start_seconds must be a number >= 0", errors);
+            Double end = optionalNumber(cue, "end_seconds", 0d, null,
+                label + ".end_seconds must be a number >= 0", errors);
+            if (!isPresent(cue.get("start_seconds")) || !isPresent(cue.get("end_seconds"))) {
+                errors.add(label + " needs both start_seconds and end_seconds: when the caption appears and "
+                    + "when it disappears, in seconds from the start of the video");
+                continue;
+            }
+            if (start == null || end == null) {
+                continue; // optionalNumber already reported what is wrong with the value
+            }
+            if (end <= start) {
+                errors.add(label + ".end_seconds must be greater than start_seconds (got " + end
+                    + " <= " + start + ")");
+                // previousEnd deliberately NOT advanced: this cue's end is already known
+                // to be wrong, so ordering the next cue against it would report a second
+                // error derived from the first one.
+                continue;
+            }
+            // Ascending and non-overlapping is REQUIRED, not repaired: two cues covering the
+            // same instant are drawn ON TOP of each other, so an overlap is always a timing
+            // bug in the caller. Sorting it away here would ship that bug as a finished video.
+            if (previousEnd != null && start < previousEnd) {
+                errors.add(label + ".start_seconds (" + start + ") overlaps the previous cue, which ends at "
+                    + previousEnd + " - give the cues in ascending, non-overlapping order");
+                previousEnd = end;
+                continue;
+            }
+            previousEnd = end;
+
+            String text = stringValue(cue.get("text"));
+            if (text == null || text.isBlank()) {
+                errors.add(label + ".text is required: the line shown between start_seconds and end_seconds");
+                continue;
+            }
+            // Measured on the TRIMMED text, because that is the value actually sent:
+            // checking the raw one would refuse a line that trailing spaces pushed over
+            // the cap, which is a rejection the caller cannot see the reason for.
+            String trimmed = text.trim();
+            if (trimmed.length() > MAX_SUBTITLE_TEXT_CHARS) {
+                errors.add(label + ".text is longer than " + MAX_SUBTITLE_TEXT_CHARS + " characters (got "
+                    + trimmed.length() + ") - split it across consecutive cues so each one stays readable");
+                continue;
+            }
+
+            totalChars += trimmed.length();
+            if (totalChars > MAX_SUBTITLE_TOTAL_CHARS) {
+                errors.add("the caption track is longer than " + MAX_SUBTITLE_TOTAL_CHARS
+                    + " characters in total - caption a shorter section, or split the video and "
+                    + "caption each part");
+                return cues;
+            }
+
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            normalized.put("start_seconds", start);
+            normalized.put("end_seconds", end);
+            normalized.put("text", trimmed);
+            cues.add(normalized);
+        }
+        return cues;
+    }
+
     // ==================== Value helpers ====================
 
     /** Resolve the params map, keeping RAW object types for whole-value templates. */
@@ -612,8 +786,20 @@ public class MediaNode extends BaseNode {
             }
             return null;
         }
-        if (value instanceof Map<?, ?> map && map.get("path") instanceof String) {
-            return (Map<String, Object>) map;
+        if (value instanceof Map<?, ?> map) {
+            // Blank is not a path: it passes validation here and then fails much later, in the
+            // renderer, with the very message this branch exists to replace.
+            if (map.get("path") instanceof String path && !path.isBlank()) {
+                return (Map<String, Object>) map;
+            }
+            // A file-shaped value with no usable path is a DIFFERENT problem from a wrong mapping,
+            // and saying "map the WHOLE FileRef output" to someone who already did sends them to
+            // re-map a correct expression. A table media cell reaches here exactly like this when
+            // the file it names is known only by id.
+            if (com.apimarketplace.orchestrator.domain.file.FileRef.TYPE_FILE.equals(map.get("_type"))) {
+                errors.add(label + " " + com.apimarketplace.orchestrator.domain.file.FileRefMessages.NO_STORAGE_PATH);
+                return null;
+            }
         }
         errors.add(label + " did not resolve to a file reference (got "
             + (value instanceof String ? "a plain string" : value.getClass().getSimpleName())
@@ -724,6 +910,25 @@ public class MediaNode extends BaseNode {
             return;
         }
         options.put(key, value);
+    }
+
+    /**
+     * A pattern-checked optional string option: absent leaves the option OUT entirely (so
+     * the renderer's own default applies and there is one definition of it), while a value
+     * that is present but malformed is an error rather than a value quietly dropped.
+     */
+    private static void putPatternOption(Map<String, Object> options, Map<String, Object> source, String key,
+                                         Pattern pattern, String errorMessage, List<String> errors) {
+        Object raw = source.get(key);
+        if (raw == null || (raw instanceof String s && s.isBlank())) {
+            return;
+        }
+        String value = stringValue(raw);
+        if (value == null || !pattern.matcher(value.trim()).matches()) {
+            errors.add(errorMessage + " (got '" + raw + "')");
+            return;
+        }
+        options.put(key, value.trim());
     }
 
     private static boolean booleanOrDefault(Map<String, Object> source, String key,

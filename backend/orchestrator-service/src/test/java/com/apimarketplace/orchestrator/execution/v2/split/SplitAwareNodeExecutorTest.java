@@ -2187,7 +2187,7 @@ class SplitAwareNodeExecutorTest {
         private NodeExecutionResult invokeNestedSplitFlat(List<Object> inner) throws Exception {
             TestNode innerNode = new TestNode("core:inner_split", NodeType.SPLIT);
             SplitNodeExecutor splitNodeExecutor = org.mockito.Mockito.mock(SplitNodeExecutor.class);
-            when(splitNodeExecutor.execute(any(), any(), any(), anyInt(), anyInt(), any()))
+            when(splitNodeExecutor.execute(any(), any(), any(), anyInt(), any(), anyInt(), any()))
                 .thenReturn(NodeExecutionResult.success("core:inner_split", Map.of("items", inner)));
             when(context.epoch()).thenReturn(FLAT_EPOCH);
             when(context.withItemIndex(anyInt())).thenReturn(context);

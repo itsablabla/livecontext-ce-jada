@@ -217,7 +217,7 @@ public final class ToolSchemaGenerator {
      * - trigger: Entry points (webhook, chat, schedule, datasource, manual)
      * - mcp: MCP catalog tool calls
      * - table: CRUD operations (database tables)
-     * - agent: AI agents (agent, guardrail, classify)
+     * - agent: AI nodes (agent, browser_agent, guardrail, classify, generate)
      * - core: Control flow (decision, switch, loop, split, merge, fork, transform, wait)
      * - note: Notes
      * - interface: UI interfaces
@@ -286,7 +286,7 @@ public final class ToolSchemaGenerator {
                 "type", "object",
                 "properties", Map.of(
                     "id", Map.of("type", "string", "description", "Agent identifier"),
-                    "type", Map.of("type", "string", "enum", List.of("agent", "guardrail", "classify"), "description", "Agent type"),
+                    "type", Map.of("type", "string", "enum", List.of("agent", "browser_agent", "guardrail", "classify", "generate"), "description", "AI node type. All five live in agents[] and are keyed agent:<label>."),
                     "label", Map.of("type", "string", "description", "Unique label for the agent"),
                     "provider", Map.of("type", "string", "description", "AI provider (openai, anthropic, etc.)"),
                     "model", Map.of("type", "string", "description", "Model name"),

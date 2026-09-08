@@ -72,6 +72,23 @@ public class UserOnboarding {
     @Column(name = "experience_level", length = 50)
     private String experienceLevel;
 
+    /** What the user wants to automate first (bounded option value). */
+    @Column(name = "primary_goal", length = 100)
+    private String primaryGoal;
+
+    /** Tools the user already uses (option slugs). */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "tools_used", columnDefinition = "jsonb")
+    private List<String> toolsUsed = new ArrayList<>();
+
+    /** What they automate with today: none, zapier-make, n8n, custom-code, other-platform. */
+    @Column(name = "previous_tool", length = 50)
+    private String previousTool;
+
+    /** How they heard about LiveContext (bounded option value). */
+    @Column(name = "referral_source", length = 50)
+    private String referralSource;
+
     /**
      * Whether onboarding is completed.
      */
@@ -217,6 +234,38 @@ public class UserOnboarding {
 
     public void setExperienceLevel(String experienceLevel) {
         this.experienceLevel = experienceLevel;
+    }
+
+    public String getPrimaryGoal() {
+        return primaryGoal;
+    }
+
+    public void setPrimaryGoal(String primaryGoal) {
+        this.primaryGoal = primaryGoal;
+    }
+
+    public List<String> getToolsUsed() {
+        return toolsUsed;
+    }
+
+    public void setToolsUsed(List<String> toolsUsed) {
+        this.toolsUsed = toolsUsed != null ? toolsUsed : new ArrayList<>();
+    }
+
+    public String getPreviousTool() {
+        return previousTool;
+    }
+
+    public void setPreviousTool(String previousTool) {
+        this.previousTool = previousTool;
+    }
+
+    public String getReferralSource() {
+        return referralSource;
+    }
+
+    public void setReferralSource(String referralSource) {
+        this.referralSource = referralSource;
     }
 
     public boolean isOnboardingCompleted() {

@@ -22,6 +22,7 @@ import { getProviderIconSlug } from '@/lib/ai-providers/providerIcons';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { getTargetHandleGeometry, getBranchHandleGeometry, getBranchRowFlow } from './handleGeometry';
+import { NodeActivityShimmer } from './NodeActivityShimmer';
 // Guardrail type labels for display
 const GUARDRAIL_TYPE_LABELS: Record<string, string> = {
   pii_detection: 'PII Detection',
@@ -62,7 +63,7 @@ export function GuardrailNode({ data, selected, id }: NodeProps<BuilderNodeData>
   const nodeFamily = nodeClass?.family;
 
   // Step-by-step execution status
-  const executionStatus = useNodeExecutionStatus(id, { label: data.label, kind: 'guardrail' });
+  const executionStatus = useNodeExecutionStatus(id, { label: data.label, kind: 'guardrail', status: data.status });
 
   // Use centralized validation context for error state
   const { hasNodeErrors: checkNodeErrors } = useValidation();
@@ -116,17 +117,7 @@ export function GuardrailNode({ data, selected, id }: NodeProps<BuilderNodeData>
       }}
       tabIndex={0}
     >
-      {/* Shimmer scan effect for running state - show in all modes */}
-      {effectiveStatus === 'running' && (
-        <div
-          className="absolute inset-0 pointer-events-none rounded-[26px]"
-          style={{
-            background: 'linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.15) 50%, transparent 100%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer-scan 2.5s ease-in-out infinite',
-          }}
-        />
-      )}
+      <NodeActivityShimmer status={effectiveStatus} className="rounded-[26px]" />
 
       {/* Header with provider icon */}
       <NodeHeader

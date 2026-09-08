@@ -381,6 +381,7 @@ export function AppHeader() {
     description: string;
     /** Workflow cost budget in credits (loaded lazily for workflow resources). */
     budgetCredits?: number | null;
+    budgetPeriodMode?: string | null;
   } | null>(null);
   const [isSavingMetadata, setIsSavingMetadata] = useState(false);
 
@@ -394,14 +395,19 @@ export function AppHeader() {
         name: detail.name || '',
         description: detail.description || '',
         budgetCredits: detail.budgetCredits ?? null,
+        budgetPeriodMode: null,
       });
       // Seed the budget field for workflow/application resources: the breadcrumb
       // opener doesn't carry it, so fetch the current value once on open.
-      if (detail.resourceType === 'workflow' && detail.budgetCredits == null) {
+      if (detail.resourceType === 'workflow') {
         orchestratorApi.getWorkflow(detail.id)
           .then((wf) => {
             setEditMetadata((prev) => (prev && prev.id === detail.id)
-              ? { ...prev, budgetCredits: wf.budgetCredits ?? null }
+              ? {
+                  ...prev,
+                  budgetCredits: prev.budgetCredits ?? wf.budgetCredits ?? null,
+                  budgetPeriodMode: wf.budgetPeriodMode ?? 'monthly',
+                }
               : prev);
           })
           .catch(() => { /* best-effort: field just starts blank */ });
@@ -411,7 +417,12 @@ export function AppHeader() {
     return () => window.removeEventListener('openMetadataEditModal', handler as EventListener);
   }, []);
 
-  const handleSaveMetadata = useCallback(async (values: { name: string; description: string; budgetCredits?: number | null }) => {
+  const handleSaveMetadata = useCallback(async (values: {
+    name: string;
+    description: string;
+    budgetCredits?: number | null;
+    budgetPeriodMode?: string | null;
+  }) => {
     if (!editMetadata) return;
     setIsSavingMetadata(true);
     try {
@@ -420,6 +431,7 @@ export function AppHeader() {
           name: values.name,
           description: values.description,
           budgetCredits: values.budgetCredits,
+          budgetPeriodMode: values.budgetPeriodMode,
         } as any);
         // Notify workflow builder to update its in-memory plan name
         window.dispatchEvent(new CustomEvent('workflowNameChangeFromBreadcrumb', {
@@ -688,6 +700,7 @@ export function AppHeader() {
         initialName={editMetadata.name}
         initialDescription={editMetadata.description}
         initialBudgetCredits={editMetadata.budgetCredits}
+        initialBudgetPeriodMode={editMetadata.budgetPeriodMode}
         isSaving={isSavingMetadata}
         onClose={() => setEditMetadata(null)}
         onSave={handleSaveMetadata}

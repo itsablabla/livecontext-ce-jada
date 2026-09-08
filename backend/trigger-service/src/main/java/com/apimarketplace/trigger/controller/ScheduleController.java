@@ -6,6 +6,7 @@ import com.apimarketplace.trigger.client.dto.ScheduledExecutionDto;
 import com.apimarketplace.common.scope.ScopeGuard;
 import com.apimarketplace.common.web.TenantResolver;
 import com.apimarketplace.trigger.domain.ScheduledExecutionEntity;
+import com.apimarketplace.trigger.service.PendingFirePolicy;
 import com.apimarketplace.trigger.domain.TriggerState;
 import com.apimarketplace.trigger.repository.ScheduledExecutionRepository;
 import com.apimarketplace.trigger.service.PlanLimitHelper;
@@ -100,7 +101,7 @@ public class ScheduleController {
                     "error", "X-Organization-ID header is required (post-V261)"));
         }
 
-        if (!cronParser.isValid(body.cron())) {
+        if (!cronParser.isAcceptableInput(body.cron())) {
             return ResponseEntity.badRequest().body(Map.of("error", "Invalid cron expression"));
         }
 
@@ -153,11 +154,19 @@ public class ScheduleController {
         if (schedule.getOrganizationId() == null) {
             schedule.setOrganizationId(organizationId);
         }
+        // Captured before the shape is overwritten. A brand-new row carries no stored fire
+        // and takes the computed one; an existing row rewritten with the same cron (which
+        // is what sync does, on every run start) keeps the occurrence the user moved.
+        String storedCron = schedule.getCronExpression();
+        String storedZone = schedule.getTimezone();
+        Instant storedFire = schedule.getNextExecutionAt();
+        String newZone = body.timezone() != null ? body.timezone() : "UTC";
         schedule.setCronExpression(body.cron());
-        schedule.setTimezone(body.timezone() != null ? body.timezone() : "UTC");
+        schedule.setTimezone(newZone);
         schedule.setMaxExecutions(body.maxExecutions());
         schedule.setEnabled(body.enabled());
-        schedule.setNextExecutionAt(nextExecution);
+        schedule.setNextExecutionAt(PendingFirePolicy.resolve(
+                storedFire, storedCron, storedZone, body.cron(), newZone, nextExecution));
         schedule.setUpdatedAt(Instant.now());
 
         if (body.expiresInDays() != null && body.expiresInDays() > 0) {
@@ -195,10 +204,11 @@ public class ScheduleController {
         schedule.setEnabled(enabled);
 
         if (enabled) {
-            Instant nextExecution = cronParser.getNextExecution(schedule.getCronExpression(), schedule.getTimezone());
-            if (nextExecution != null) {
-                schedule.setNextExecutionAt(nextExecution);
-            }
+            // Same rule as every other resume: a pending fire still ahead is a decision.
+            Instant recomputed = cronParser.getNextExecution(schedule.getCronExpression(), schedule.getTimezone());
+            schedule.setNextExecutionAt(PendingFirePolicy.resolve(
+                    schedule.getNextExecutionAt(), schedule.getCronExpression(), schedule.getTimezone(),
+                    schedule.getCronExpression(), schedule.getTimezone(), recomputed));
         }
 
         schedule.setUpdatedAt(Instant.now());

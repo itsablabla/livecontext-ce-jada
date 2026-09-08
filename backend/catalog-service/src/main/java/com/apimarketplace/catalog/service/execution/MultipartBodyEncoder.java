@@ -114,6 +114,12 @@ public class MultipartBodyEncoder {
 
         Map<String, Object> fileRef = coerceToFileRef(paramValue);
         if (fileRef == null) {
+            // KNOWINGLY LEFT, not overlooked. Dropping the part sends the request
+            // without the file and the provider answers with its own complaint, or
+            // succeeds: the same "green run, file gone" shape that
+            // FileAttachmentException refuses on the JSON-body path. Turning this
+            // into a refusal touches every multipart endpoint in the catalog, so it
+            // is its own change with its own end-to-end run.
             log.error("MultipartBodyEncoder: parameter for part '{}' is not a FileRef ({})", partName, paramValue.getClass().getSimpleName());
             return;
         }
@@ -184,9 +190,29 @@ public class MultipartBodyEncoder {
     }
 
     /**
+     * {@code scheme://} at the head of a value: a link some provider fetches, never
+     * a storage key.
+     *
+     * <p>Same rule as {@link FileAttachmentResolver}'s, and here for the same
+     * reason: a {@code path} holding a URL was read as a key, the download found
+     * nothing, and the part was dropped with a message about a missing file.
+     * Matched with {@code find()} on an anchored pattern rather than
+     * {@code matches()}, so a value carrying a newline is recognised too, exactly
+     * as the resolver recognises it.
+     */
+    private static final java.util.regex.Pattern ABSOLUTE_URL =
+            java.util.regex.Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://");
+
+    private static boolean isAbsoluteUrl(Object path) {
+        return path instanceof String s && ABSOLUTE_URL.matcher(s).find();
+    }
+
+    /**
      * Convert a parameter value to a FileRef map. Accepts:
      * <ul>
      *   <li>a {@code Map} that already has {@code _type:"file"}</li>
+     *   <li>a {@code Map} carrying {@code path} and {@code name}, whose {@code path}
+     *       is not an absolute URL</li>
      *   <li>a JSON string representation of such a map</li>
      * </ul>
      */
@@ -197,7 +223,7 @@ public class MultipartBodyEncoder {
             if ("file".equals(type)) {
                 return new LinkedHashMap<>((Map<String, Object>) map);
             }
-            if (map.containsKey("path") && map.containsKey("name")) {
+            if (map.containsKey("path") && map.containsKey("name") && !isAbsoluteUrl(map.get("path"))) {
                 return new LinkedHashMap<>((Map<String, Object>) map);
             }
         }

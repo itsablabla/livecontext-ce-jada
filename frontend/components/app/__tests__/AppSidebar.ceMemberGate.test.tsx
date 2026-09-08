@@ -79,7 +79,6 @@ function renderUserSection() {
       user={{ name: 'CE Member', email: 'member@example.com' }}
       avatarUrl={null}
       numericUserId={2}
-      hasActiveSubscription={false}
       planCode="COMMUNITY"
       isSubscriptionLoading={false}
       themePreference="auto"

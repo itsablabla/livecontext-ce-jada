@@ -42,6 +42,13 @@ import java.util.Optional;
 @ConditionalOnProperty(name = "billing.provider", havingValue = "stripe")
 public class SubscriptionService {
 
+    /**
+     * Product-analytics emitter (PostHog). Optional so hand-built test instances and
+     * analytics-less deployments are untouched; a null field emits nothing.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics;
+
     private static final Logger log = LoggerFactory.getLogger(SubscriptionService.class);
 
     private final StripeClient stripe;
@@ -217,6 +224,7 @@ public class SubscriptionService {
             // keep the old plan and credit quantity for transitions
             String oldPlanCode = (local.getPlan() != null) ? local.getPlan().getCode() : null;
             int oldCreditQuantity = (local.getCreditQuantity() != null) ? local.getCreditQuantity() : 0;
+            String oldStatus = local.getStatus();
 
             local.setBillingCustomer(bc);
             local.setPlan(plan);
@@ -327,6 +335,13 @@ public class SubscriptionService {
             boolean planChanged = oldPlanCode == null || !oldPlanCode.equals(newPlanCode);
             if (planChanged) {
                 log.info("Plan changed for user {}: {} -> {}", bc.getUser().getId(), oldPlanCode, newPlanCode);
+            }
+            // Stripe re-sends `customer.subscription.updated` for renewals and
+            // metadata edits; only a real transition is a product event.
+            boolean statusChanged = oldStatus == null || !oldStatus.equals(local.getStatus());
+            if (analytics != null && (isNewSubscription || planChanged || statusChanged || oldCreditQuantity != creditQuantity)) {
+                analytics.subscriptionChanged(bc.getUser().getId(), oldPlanCode, newPlanCode,
+                        local.getStatus(), creditQuantity, "stripe");
             }
 
             // Sync the tenant's storage quota to the new plan's allowance ONLY
@@ -489,6 +504,10 @@ public class SubscriptionService {
             // optionally, you can also set currentPeriodEnd when forcing immediate cancellation
             subscriptionRepository.save(sub);
             log.info("Local subscription canceled providerSubId={}", providerSubscriptionId);
+            if (analytics != null && sub.getBillingCustomer() != null && sub.getBillingCustomer().getUser() != null) {
+                analytics.subscriptionCancelled(sub.getBillingCustomer().getUser().getId(),
+                        sub.getPlan() != null ? sub.getPlan().getCode() : null);
+            }
 
             // V311: cancellation leaves the owner with no active subscription, so the workspace cap
             // falls back to FREE (1) - pause any now-over-cap workspaces. (customer.subscription.deleted

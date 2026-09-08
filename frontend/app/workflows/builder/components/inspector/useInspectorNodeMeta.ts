@@ -124,11 +124,19 @@ export function useInspectorNodeMeta(node: Node<BuilderNodeData> | null): Inspec
       || nodeIdForAi === 'browser-agent'
       || nodeIdForAi.startsWith('browser-agent-')
       || node?.data?.kind === 'browser_agent';
+    // Generate - excluded for the same reason as browser_agent above, and it
+    // became an AI node in the same change that made this necessary: without
+    // it the node reads as "an AI type not chosen yet", which is a NAVIGATION
+    // node, and shouldForceSmallMode then switches advanced mode and
+    // fullscreen back off as fast as the reader turns them on.
+    const isGenerate = nodeIdForAi === 'generate'
+      || nodeIdForAi.startsWith('generate-')
+      || node?.data?.kind === 'generate';
     const isAiGenericNode =
-      (nodeFamily === 'ai' && !isAiAgent && !isAiSummarize && !isGuardrail && !isClassify && !isBrowserAgent) ||
-      (nodeIdForAi === 'ai' || (nodeIdForAi.startsWith('ai-') && !isAiAgent && !isAiSummarize && !isGuardrail && !isClassify && !isBrowserAgent));
+      (nodeFamily === 'ai' && !isAiAgent && !isAiSummarize && !isGuardrail && !isClassify && !isBrowserAgent && !isGenerate) ||
+      (nodeIdForAi === 'ai' || (nodeIdForAi.startsWith('ai-') && !isAiAgent && !isAiSummarize && !isGuardrail && !isClassify && !isBrowserAgent && !isGenerate));
     const isAiNode =
-      isAiGenericNode || isAiAgent || isAiSummarize || isGuardrail || isClassify || isBrowserAgent || (node?.data?.kind === 'reasoning' && !nodeIdForAi.includes('-'));
+      isAiGenericNode || isAiAgent || isAiSummarize || isGuardrail || isClassify || isBrowserAgent || isGenerate || (node?.data?.kind === 'reasoning' && !nodeIdForAi.includes('-'));
 
     // Core
     const nodeData = node?.data as any;

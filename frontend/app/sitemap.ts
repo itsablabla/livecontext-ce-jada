@@ -2,10 +2,14 @@ import type { MetadataRoute } from 'next';
 import { IS_CE } from '@/lib/edition';
 import { COMPARISONS } from './compare/_lib/comparisons';
 import { DOCS_PAGES } from './docs/_nav';
-import { getAllPosts } from '@/lib/blog/posts';
-import { blogHreflang } from '@/lib/blog/localized';
 import { fetchAllPublicPublications } from '@/lib/marketplace/publicPublications';
 import { isIndexable, marketplacePath } from '@/lib/marketplace/indexability';
+import { fetchAllIntegrations } from '@/lib/integrations/publicIntegrations';
+import {
+  integrationPath,
+  isIndexableIntegration,
+  isValidIntegrationSlug,
+} from '@/lib/integrations/integrations';
 
 // Configurable at deploy time; falls back to the production domain.
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
@@ -30,12 +34,23 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
  *    (currently placeholder content) - kept at a modest priority.
  *  - Documentation - one entry per live docs page, enumerated from the docs IA
  *    (`app/docs/_nav.ts`) so the sitemap and the sidebar never drift apart.
- *  - Blog - the index and one entry per post, enumerated from the post registry
- *    (`lib/blog/posts.ts`). Unlike the other marketing pages the blog IS
- *    translated (en canonical at `/blog`, localized under `/<locale>/blog`), so
- *    each entry carries a reciprocal hreflang cluster (`blogHreflang`).
+ *  - Integrations - `/integrations` plus one entry per public integration that
+ *    passes `isIndexableIntegration`, the SAME predicate driving each page's
+ *    robots meta. Walked from the catalog rather than enumerated in the repo:
+ *    integrations appear whenever a batch of APIs is imported.
  *
- * Excluded (also disallowed in robots.ts):
+ * Excluded:
+ *  - Blog (`/blog`, `/<locale>/blog`) - withheld while the section is being
+ *    reworked. The routes still render, but they are unlinked from the landing
+ *    and every blog page sends `noindex, nofollow`, so listing them here would
+ *    advertise URLs that refuse indexing. It is deliberately NOT disallowed in
+ *    robots.ts: a crawler that cannot fetch the page never reads the noindex,
+ *    so already-indexed URLs would linger in the results. Re-add the index plus
+ *    one entry per post (enumerated from `lib/blog/posts.ts`, each carrying the
+ *    reciprocal `blogHreflang` cluster since the blog IS translated) when it
+ *    ships again.
+ *
+ * Excluded and disallowed in robots.ts:
  *  - Auth-gated app (`/app/*`), `/onboarding`, `/ce-setup`, `/workflows/*`,
  *    `/billing/*`, `/local-mcp`, and token URLs (`/f`, `/s`, `/w/embed`).
  *  - `/login` and `/register`: on the cloud deployment these immediately redirect
@@ -89,7 +104,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const pages: MetadataRoute.Sitemap = [
     { url: `${SITE_URL}/about`, lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${SITE_URL}/contact`, lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${SITE_URL}/models`, lastModified: now, changeFrequency: 'weekly', priority: 0.7 },
     { url: `${SITE_URL}/changelog`, lastModified: now, changeFrequency: 'weekly', priority: 0.5 },
+    // Status mirrors live monitoring, so it changes far more often than it is
+    // worth crawling; the canonical incident history lives on the externally
+    // hosted status page, which is why the priority stays low.
+    { url: `${SITE_URL}/status`, lastModified: now, changeFrequency: 'daily', priority: 0.4 },
     { url: `${SITE_URL}/legal/privacy`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
     { url: `${SITE_URL}/legal/terms`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
     { url: `${SITE_URL}/legal/mentions`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
@@ -104,25 +124,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     changeFrequency: 'monthly',
     priority: page.href === '/' ? 0.6 : 0.5,
   }));
-
-  // Blog: en canonical URLs, each with the full hreflang cluster so Google
-  // discovers every translated version. Article lastModified = its publish date.
-  const blog: MetadataRoute.Sitemap = [
-    {
-      url: `${SITE_URL}/blog`,
-      lastModified: now,
-      changeFrequency: 'weekly',
-      priority: 0.7,
-      alternates: { languages: blogHreflang(SITE_URL, '') },
-    },
-    ...getAllPosts().map((post) => ({
-      url: `${SITE_URL}/blog/${post.slug}`,
-      lastModified: new Date(`${post.date}T00:00:00Z`),
-      changeFrequency: 'monthly' as const,
-      priority: 0.7,
-      alternates: { languages: blogHreflang(SITE_URL, `/${post.slug}`) },
-    })),
-  ];
 
   // Marketplace: the index plus every listing that passes the indexability gate.
   // The SAME predicate drives each page's robots meta, so the sitemap can never
@@ -142,12 +143,42 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const marketplace: MetadataRoute.Sitemap = [
     { url: `${SITE_URL}/marketplace`, lastModified: now, changeFrequency: 'daily', priority: 0.8 },
     ...publications.filter(isIndexable).map((publication) => ({
-      url: `${SITE_URL}${marketplacePath(publication.publicSlug as string)}`,
+      url: `${SITE_URL}${marketplacePath(publication.publicSlug)}`,
       lastModified: publication.updatedAt ? new Date(publication.updatedAt) : now,
       changeFrequency: 'weekly' as const,
       priority: 0.6,
     })),
   ];
 
-  return [...landing, ...compare, ...pages, ...docs, ...blog, ...marketplace];
+  // Integrations: the directory plus every integration page that passes the same
+  // indexability gate its own `robots` meta reads, so the sitemap can never
+  // advertise a URL that then tells the crawler not to index it.
+  const { integrations, truncated: integrationsTruncated } = await fetchAllIntegrations({
+    revalidateSeconds: 3600,
+  });
+  if (integrationsTruncated) {
+    console.warn(
+      `[sitemap] integration walk stopped early after ${integrations.length} integrations; `
+      + 'the sitemap is incomplete (page cap reached or a gateway read failed).',
+    );
+  }
+  const integrationEntries: MetadataRoute.Sitemap = [
+    { url: `${SITE_URL}/integrations`, lastModified: now, changeFrequency: 'weekly', priority: 0.8 },
+    // Also validated for SHAPE: `fetchIntegration` rejects a slug that does not
+    // match locally, before any gateway call, so a slug the catalog somehow holds
+    // in another shape would be advertised here and 404 on its own page.
+    ...integrations
+      .filter((integration) => isValidIntegrationSlug(integration.slug))
+      .filter(isIndexableIntegration)
+      .map((integration) => ({
+        url: `${SITE_URL}${integrationPath(integration.slug)}`,
+        lastModified: now,
+        // The catalog changes when a batch of APIs is imported, which is weeks
+        // apart, not daily like a marketplace anyone can publish to.
+        changeFrequency: 'monthly' as const,
+        priority: 0.6,
+      })),
+  ];
+
+  return [...landing, ...compare, ...pages, ...docs, ...marketplace, ...integrationEntries];
 }

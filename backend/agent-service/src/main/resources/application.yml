@@ -118,6 +118,29 @@ credential:
 # Note: models must be comma-separated for @Value annotation to work
 ai:
   agent:
+    # Long-term memory: the facts agents keep across conversations in a workspace.
+    # Every cap is in CHARACTERS, not tokens, so switching model never invalidates
+    # a limit. Listed here because they are the operator's knobs: the tool help and
+    # the parameter schema quote these values rather than hard-coded numbers, so a
+    # change here is what the agent is told.
+    memory:
+      # Off means: nothing new is stored and no block is injected. Existing entries
+      # stay readable and deletable, so switching it off is not a way to hide rows.
+      enabled: ${AI_AGENT_MEMORY_ENABLED:true}
+      # Per-workspace and per-agent row caps. Entries switched off still count.
+      max-workspace-entries: ${AI_AGENT_MEMORY_MAX_WORKSPACE_ENTRIES:200}
+      max-agent-entries: ${AI_AGENT_MEMORY_MAX_AGENT_ENTRIES:50}
+      # The index line injected on every run, and the body fetched on demand.
+      max-summary-chars: ${AI_AGENT_MEMORY_MAX_SUMMARY_CHARS:240}
+      max-content-chars: ${AI_AGENT_MEMORY_MAX_CONTENT_CHARS:8000}
+      # What the injected block may spend. The pinned budget is what a pinned
+      # entry's whole body is measured against at WRITE time, so lowering it
+      # tightens what can be pinned from then on; entries pinned before are
+      # dropped from the block at render rather than silently truncated.
+      index-block-chars: ${AI_AGENT_MEMORY_INDEX_BLOCK_CHARS:3000}
+      pinned-block-chars: ${AI_AGENT_MEMORY_PINNED_BLOCK_CHARS:4000}
+      max-index-entries: ${AI_AGENT_MEMORY_MAX_INDEX_ENTRIES:40}
+      max-pinned-entries: ${AI_AGENT_MEMORY_MAX_PINNED_ENTRIES:3}
     # default-model/default-provider removed: resolved dynamically from first AI provider
     defaults:
       temperature: 0.7
@@ -752,6 +775,32 @@ management:
   endpoint:
     health:
       show-details: always
+  # Latency buckets for http.server.requests. Without them the service emits only
+  # a count and a sum, so it is invisible to the HighApiLatency SLO in
+  # deploy/config/alert-rules.yml, which reads the le="5.0" bucket. Six of the
+  # twelve services had no buckets at all, so a latency regression on this one
+  # could not have alerted.
+  #
+  # `slo` WITHOUT `percentiles-histogram`, unlike the five services instrumented
+  # earlier. `percentiles-histogram: true` emits Micrometer's full ladder, measured
+  # at 74 buckets per timer on this deployment; these five jobs carried ~170 timers
+  # between them when measured 2026-09-01, and that count grows with every new endpoint,
+  # so the ladder would add on the order of 12,000 series. The monitoring box
+  # (ops-host) runs prometheus with about 1 GiB of the 7 GiB free and already alerts
+  # on HighMemoryUsage, so that is a real cost for data nothing reads: the alert
+  # rule needs exactly one boundary. The SLO boundaries alone give 6 bucket series per
+  # timer (the 5 declared, plus +Inf), so on the order of 1,000, and the same le="5.0".
+  #
+  # Only the SLO reads these. The Grafana overview's p95/p99 panels are restricted
+  # to the five jobs that carry the full ladder, because histogram_quantile over
+  # five boundaries returns the highest finite bound and would render a confident
+  # flat line at exactly 5s for a job whose real p99 is minutes.
+  #
+  # Pinned by gateway/.../ApiLatencySloContractTest.
+  metrics:
+    distribution:
+      slo:
+        http.server.requests: 100ms, 500ms, 1s, 3s, 5s
 
 # Rate limiter wait-mode timeout - bumped 2026-04-29 from default 60s for split-aware
 # bursts (e.g. 30-item Gmail classify at gemini-3-pro-preview rpm-per-tenant=5 needs
@@ -765,3 +814,23 @@ logging:
     com.apimarketplace.agent: INFO
   file:
     name: logs/agent-service.log
+
+# Execution-log retention (agent transcripts).
+#
+# Same contract, same switches and the same environment variables as
+# orchestrator-service, deliberately: one workspace has one retention window, so
+# the two sweeps must never be configurable into disagreeing about it. See the
+# orchestrator's application.yml for what each key means.
+#
+# This sweep deletes the message / tool-call / iteration journal of TERMINATED
+# agent runs and the text payloads it points at. The agent_executions row itself
+# is kept: it carries the status, model, token counts and cost that metrics and
+# billing read back.
+retention:
+  execution-logs:
+    enabled: ${RETENTION_EXECUTION_LOGS_ENABLED:false}
+    dry-run: ${RETENTION_EXECUTION_LOGS_DRY_RUN:true}
+    enforce-from: ${RETENTION_EXECUTION_LOGS_ENFORCE_FROM:}
+    days: ${RETENTION_EXECUTION_LOGS_DAYS:}
+    batch-size: ${RETENTION_EXECUTION_LOGS_BATCH_SIZE:200}
+    tenant-page-size: ${RETENTION_EXECUTION_LOGS_TENANT_PAGE_SIZE:200}

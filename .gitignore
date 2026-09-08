@@ -157,3 +157,8 @@ frontend/app/workflows/builder/contracts/
 
 # Playwright scratch captures written by e2e specs
 frontend/e2e/.artifacts/
+
+# Vendor OpenAPI documents harvested by scripts/api-migrations/tools. Deliberately
+# not committed: they are large, they are the vendor's to change, and each recipe
+# records the `specUrl` that fetches it again.
+scripts/api-migrations/tools/_specs/

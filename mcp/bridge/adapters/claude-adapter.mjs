@@ -254,6 +254,25 @@ export class ClaudeAdapter {
   }
 
   /**
+   * How long Claude Code waits for ONE MCP tool call before giving up on it, in seconds.
+   *
+   * Two timers bound a call (code.claude.com/docs/en/mcp, timeout configuration): the
+   * call is aborted after this long without activity on a stdio server (the CLI's own
+   * default, 30 minutes), and by a wall clock of many hours. The idle window is the
+   * tighter of the two for a call that sits silent on a card, so it is the one declared,
+   * and buildChildEnv WRITES it into the child's environment rather than inheriting
+   * whatever the bridge host happens to export (the same rule as codex's tool_timeout_sec
+   * and gemini's timeout: the bridge states the wait it granted). server.mjs hands the
+   * backend gate a hold derived from this, so a question card on a claude-code run can
+   * wait for the person instead of expiring at the floor sized for the shortest CLI.
+   */
+  static TOOL_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+
+  getToolCallTimeoutSeconds() {
+    return ClaudeAdapter.TOOL_IDLE_TIMEOUT_MS / 1000;
+  }
+
+  /**
    * Write Claude MCP config file (JSON format).
    *
    * @param {string} tmpDir - temp directory path
@@ -324,6 +343,11 @@ export class ClaudeAdapter {
       // (prod, user-space) bridge is unchanged. getuid is undefined on Windows -> skipped.
       ...(process.getuid?.() === 0 ? { IS_SANDBOX: '1' } : {}),
       ...claudeReasoningEnv(reasoningEffort),
+      // The per-call idle window this adapter DECLARES to the backend gate (see
+      // getToolCallTimeoutSeconds). Written, not inherited: an operator export of a
+      // shorter value on the bridge host would otherwise falsify the declaration with no
+      // signal, and a held tool call would be abandoned while the gate still waits.
+      CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(ClaudeAdapter.TOOL_IDLE_TIMEOUT_MS),
     };
   }
 

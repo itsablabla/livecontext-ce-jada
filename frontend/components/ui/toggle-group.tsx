@@ -74,8 +74,31 @@ export const ToggleGroup: React.FC<ToggleGroupProps> = ({
     ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm"
     : "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm";
 
+  // Hover is written with ARBITRARY VALUES, not with the app's `*-theme-*` classes.
+  //
+  // Those classes are hand-written CSS in `@layer components` (globals.css), so Tailwind v4 does
+  // not own them: it emits `.bg-theme-primary`, but never `hover:bg-theme-primary`, and never an
+  // opacity modifier like `bg-theme-primary/10`. The pill's inactive state used to ask for exactly
+  // those two, so BOTH were absent from the stylesheet and the control had no hover feedback at
+  // all - the chat/studio switch above the composer looked inert under the pointer. Compiling
+  // globals.css confirms it: `.text-theme-secondary` is emitted, `hover:text-theme-primary` is not.
+  //
+  // The grid variant below never had the bug, because it already wrote its hover as an arbitrary
+  // value. That is the form to copy.
+  //
+  // The TOKEN is `--bg-secondary`, not `--bg-hover`. The app moves one step along its surface
+  // ladder on hover - Button's `outline` (transparent) hovers to `--bg-secondary`, its
+  // `secondary` hovers to `--bg-tertiary`, and panel-tab documents the same ladder explicitly -
+  // and `--bg-hover` is the far end of it, the token a SELECTED item wears. Using it for a hover
+  // painted the option as though it had been chosen. `--bg-secondary` is the step toward the
+  // active surface in both themes (#eceff3 -> #f5f6f8 on white, #2a2925 -> #1f1e1b on dark), so it
+  // reads as "you are about to pick this" and needs no per-theme override.
+  //
+  // The ACTIVE option deliberately gets no hover ground: it is the selected segment, clicking it
+  // does nothing (`onValueChange` early-returns on the current value), and a ground that lights up
+  // under the pointer would promise an action that will not happen.
   const defaultInactiveClass = isPill
-    ? "text-theme-secondary hover:text-theme-primary hover:bg-theme-primary/10"
+    ? "text-theme-secondary hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]"
     : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]";
 
   const resolvedActiveClass = activeClassName ?? defaultActiveClass;

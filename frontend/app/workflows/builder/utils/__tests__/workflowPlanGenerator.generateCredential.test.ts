@@ -4,7 +4,7 @@ import type { BuilderNodeData } from '../../types';
 import { generateWorkflowPlan } from '../workflowPlanGenerator';
 
 /**
- * WHICH of the author's own keys a `core:generate` node runs on, from the
+ * WHICH of the author's own keys a `agent:` generate node runs on, from the
  * inspector to the saved plan.
  *
  * <p>The inspector has offered this choice since the node shipped and the
@@ -32,14 +32,20 @@ function generateNode(data: Partial<BuilderNodeData> = {}): Node<BuilderNodeData
   };
 }
 
-function generateCore(nodes: Node<BuilderNodeData>[]): any {
+/**
+ * The node is filed under `agents`, never `cores`: it belongs to the AI family
+ * and is keyed `agent:<label>`, so a reader of the plan finds it beside the
+ * agent, classify and guardrail nodes.
+ */
+function generateAgent(nodes: Node<BuilderNodeData>[]): any {
   const plan = generateWorkflowPlan(nodes, []);
-  return (plan.cores ?? []).find((core: any) => core.type === 'generate');
+  expect((plan.cores ?? []).some((core: any) => core.type === 'generate')).toBe(false);
+  return (plan.agents ?? []).find((agent: any) => agent.type === 'generate');
 }
 
 describe('generateWorkflowPlan - the generate node and the key it runs on', () => {
   it('writes the pinned key into the plan, so the run uses the one the inspector shows', () => {
-    const core = generateCore([generateNode({ selectedCredentialId: 42 } as any)]);
+    const core = generateAgent([generateNode({ selectedCredentialId: 42 } as any)]);
 
     expect(core.params.credential_id).toBe(42);
     expect(core.params.credential_source).toBe('user');
@@ -49,13 +55,13 @@ describe('generateWorkflowPlan - the generate node and the key it runs on', () =
   it('omits the key when none is pinned, which is the account default at run time too', () => {
     // Absence is the statement, and writing a null instead would be a value
     // every reader of the plan has to interpret.
-    const core = generateCore([generateNode()]);
+    const core = generateAgent([generateNode()]);
 
     expect(core.params).not.toHaveProperty('credential_id');
   });
 
   it('never lets the key become a generation parameter the provider would refuse', () => {
-    const core = generateCore([generateNode({ selectedCredentialId: 42 } as any)]);
+    const core = generateAgent([generateNode({ selectedCredentialId: 42 } as any)]);
 
     // It travels beside the model rather than among the values projected onto
     // the provider's request, which is what keeps a correctly configured call

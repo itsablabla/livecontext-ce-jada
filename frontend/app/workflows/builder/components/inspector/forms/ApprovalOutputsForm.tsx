@@ -181,8 +181,8 @@ export function ApprovalOutputsForm({
                 onClick={() => handleTimeoutChange(preset.value)}
                 className={`px-2 py-1 text-xs rounded-md transition-colors ${
                   duration === preset.value
-                    ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900'
-                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                    ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)]'
+                    : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 {preset.label}

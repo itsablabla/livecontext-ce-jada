@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /**
- * AgentView is the /app/agent shell with four tabs (Agents / Skills / Fleet / Metrics).
+ * AgentView is the /app/agent shell with its tabs (Agents / Skills / Memory / Fleet / Metrics /
+ * Settings).
  * These pin the contract that the URL (?view=) is the SINGLE source of truth for the
  * active tab, derived at render time:
  *   - no ?view=        → Agents list
@@ -8,6 +9,7 @@
  *   - ?view=fleet      → full-screen Fleet canvas (the tab bar is hidden here, so the
  *                        breadcrumb is the only way out)
  *   - ?view=metrics    → Metrics dashboard
+ *   - ?view=settings   → Agent & chat defaults panel
  * and that clicking a tab encodes the choice in the URL (default 'agents' = clean URL).
  *
  * Regression: the Fleet canvas used to get stuck when leaving via the breadcrumb (it
@@ -21,6 +23,13 @@ vi.mock('@/components/AgentTable', () => ({ AgentTable: () => <div data-testid="
 vi.mock('@/components/SkillTab', () => ({ SkillTab: () => <div data-testid="skill-tab" /> }));
 vi.mock('@/components/agent-fleet/AgentFleetCanvas', () => ({ AgentFleetCanvas: () => <div data-testid="fleet-canvas" /> }));
 vi.mock('@/components/agent-fleet/AgentMetricsDashboard', () => ({ AgentMetricsDashboard: () => <div data-testid="metrics-dashboard" /> }));
+// The stub reflects headingLevel back into the DOM: the Agents page must ask for the h2,
+// and a props-ignoring stub would let that call-site prop be deleted with every test green.
+vi.mock('@/components/settings/AgentChatDefaults', () => ({
+  AgentChatDefaults: ({ headingLevel }: { headingLevel?: string }) => (
+    <div data-testid="agent-chat-defaults" data-heading-level={headingLevel} />
+  ),
+}));
 vi.mock('@/lib/providers/smart-providers', () => ({
   useAuth: () => ({ isLoading: false, isAuthenticated: true, loginWithRedirect: vi.fn() }),
 }));
@@ -78,6 +87,33 @@ describe('AgentView - URL is the single source of truth', () => {
     searchParams = new URLSearchParams('view=metrics');
     render(<AgentView />);
     expect(screen.getByTestId('metrics-dashboard')).toBeTruthy();
+  });
+
+  // The Settings tab hosts the agent & general-chat defaults - the same editor as the
+  // Settings > Agents page. Only a KNOWN view renders its own tab, so this deep-link is
+  // what guards that ?view=settings is wired all the way through tabFromView.
+  it('renders the agent & chat defaults on ?view=settings (deep-link)', () => {
+    searchParams = new URLSearchParams('view=settings');
+    render(<AgentView />);
+    expect(screen.getByTestId('agent-chat-defaults')).toBeTruthy();
+    expect(screen.queryByTestId('agent-table')).toBeNull();
+  });
+
+  // Sibling tabs render an h2 at most, so an h1 that shows up only on this tab moves the
+  // page heading level around as the user switches tabs. The settings PAGE keeps its h1.
+  it('asks the defaults panel for an h2 heading inside the tab', () => {
+    searchParams = new URLSearchParams('view=settings');
+    render(<AgentView />);
+    expect(screen.getByTestId('agent-chat-defaults').getAttribute('data-heading-level')).toBe('h2');
+  });
+
+  // Not a regression guard - the ternary chain already defaulted to Agents. It pins that
+  // 'settings' was added as its own arm and did not become the catch-all.
+  it('falls back to the Agents list on an unknown ?view=', () => {
+    searchParams = new URLSearchParams('view=nope');
+    render(<AgentView />);
+    expect(screen.getByTestId('agent-table')).toBeTruthy();
+    expect(screen.queryByTestId('agent-chat-defaults')).toBeNull();
   });
 
   // Regression: pre-fix, a ?view=skills deep-link fell through to the Agents list
@@ -146,6 +182,12 @@ describe('AgentView - tab clicks encode the choice in the URL', () => {
     render(<AgentView />);
     fireEvent.click(screen.getByText('tabMetrics'));
     expect(replace).toHaveBeenCalledWith('/app/agent?view=metrics');
+  });
+
+  it('encodes Settings as ?view=settings', () => {
+    render(<AgentView />);
+    fireEvent.click(screen.getByText('tabSettings'));
+    expect(replace).toHaveBeenCalledWith('/app/agent?view=settings');
   });
 
   it('keeps the Agents tab on a clean URL (no ?view=)', () => {

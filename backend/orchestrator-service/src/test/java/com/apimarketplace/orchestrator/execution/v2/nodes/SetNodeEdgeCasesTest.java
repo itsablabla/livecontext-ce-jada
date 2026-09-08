@@ -202,4 +202,69 @@ class SetNodeEdgeCasesTest {
         assertTrue(result.output().containsKey("resolved_params"),
             "failure output must keep resolved_params for the inspector");
     }
+
+    @Test
+    @DisplayName("An empty assignment list fails with the configuration still reported, under the plan's key names")
+    @SuppressWarnings("unchecked")
+    void emptyAssignmentsStillReportsConfiguration() {
+        SetNode node = buildNode(new Core.SetConfig(List.of(), false, "{{core:up.output.items}}"));
+
+        NodeExecutionResult result = node.execute(context);
+
+        assertFalse(result.isSuccess());
+        Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+        assertEquals(false, params.get("keepOnlySet"));
+        assertEquals("{{core:up.output.items}}", params.get("input"));
+        assertEquals(0, params.get("assignmentCount"));
+    }
+
+    @Test
+    @DisplayName("Reports its configuration under the plan's key names, the same ones on the failure path as on the success path")
+    @SuppressWarnings("unchecked")
+    void reportsResolvedParamsUnderPlanKeyNames() {
+        SetNode node = buildNode(new Core.SetConfig(
+            List.of(new Core.SetFieldAssignment("field", "{{broken}}", "string")),
+            true, "{{core:up.output.items}}"));
+        when(mockTemplateAdapter.resolveTemplates(anyMap(), any()))
+            .thenThrow(new IllegalStateException("boom"));
+
+        Map<String, Object> params = (Map<String, Object>) node.execute(context)
+            .output().get("resolved_params");
+
+        // keep_only_set / input_expression / assignment_count were three names the
+        // inspector had no label for, and `input` meant two different things
+        // depending on which exit path wrote it.
+        assertEquals(true, params.get("keepOnlySet"));
+        assertEquals("{{core:up.output.items}}", params.get("input"));
+        assertEquals(1, params.get("assignmentCount"));
+        assertFalse(params.containsKey("keep_only_set"));
+        assertFalse(params.containsKey("input_expression"));
+        assertFalse(params.containsKey("assignment_count"));
+    }
+
+    @Test
+    @DisplayName("The SUCCESS path reports keepOnlySet under the plan's key name, alongside each resolved assignment")
+    @SuppressWarnings("unchecked")
+    void successPathReportsKeepOnlySetUnderPlanKeyName() {
+        SetNode node = buildNode(new Core.SetConfig(
+            List.of(new Core.SetFieldAssignment("status", "done", "string")),
+            true, null));
+
+        NodeExecutionResult result = node.execute(context);
+
+        assertTrue(result.isSuccess());
+        Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+        // The failure paths are covered above. This one is the path a reader opens
+        // most, and it used to report `keep_only_set` - a key the inspector had no
+        // label for, and one the alignment check reads as "parameter not reported".
+        assertEquals(true, params.get("keepOnlySet"));
+        assertFalse(params.containsKey("keep_only_set"),
+            "the snake_case alias belongs to the OUTPUT schema, not to the parameters");
+        // Each assignment is reported under its own name with its resolved value.
+        // That is why `assignments` is in NOT_ECHOED_BY_DESIGN: the structural list
+        // would show every assignment a second time.
+        assertEquals("done", params.get("status"));
+        // ...while the OUTPUT keeps its declared snake_case field, untouched.
+        assertEquals(true, result.output().get("keep_only_set"));
+    }
 }

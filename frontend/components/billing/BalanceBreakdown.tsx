@@ -20,7 +20,7 @@
 
 import React from 'react';
 import { Coins, Plus } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -61,6 +61,7 @@ export function BalanceBreakdownTooltip({
   paygBalance: number | null;
 }) {
   const t = useTranslations('billing.payg');
+  const locale = useLocale();
 
   const hasBreakdown =
     subBalance !== null &&
@@ -82,7 +83,7 @@ export function BalanceBreakdownTooltip({
                 {t('breakdown.sub')}
               </span>
               <span className="font-medium text-gray-900 dark:text-white">
-                {formatCreditsCompact(subBalance)}
+                {formatCreditsCompact(subBalance, locale)}
               </span>
             </div>
             <div className="flex items-center justify-between gap-3">
@@ -90,7 +91,7 @@ export function BalanceBreakdownTooltip({
                 {t('breakdown.payg')}
               </span>
               <span className="font-medium text-gray-900 dark:text-white">
-                {formatCreditsCompact(paygBalance)}
+                {formatCreditsCompact(paygBalance, locale)}
               </span>
             </div>
           </div>
@@ -125,12 +126,17 @@ export function BalanceBreakdownCard({
   /** When false (e.g. PAYG_PRICE_UNCONFIGURED), the button is disabled. */
   topUpEnabled?: boolean;
   /**
-   * Plan-cycle counter. Provided only for paid subscribers; FREE / CE callers
-   * omit it and the subscription gauge falls back to a plain balance display.
+   * Plan-cycle counter, resolved by `useCreditWallet` and therefore present for
+   * any CLOUD account with a knowable grant - a FREE one included, since its
+   * monthly reset is a real allowance. It is absent in CE (which bills in
+   * dollars against no grant) and for a guest reading the owner's wallet, where
+   * our own tier would be the wrong denominator; the gauge then falls back to a
+   * plain balance display.
    */
   monthlyPlan?: MonthlyPlanInfo;
 }) {
   const t = useTranslations('billing.payg');
+  const locale = useLocale();
 
   if (balance === null) return null;
 
@@ -154,7 +160,7 @@ export function BalanceBreakdownCard({
           <Button
             onClick={onTopUp}
             disabled={!topUpEnabled}
-            variant="contrast"
+            variant="default"
             size="sm"
             className="gap-1"
           >
@@ -165,7 +171,7 @@ export function BalanceBreakdownCard({
       </div>
 
       <div className="text-2xl font-semibold text-theme-primary mb-1">
-        {formatCreditsCompact(total)}
+        {formatCreditsCompact(total, locale)}
       </div>
       <div className="text-sm text-theme-secondary mb-5">
         {t('totalAvailable')}
@@ -188,7 +194,8 @@ export function BalanceBreakdownCard({
  * monthly grant. The right-side label shows `balance / allowance` so the
  * overflow is visible in the number even when the bar is capped.
  *
- * Falls back to a plain balance display when no allowance is known (FREE / CE).
+ * Falls back to a plain balance display when no allowance is known: CE, or a
+ * guest whose payer is someone else.
  */
 function SubscriptionGauge({
   balance,
@@ -198,12 +205,24 @@ function SubscriptionGauge({
   allowance: number;
 }) {
   const t = useTranslations('billing.payg');
+  const locale = useLocale();
   const hasAllowance = allowance > 0;
-  // With an allowance: gauge against it (capped at 100%). Without one
-  // (FREE / CE): fall back to "funded vs empty" so the bar still renders and
-  // the row stays visually balanced with the PAYG gauge below.
+  // With an allowance: gauge against it (capped at 100%). Without one, fall
+  // back to "funded vs empty" so the bar still renders and the row stays
+  // visually balanced with the PAYG gauge below.
+  //
+  // "Without one" is CE, or a guest whose payer is someone else. It is NOT
+  // FREE: a FREE cloud account has a real 1,000-credit monthly reset and now
+  // gets a real denominator here, which is the whole point of routing this
+  // page through useCreditWallet.
+  // Clamped at BOTH ends. Only the high end was held, and a debit can drive a
+  // bucket negative (`CreditService.applyDebit` takes the whole cost from PAYG
+  // when the plan's monthly grant is workflow-only), which yields
+  // `width: "-20%"` - an invalid declaration, so the bar silently disappears
+  // rather than reading empty. This change widened the exposure by giving FREE
+  // accounts a denominator here, and FREE is exactly the workflow-only plan.
   const fillPct = hasAllowance
-    ? Math.min(100, Math.round((balance / allowance) * 100))
+    ? Math.max(0, Math.min(100, Math.round((balance / allowance) * 100)))
     : balance > 0
       ? 100
       : 0;
@@ -213,14 +232,15 @@ function SubscriptionGauge({
       <div className="flex items-center justify-between text-sm mb-1">
         <span className="text-theme-secondary">{t('breakdown.sub')}</span>
         <span className="font-medium text-theme-primary">
-          {formatCreditsCompact(balance)}
+          {formatCreditsCompact(balance, locale)}
           {hasAllowance && (
-            <span className="text-theme-muted"> / {formatCreditsCompact(allowance)}</span>
+            <span className="text-theme-muted"> / {formatCreditsCompact(allowance, locale)}</span>
           )}
         </span>
       </div>
       <div className="h-1.5 rounded-full bg-theme-tertiary overflow-hidden">
         <div
+          data-testid="subscription-gauge-fill"
           className="h-full bg-gray-900 dark:bg-white transition-all"
           style={{ width: `${fillPct}%` }}
         />
@@ -237,6 +257,7 @@ function SubscriptionGauge({
  */
 function PaygGauge({ balance }: { balance: number }) {
   const t = useTranslations('billing.payg');
+  const locale = useLocale();
   // Full bar when funded, empty when zero - keeps the row visually balanced
   // with the subscription gauge above whether or not the user has topped up.
   const fillPct = balance > 0 ? 100 : 0;
@@ -246,7 +267,7 @@ function PaygGauge({ balance }: { balance: number }) {
       <div className="flex items-center justify-between text-sm mb-1">
         <span className="text-theme-secondary">{t('breakdown.payg')}</span>
         <span className="font-medium text-theme-primary">
-          {formatCreditsCompact(balance)}
+          {formatCreditsCompact(balance, locale)}
         </span>
       </div>
       <div className="h-1.5 rounded-full bg-theme-tertiary overflow-hidden">

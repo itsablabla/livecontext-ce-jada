@@ -53,10 +53,13 @@ public class StopOnErrorNode extends BaseNode {
         logger.info("StopOnError node executing: nodeId={}, errorMessage={}, errorCode={}, itemId={}",
             nodeId, errorMessage, errorCode, context.itemId());
 
+        // `errorMessage` / `errorCode`, the names StopOnErrorConfig uses. They were
+        // snake_case here, which reached the Params column as keys the plan does not
+        // have and the alignment check reads as "configured but not reported".
         Map<String, Object> resolvedParams = new LinkedHashMap<>();
-        resolvedParams.put("error_message", errorMessage);
+        resolvedParams.put("errorMessage", errorMessage);
         if (errorCode != null && !errorCode.isBlank()) {
-            resolvedParams.put("error_code", errorCode);
+            resolvedParams.put("errorCode", errorCode);
         }
 
         Map<String, Object> result = new LinkedHashMap<>();

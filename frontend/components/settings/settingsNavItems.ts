@@ -10,6 +10,7 @@ import {
   Shield,
   Building2,
   Bot,
+  Bug,
   Blocks,
   Globe,
   Coins,
@@ -40,7 +41,7 @@ export interface SettingsNavItem {
 
 /**
  * Navigation items for /app/settings routes, grouped by concern:
- *  1. Account (overview, organization, information)
+ *  1. Account (overview, organization, agents & chat defaults, information)
  *  2. Billing & usage (pricing, quota, storage)
  *  3. Access & sharing (public access)
  *  4. Credentials (user credentials, platform keys, AI providers)
@@ -50,6 +51,7 @@ export const settingsNavItems: SettingsNavItem[] = [
   // ── Account ───────────────────────────────────────
   { href: '/app/settings/overview', label: 'Overview', icon: LayoutDashboard },
   { href: '/app/settings/organization', label: 'Organization', icon: Building2 },
+  { href: '/app/settings/agents', label: 'Agents & Chat', icon: Bot },
   { href: '/app/settings/information', label: 'Information', icon: Info },
 
   // ── Billing & usage ──────────────────────────────
@@ -77,7 +79,7 @@ export const settingsNavItems: SettingsNavItem[] = [
   { href: '/app/settings/node-types', label: 'Node Types', icon: Blocks, adminOnly: true, groupStart: true },
   { href: '/app/settings/publication-review', label: 'Publication Review', icon: ClipboardCheck, adminOnly: true, hiddenInCE: true },
   { href: '/app/settings/marketplace-highlights', label: 'Marketplace Highlights', icon: Star, adminOnly: true, hiddenInCE: true },
-  { href: '/app/settings/agent-debug', label: 'Agent Debug', icon: Bot, adminOnly: true, hiddenInCE: true },
+  { href: '/app/settings/agent-debug', label: 'Agent Debug', icon: Bug, adminOnly: true, hiddenInCE: true },
   // Unified "Cloud" section (both editions): cloud connection (CE: link this
   // install · cloud: connected-installs inventory) + the Bundles sub-tab. The
   // legacy /settings/cloud-link routes now redirect here.

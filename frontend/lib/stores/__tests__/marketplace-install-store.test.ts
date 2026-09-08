@@ -177,6 +177,28 @@ describe('marketplace-install store - state machine', () => {
     );
   });
 
+  it('403 PLAN_UPGRADE_REQUIRED → its own state, NOT ce-exclusive', async () => {
+    // These two are both 403 on an install and mean opposite things. ce-exclusive renders a dead
+    // end with no way forward, which is right for an app that needs a local CLI agent and wrong
+    // for one that needs a plan the user can buy in two clicks. Collapsing them would tell a
+    // paying customer to go self-host.
+    svc.acquirePublication.mockRejectedValue(
+      Object.assign(new Error('This app uses vector search, available from the PRO plan.'), {
+        status: 403,
+        code: 'PLAN_UPGRADE_REQUIRED',
+      }),
+    );
+    store().startInstall(pub());
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(store().active!.status).toBe('plan-upgrade-required');
+    expect(store().active!.error).toContain('PRO');
+    expect(trackMock).toHaveBeenCalledWith(
+      'app_install_failed',
+      expect.objectContaining({ outcome: 'plan_upgrade_required', error_code: 'PLAN_UPGRADE_REQUIRED' }),
+    );
+  });
+
   it('is single-flight: a second startInstall while installing returns false and does nothing', () => {
     svc.acquirePublication.mockReturnValue(new Promise(() => {}));
     expect(store().startInstall(pub())).toBe(true);

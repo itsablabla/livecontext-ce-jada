@@ -4,6 +4,7 @@ import com.apimarketplace.orchestrator.domain.workflow.Core;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
 import com.apimarketplace.orchestrator.execution.v2.engine.CoreNodeBuilder;
 import com.apimarketplace.orchestrator.execution.v2.engine.ExecutionContext;
+import com.apimarketplace.orchestrator.execution.v2.engine.ExecutionNodeFactory;
 import com.apimarketplace.orchestrator.execution.v2.engine.ExecutionServiceInjector;
 import com.apimarketplace.orchestrator.execution.v2.nodes.ExecutionNode;
 import com.apimarketplace.orchestrator.execution.v2.nodes.NodeExecutionResult;
@@ -44,6 +45,9 @@ import static org.mockito.Mockito.when;
 class AdHocNodeExecutionServiceTest {
 
     @Mock private CoreNodeBuilder coreNodeBuilder;
+    // Generate is built by the FACTORY, from the plan's agents, so a probe of
+    // an AI node never reaches the core builder at all.
+    @Mock private ExecutionNodeFactory executionNodeFactory;
     @Mock private ExecutionServiceInjector serviceInjector;
     @Mock private OutputSchemaMapper outputSchemaMapper;
     @Mock private ExecutionNode node;
@@ -53,7 +57,7 @@ class AdHocNodeExecutionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AdHocNodeExecutionService(coreNodeBuilder, serviceInjector, outputSchemaMapper, nodeCreditGate);
+        service = new AdHocNodeExecutionService(coreNodeBuilder, executionNodeFactory, serviceInjector, outputSchemaMapper, nodeCreditGate);
         lenient().when(nodeCreditGate.denyOrNull(any(), any())).thenReturn(null);
         lenient().when(outputSchemaMapper.transformToDbSchema(any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0));
@@ -121,6 +125,114 @@ class AdHocNodeExecutionServiceTest {
             // random one otherwise, so a prefixed value would be discarded unnoticed.
             assertThat(java.util.UUID.fromString(plan.getId())).isNotNull();
             assertThat(plan.getTenantId()).isEqualTo("tenant-1");
+        }
+
+        /**
+         * Running a generate node on its own, which is the only way an author
+         * tries a paid model before wiring it into a run.
+         *
+         * <p>It is not a core: it belongs to the AI family, so it travels in
+         * {@code agents} and is keyed {@code agent:}, and it is the FACTORY that
+         * builds it. A synthetic plan that filed it under {@code cores} and
+         * called only the core builder produced no node at all, and the probe
+         * answered that the node cannot run standalone.
+         */
+        @Test
+        @DisplayName("Should file a generate probe with the agents, and build it through the factory")
+        void shouldFileGenerateWithTheAgents() {
+            AdHocNodeRequest request = request("generate",
+                    Map.of("model", "seedance-2.0-fast", "prompt", "a paper boat"));
+
+            assertThat(request.nodeKey())
+                    .as("the key decides which builder is asked for the node")
+                    .isEqualTo("agent:probe");
+
+            doAnswer(inv -> {
+                Map<String, ExecutionNode> map = inv.getArgument(0);
+                map.put("agent:probe", node);
+                return null;
+            }).when(executionNodeFactory).createAgentNodes(any(), any());
+            when(node.execute(any())).thenReturn(NodeExecutionResult.success("agent:probe", Map.of()));
+
+            service.execute(request);
+
+            ArgumentCaptor<WorkflowPlan> captor = ArgumentCaptor.forClass(WorkflowPlan.class);
+            org.mockito.Mockito.verify(executionNodeFactory).createAgentNodes(any(), captor.capture());
+            WorkflowPlan plan = captor.getValue();
+            assertThat(plan.getCores())
+                    .as("a generate node among the cores is built by nobody")
+                    .isEmpty();
+            assertThat(plan.getAgents()).hasSize(1);
+            assertThat(plan.getAgents().get(0).type()).isEqualTo("generate");
+            assertThat(plan.getAgents().get(0).params()).containsEntry("model", "seedance-2.0-fast");
+        }
+
+        /**
+         * The node registered under two keys is still ONE node.
+         *
+         * <p>The agent builder deliberately files a node under its normalized
+         * key AND under its raw lowercased label whenever the two differ, so an
+         * edge written either way finds it. Both keys hold the same instance.
+         *
+         * <p>The standalone probe used to refuse anything that produced more
+         * than one map ENTRY, which was safe only while it built core nodes
+         * (they register one key each). Routing generate through the agent
+         * builder made every multi-word label look like a node that fanned out:
+         * "Make Clip" gives agent:make_clip plus agent:make clip, and the probe
+         * answered with a message about node expansion naming nothing the caller
+         * could change. Only the default single-word label escaped it, which is
+         * why nothing caught this.
+         */
+        @Test
+        @DisplayName("Should run a generate probe whose label needs an alias key")
+        void shouldRunAProbeRegisteredUnderAnAliasKey() {
+            AdHocNodeRequest request = new AdHocNodeRequest("generate",
+                    AdHocNodeTypeResolver.configKey("generate"),
+                    Map.of("model", "seedance-2.0-fast", "prompt", "a paper boat"),
+                    Map.of(), "tenant-1", "org-1", "OWNER", "Make Clip");
+
+            // Exactly what the real factory does for this label.
+            doAnswer(inv -> {
+                Map<String, ExecutionNode> map = inv.getArgument(0);
+                map.put("agent:make_clip", node);
+                map.put("agent:make clip", node);
+                return null;
+            }).when(executionNodeFactory).createAgentNodes(any(), any());
+            when(node.execute(any()))
+                    .thenReturn(NodeExecutionResult.success("agent:make_clip", Map.of()));
+
+            AdHocNodeResult result = service.execute(request);
+
+            assertThat(result.status())
+                    .as("two keys pointing at one node is not a fan-out, and refusing it "
+                        + "makes the only way to try a paid model unusable for any label "
+                        + "with a space in it")
+                    .isEqualTo(AdHocNodeResult.COMPLETED);
+        }
+
+        /**
+         * And a genuine fan-out is still refused, so the count was widened and
+         * not simply removed: picking one of two different nodes arbitrarily
+         * would run something the caller did not ask for.
+         */
+        @Test
+        @DisplayName("Should still refuse a build that produced two DIFFERENT nodes")
+        void shouldStillRefuseARealFanOut() {
+            AdHocNodeRequest request = request("generate",
+                    Map.of("model", "seedance-2.0-fast"));
+            ExecutionNode other = org.mockito.Mockito.mock(ExecutionNode.class);
+
+            doAnswer(inv -> {
+                Map<String, ExecutionNode> map = inv.getArgument(0);
+                map.put("agent:probe", node);
+                map.put("agent:probe_2", other);
+                return null;
+            }).when(executionNodeFactory).createAgentNodes(any(), any());
+
+            AdHocNodeResult result = service.execute(request);
+
+            assertThat(result.status()).isEqualTo(AdHocNodeResult.FAILED);
+            assertThat(result.error()).contains("expanded into 2 nodes");
         }
 
         @Test

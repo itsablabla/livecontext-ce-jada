@@ -42,6 +42,11 @@ class PublicationClientCeExclusiveTest {
     private static final String CE_BODY =
             "{\"error\":\"This app is Community Edition exclusive.\","
                     + "\"code\":\"CE_EXCLUSIVE\",\"features\":[\"CLI_AGENT\"]}";
+    /** Same status, same shape, different code: the refusal an upgrade lifts. */
+    private static final String PLAN_BODY =
+            "{\"error\":\"This app uses vector search, available from the PRO plan.\","
+                    + "\"code\":\"PLAN_UPGRADE_REQUIRED\",\"requiredPlan\":\"PRO\","
+                    + "\"features\":[\"VECTOR_SEARCH\"]}";
 
     @Mock private RestTemplate restTemplate;
 
@@ -73,6 +78,34 @@ class PublicationClientCeExclusiveTest {
                         .type(CeExclusiveAcquisitionException.class))
                 .extracting(CeExclusiveAcquisitionException::getFeatures)
                 .isEqualTo(List.of("CLI_AGENT"));
+    }
+
+    @Test
+    @DisplayName("a plan refusal decodes to its OWN exception, not the terminal CE one")
+    void planRefusalIsItsOwnException() {
+        // Mapping this onto CeExclusiveAcquisitionException would be worse than an untyped
+        // failure: the agent help documents that exception as terminal, so the agent would tell
+        // the user to give up on an install one upgrade away.
+        stubForbidden("/acquire", PLAN_BODY);
+
+        assertThatThrownBy(() -> client.acquirePublication(PUB_ID, "7", "org-1"))
+                .isInstanceOf(PublicationPlanUpgradeException.class)
+                .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories
+                        .type(PublicationPlanUpgradeException.class))
+                .extracting(PublicationPlanUpgradeException::getRequiredPlan)
+                .isEqualTo("PRO");
+    }
+
+    @Test
+    @DisplayName("a plan refusal carries the features, so the caller can say WHAT needs the plan")
+    void planRefusalCarriesFeatures() {
+        stubForbidden("/acquire", PLAN_BODY);
+
+        assertThatThrownBy(() -> client.acquirePublication(PUB_ID, "7", "org-1"))
+                .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories
+                        .type(PublicationPlanUpgradeException.class))
+                .extracting(PublicationPlanUpgradeException::getFeatures)
+                .isEqualTo(List.of("VECTOR_SEARCH"));
     }
 
     @Test

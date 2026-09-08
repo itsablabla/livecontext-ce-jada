@@ -3197,6 +3197,64 @@ class OAuth2ServiceTest {
         }
 
         @Test
+        @DisplayName("normalize finds the suffix in the baseUrl when the OAuth URLs are literal (Salesforce)")
+        void normalizesAgainstTheBaseUrlWhenTheAuthorizeUrlHasNoPlaceholder() {
+            // Salesforce authorizes against a literal host, so the authorize URL alone offers no
+            // suffix to strip: a pasted full host would survive and the runtime base URL would
+            // become https://acme.my.salesforce.com.my.salesforce.com.
+            String authorize = "https://login.salesforce.com/services/oauth2/authorize";
+            String baseUrl = "https://{instance}.my.salesforce.com";
+
+            assertThat(oAuth2Service.normalizeHostVarsAgainstTemplates(
+                    Map.of("instance", "https://acme.my.salesforce.com"), authorize, baseUrl))
+                    .containsEntry("instance", "acme");
+            assertThat(oAuth2Service.normalizeHostVarsAgainstTemplates(
+                    Map.of("instance", "acme.my.salesforce.com"), authorize, baseUrl))
+                    .containsEntry("instance", "acme");
+            assertThat(oAuth2Service.normalizeHostVarsAgainstTemplates(
+                    Map.of("instance", "acme"), authorize, baseUrl))
+                    .containsEntry("instance", "acme");
+
+            // Pin the defect this fixes: against the authorize URL ALONE there is no suffix to
+            // find, so the pasted host survives whole. Drop the baseUrl fallback and this is what
+            // reaches the runtime base URL, producing acme.my.salesforce.com.my.salesforce.com.
+            assertThat(oAuth2Service.normalizeHostVarsAgainstTemplate(
+                    Map.of("instance", "acme.my.salesforce.com"), authorize))
+                    .containsEntry("instance", "acme.my.salesforce.com");
+        }
+
+        @Test
+        @DisplayName("normalize prefers the FIRST template carrying the placeholder (OAuth URL wins over baseUrl)")
+        void oauthUrlSuffixWinsOverTheBaseUrl() {
+            // Shopify carries {shop} in both. The OAuth URL is passed first and must decide, so
+            // adding the baseUrl fallback cannot change any provider that already worked.
+            String authorize = "https://{shop}.myshopify.com/admin/oauth/authorize";
+            String baseUrl = "https://{shop}.myshopify.com/admin/api/2024-01";
+
+            assertThat(oAuth2Service.normalizeHostVarsAgainstTemplates(
+                    Map.of("shop", "https://acme.myshopify.com/admin"), authorize, baseUrl))
+                    .containsEntry("shop", "acme");
+        }
+
+        @Test
+        @DisplayName("a null baseUrl fallback is ignored rather than throwing")
+        void tolerAtesNullTemplates() {
+            String authorize = "https://{shop}.myshopify.com/admin/oauth/authorize";
+
+            assertThat(oAuth2Service.normalizeHostVarsAgainstTemplates(
+                    Map.of("shop", "acme.myshopify.com"), authorize, null))
+                    .containsEntry("shop", "acme");
+        }
+
+        @Test
+        @DisplayName("a var in no template keeps its host, minus scheme and path")
+        void unknownVarStillGetsSchemeAndPathStripped() {
+            assertThat(oAuth2Service.normalizeHostVarsAgainstTemplates(
+                    Map.of("mystery", "https://host.example.com/path"), "https://literal.example.com"))
+                    .containsEntry("mystery", "host.example.com");
+        }
+
+        @Test
         @DisplayName("normalize drops blank values so the fail-fast guard can flag a missing var")
         void dropsBlankValues() {
             String tpl = "https://{shop}.myshopify.com/admin/oauth/authorize";

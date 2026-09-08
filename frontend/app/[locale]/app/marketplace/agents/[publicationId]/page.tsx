@@ -1,7 +1,8 @@
 'use client';
 
-import { use, useState, useEffect, useCallback } from 'react';
+import { use, useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
+import { track } from '@/lib/analytics/analytics';
 import { publicationService } from '@/lib/api/orchestrator/publication.service';
 import type { AgentPublicationSnapshot } from '@/lib/api/orchestrator/types';
 import { AgentFleetCanvas } from '@/components/agent-fleet/AgentFleetCanvas';
@@ -21,6 +22,8 @@ export default function AgentPublicationDetailPage({ params }: { params: Promise
   const [publication, setPublication] = useState<any>(null);
   const [snapshot, setSnapshot] = useState<AgentPublicationSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // One detail-view event per publication id, even if the load re-runs.
+  const viewedIdRef = useRef<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -30,6 +33,17 @@ export default function AgentPublicationDetailPage({ params }: { params: Promise
       ]);
       setPublication(pub);
       setSnapshot(snap);
+      if (viewedIdRef.current !== pub.id) {
+        viewedIdRef.current = pub.id;
+        track('publication_detail_viewed', {
+          publication_id: pub.id,
+          publication_type: pub.publicationType ?? null,
+          display_mode: pub.displayMode ?? null,
+          category_slug: pub.category?.slug ?? null,
+          credits_per_use: pub.creditsPerUse,
+          is_free: !pub.creditsPerUse,
+        });
+      }
     } catch (err) {
       setError(t('agents.loadError'));
     }

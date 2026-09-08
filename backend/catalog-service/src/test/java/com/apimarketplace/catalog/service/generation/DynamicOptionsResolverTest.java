@@ -461,6 +461,172 @@ class DynamicOptionsResolverTest {
     }
 
     @Test
+    @DisplayName("a nested parameter is advertised under the body path a descriptor writes, not only its name")
+    void dynamicParametersAlsoAnswerToTheirBodyPath() {
+        // HeyGen's avatar and voice belong to the connected account and are
+        // fetched with the caller's key, but the descriptor writes them where
+        // the provider wants them, inside video_inputs[0]. Advertising the name
+        // alone left both looking like free text on the generation surface,
+        // which for an opaque account-scoped id is a dead end.
+        String extras = """
+                {"bodyPath":"video_inputs[0].voice.voice_id",
+                 "valuesFrom":{"tool":"list_voices","items":"data.voices","value":"voice_id","label":"name"}}""";
+        when(parameters.findByApiToolId(TOOL)).thenReturn(List.of(param("voice_id", extras)));
+
+        // The nested place it fills, and ONLY that: the row declares its value
+        // lands inside video_inputs, so a descriptor writing the flat name
+        // 'voice_id' would fill a field this row never populates.
+        assertThat(resolver.dynamicParameters(TOOL))
+                .containsExactly("video_inputs[0].voice.voice_id");
+    }
+
+    @Test
+    @DisplayName("the values of a nested parameter are fetched through the body path too")
+    void resolvesByBodyPath() {
+        // Advertising a parameter as fetchable and then answering nothing when
+        // its values are asked for would be worse than never advertising it.
+        String extras = """
+                {"bodyPath":"video_inputs[0].voice.voice_id",
+                 "valuesFrom":{"tool":"list_voices","items":"voices","value":"voice_id","label":"name"}}""";
+        wireVoiceEndpoint("GET");
+        when(parameters.findByApiToolId(TOOL)).thenReturn(List.of(param("voice_id", extras)));
+
+        DynamicOptionsResolver.Resolution r = resolver.resolve(
+                TOOL, "video_inputs[0].voice.voice_id", "u-1", "user", null, Map.of(),
+                answering(twoVoices()));
+
+        assertThat(r.isAvailable()).isTrue();
+        assertThat(r.options()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("a row with a body path but NO source is not advertised as fetchable")
+    void aBodyPathWithoutASourceIsNotAdvertised() {
+        when(parameters.findByApiToolId(TOOL)).thenReturn(List.of(
+                param("text", "{\"bodyPath\":\"video_inputs[0].voice.input_text\"}")));
+
+        assertThat(resolver.dynamicParameters(TOOL)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a FLAT body path claim is not advertised: a flat path is a parameter's own name")
+    void aFlatBodyPathClaimIsNotAdvertised() {
+        // 'length_ms' claiming bodyPath 'duration' must not make 'duration'
+        // answerable with length_ms's values. The catalogue's static lists are
+        // matched under the same rule; the two halves have to agree or one of
+        // them offers a parameter another parameter owns.
+        String extras = """
+                {"bodyPath":"duration",
+                 "valuesFrom":{"tool":"list_voices","items":"voices","value":"voice_id","label":"name"}}""";
+        wireVoiceEndpoint("GET");
+        when(parameters.findByApiToolId(TOOL)).thenReturn(List.of(param("length_ms", extras)));
+
+        // Neither name is answerable, and that is the conservative half of the
+        // rule: 'duration' is a flat path this row only CLAIMS, and 'length_ms'
+        // is a name whose value the request does not write there. Offering
+        // either would answer for a field with another one's values.
+        assertThat(resolver.dynamicParameters(TOOL)).isEmpty();
+
+        DynamicOptionsResolver.Resolution r = resolver.resolve(
+                TOOL, "duration", "u-1", "user", null, Map.of(), answering(twoVoices()));
+
+        assertThat(r.unavailable()).isEqualTo(DynamicOptionsResolver.Unavailable.NOT_DYNAMIC);
+    }
+
+    @Test
+    @DisplayName("a parameter's own NAME beats another row's claim on it, whatever order the rows arrive in")
+    void theNameWinsOverAForeignClaim() {
+        // The repository query has no ORDER BY. Tested both ways round so a
+        // single-pass implementation testing name-or-bodyPath cannot pass.
+        String claimant = """
+                {"bodyPath":"voice_id",
+                 "valuesFrom":{"tool":"list_voices","items":"voices","value":"name","label":"voice_id"}}""";
+        wireVoiceEndpoint("GET");
+        for (List<ApiToolParameterEntity> order : List.of(
+                List.of(param("legacy_voice", claimant), param("voice_id", VOICE_EXTRAS)),
+                List.of(param("voice_id", VOICE_EXTRAS), param("legacy_voice", claimant)))) {
+            when(parameters.findByApiToolId(TOOL)).thenReturn(order);
+
+            DynamicOptionsResolver.Resolution r = resolver.resolve(
+                    TOOL, "voice_id", "u-1", "user", null, Map.of(), answering(twoVoices()));
+
+            // The row NAMED voice_id reads value from voice_id and labels with
+            // name; the claimant has them the other way round, so the values
+            // themselves say which descriptor answered.
+            assertThat(r.options()).first()
+                    .isEqualTo(new DynamicOptionsResolver.Option("21m00", "Rachel"));
+            // A fresh resolver per order: the answer is cached per account, and
+            // the second arrangement must be read from the rows, not from the
+            // first one's cache.
+            resolver = new DynamicOptionsResolver(
+                    tools, parameters, toolNames, credentials, new ObjectMapper());
+        }
+    }
+
+    @Test
+    @DisplayName("two rows claiming one nested path answer with nothing rather than with either list")
+    void conflictingClaimsAnswerWithNothing() {
+        String a = """
+                {"bodyPath":"video_inputs[0].voice.voice_id",
+                 "valuesFrom":{"tool":"list_voices","items":"voices","value":"voice_id","label":"name"}}""";
+        String b = """
+                {"bodyPath":"video_inputs[0].voice.voice_id",
+                 "valuesFrom":{"tool":"list_voices","items":"voices","value":"name","label":"voice_id"}}""";
+        wireVoiceEndpoint("GET");
+        when(parameters.findByApiToolId(TOOL)).thenReturn(List.of(param("voice_a", a), param("voice_b", b)));
+
+        DynamicOptionsResolver.Resolution r = resolver.resolve(
+                TOOL, "video_inputs[0].voice.voice_id", "u-1", "user", null, Map.of(),
+                answering(twoVoices()));
+
+        assertThat(r.unavailable()).isEqualTo(DynamicOptionsResolver.Unavailable.NOT_DYNAMIC);
+    }
+
+    @Test
+    @DisplayName("two rows claiming one path answer nothing, even when their sources agree")
+    void duplicateClaimsAnswerNothing() {
+        String same = """
+                {"bodyPath":"video_inputs[0].voice.voice_id",
+                 "valuesFrom":{"tool":"list_voices","items":"voices","value":"voice_id","label":"name"}}""";
+        wireVoiceEndpoint("GET");
+        when(parameters.findByApiToolId(TOOL)).thenReturn(List.of(param("a", same), param("b", same)));
+
+        DynamicOptionsResolver.Resolution r = resolver.resolve(
+                TOOL, "video_inputs[0].voice.voice_id", "u-1", "user", null, Map.of(),
+                answering(twoVoices()));
+
+        // Agreeing today is not the same as being the owner: the seed still says
+        // two rows fill one field, and which of them is authoritative is not a
+        // question to answer by guessing. Same rule as the values half.
+        assertThat(r.unavailable()).isEqualTo(DynamicOptionsResolver.Unavailable.NOT_DYNAMIC);
+    }
+
+    @Test
+    @DisplayName("a claimant with no source of its own still contests, and the field is not advertised")
+    void aSourcelessClaimantContestsAndIsNotAdvertised() {
+        // Advertising it and then refusing to answer is the one thing the
+        // resolution path promises not to do: an agent is told the values can
+        // be fetched and gets 'not fetchable' when it asks.
+        String withSource = """
+                {"bodyPath":"video_inputs[0].voice.voice_id",
+                 "valuesFrom":{"tool":"list_voices","items":"voices","value":"voice_id","label":"name"}}""";
+        String claimOnly = """
+                {"bodyPath":"video_inputs[0].voice.voice_id"}""";
+        wireVoiceEndpoint("GET");
+        when(parameters.findByApiToolId(TOOL)).thenReturn(List.of(
+                param("owner", claimOnly), param("other", withSource)));
+
+        assertThat(resolver.dynamicParameters(TOOL))
+                .doesNotContain("video_inputs[0].voice.voice_id");
+
+        DynamicOptionsResolver.Resolution r = resolver.resolve(
+                TOOL, "video_inputs[0].voice.voice_id", "u-1", "user", null, Map.of(),
+                answering(twoVoices()));
+
+        assertThat(r.unavailable()).isEqualTo(DynamicOptionsResolver.Unavailable.NOT_DYNAMIC);
+    }
+
+    @Test
     @DisplayName("malformed extras leave the parameter plain instead of breaking the catalogue")
     void malformedExtrasAreIgnored() {
         when(parameters.findByApiToolId(TOOL)).thenReturn(List.of(

@@ -9,6 +9,15 @@ import { Button } from '@/components/ui/button';
 interface RerunConfirmModalProps {
   /** Human-readable name of the step the rerun would restart from. */
   stepLabel: string;
+  /**
+   * The fire of the run that will be redone, or undefined for the run's most recent one.
+   *
+   * A run accumulates one epoch per trigger fire and each keeps its own results, so the node
+   * alone does not say what is about to be re-executed: the same restart, clicked while
+   * reading epoch 2, redoes different work than it does on epoch 9. Naming it is the whole
+   * point of a confirmation on a run that then continues unattended.
+   */
+  epoch?: number;
   /** Start the rerun. */
   onConfirm: () => void;
   /** Dismiss without rerunning anything. */
@@ -25,7 +34,7 @@ interface RerunConfirmModalProps {
  * confirmation-modal style (portal overlay, rounded card, icon + title + message,
  * Cancel | primary action).</p>
  */
-export function RerunConfirmModal({ stepLabel, onConfirm, onCancel }: RerunConfirmModalProps) {
+export function RerunConfirmModal({ stepLabel, epoch, onConfirm, onCancel }: RerunConfirmModalProps) {
   const t = useTranslations('workflowBuilder.rerunConfirm');
   const tc = useTranslations('common');
 
@@ -69,8 +78,15 @@ export function RerunConfirmModal({ stepLabel, onConfirm, onCancel }: RerunConfi
         </p>
 
         {/* The node the restart starts from, shown verbatim so the user can vet it. */}
-        <p className="text-sm text-theme-secondary text-center mb-8 break-all font-mono bg-black/5 dark:bg-white/5 rounded-lg px-3 py-2">
+        <p className="text-sm text-theme-secondary text-center break-all font-mono bg-black/5 dark:bg-white/5 rounded-lg px-3 py-2">
           {stepLabel}
+        </p>
+
+        {/* ...and WHICH fire of the run it redoes. Always shown, both branches named: a user
+            reading epoch 2 has to see that this restarts epoch 2, and one on the live state
+            has to see that it does not. */}
+        <p className="text-sm text-theme-secondary text-center mt-2 mb-8" data-testid="rerun-confirm-scope">
+          {epoch != null ? t('scopeEpoch', { epoch }) : t('scopeLatestEpoch')}
         </p>
 
         {/* Actions */}

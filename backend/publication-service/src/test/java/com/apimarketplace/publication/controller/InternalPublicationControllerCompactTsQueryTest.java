@@ -156,4 +156,50 @@ class InternalPublicationControllerCompactTsQueryTest {
             assertThat(InternalPublicationController.parseShowcaseEpoch(null)).isNull();
         }
     }
+
+    /**
+     * The studio axis on the server-to-server publish path.
+     *
+     * <p>This used to be a hardcoded {@code null}: an agent could create an application but never
+     * put it on the Studio shelf, and nothing said so. The three-valued reading is the whole point -
+     * absent means "no opinion", and the service leaves the stored value alone, so a re-publish that
+     * does not mention the axis cannot silently take an application off the shelf.
+     */
+    @Nested
+    @DisplayName("parseStudio - internal publish studio axis")
+    class ParseStudio {
+        @Test @DisplayName("true puts the application on the studio shelf")
+        void explicitTrue() {
+            assertThat(InternalPublicationController.parseStudio(Map.of("studio", true))).isTrue();
+        }
+
+        @Test @DisplayName("false takes it off - not the same as saying nothing")
+        void explicitFalse() {
+            assertThat(InternalPublicationController.parseStudio(Map.of("studio", false))).isFalse();
+        }
+
+        @Test @DisplayName("Missing key -> null, so the stored value is left alone")
+        void missingKey() {
+            assertThat(InternalPublicationController.parseStudio(Map.of("workflowId", "w"))).isNull();
+        }
+
+        @Test @DisplayName("Explicit null value -> null")
+        void explicitNull() {
+            Map<String, Object> req = new HashMap<>();
+            req.put("studio", null);
+            assertThat(InternalPublicationController.parseStudio(req)).isNull();
+        }
+
+        @Test @DisplayName("The string \"true\" is IGNORED rather than guessed at")
+        void stringIsNotABoolean() {
+            // Where an application appears is the publisher's decision. Coercing a malformed field
+            // would move it on a caller's typo, and the failure is invisible either way.
+            assertThat(InternalPublicationController.parseStudio(Map.of("studio", "true"))).isNull();
+        }
+
+        @Test @DisplayName("A null request map -> null (never a NullPointerException on the publish path)")
+        void nullRequest() {
+            assertThat(InternalPublicationController.parseStudio(null)).isNull();
+        }
+    }
 }

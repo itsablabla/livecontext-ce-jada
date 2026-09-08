@@ -5,6 +5,8 @@ import com.apimarketplace.catalog.domain.ApiToolEntity;
 import com.apimarketplace.catalog.domain.ApiToolParameterEntity;
 import com.apimarketplace.catalog.repository.ApiToolParameterRepository;
 import com.apimarketplace.catalog.util.AllowedValuesParser;
+import com.apimarketplace.catalog.util.ParameterBodyPath;
+import com.apimarketplace.catalog.util.ParameterOwner;
 import com.apimarketplace.catalog.repository.ApiRepository;
 import com.apimarketplace.catalog.repository.ApiToolRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,6 +18,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.Set;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -285,31 +289,25 @@ public class GenerationRegistry {
                     + "free-text fields for anything the descriptor does not restrict", context, e.getMessage());
             return Map.of();
         }
-        Map<String, String> allowedByName = new LinkedHashMap<>();
-        for (ApiToolParameterEntity p : params) {
-            if (p.getName() != null && p.getAllowedValues() != null) {
-                allowedByName.put(p.getName(), p.getAllowedValues());
-            }
-        }
-        if (allowedByName.isEmpty()) return Map.of();
-
         Map<String, List<String>> resolved = new LinkedHashMap<>();
         spec.paramMap().forEach((unified, binding) -> {
             String path = binding.path();
-            // A binding path is a WRITE path, not always a parameter name:
-            // `content[0].text` and `config.duration` address a place inside a
-            // body, and the row that owns them is stored under a different
-            // name. Matching those by string would attach one parameter's list
-            // to another, which is worse than no list at all.
-            if (path == null || path.indexOf('.') >= 0 || path.indexOf('[') >= 0) return;
-            // A SCALED binding writes a different unit from the one the field
-            // is labelled in: `duration_seconds` reaching `music_length_ms`
-            // multiplies by 1000, so the parameter's own values are
-            // milliseconds and offering them under a field that says seconds
-            // would suggest 30000 for a half-minute clip.
+            if (path == null) return;
+            // A SCALED binding writes a different unit from the one the field is
+            // labelled in: duration_seconds reaching music_length_ms multiplies
+            // by 1000, so the parameter's own values are milliseconds and
+            // offering them under a field that says seconds would suggest 30000
+            // for a half-minute clip.
             if (binding.scale() != null) return;
-            List<String> values = AllowedValuesParser.parseString(allowedByName.get(path));
-            if (values != null && !values.isEmpty()) resolved.put(unified, values);
+            // WHICH row owns this write path is decided in one place, shared
+            // with the resolver that fetches a parameter's values from the
+            // provider. Deciding it twice is how a parameter came to be
+            // described with one row's enumeration and another row's source.
+            ParameterOwner.of(params, path)
+                    .map(ApiToolParameterEntity::getAllowedValues)
+                    .map(AllowedValuesParser::parseString)
+                    .filter(values -> !values.isEmpty())
+                    .ifPresent(values -> resolved.put(unified, values));
         });
         return resolved;
     }

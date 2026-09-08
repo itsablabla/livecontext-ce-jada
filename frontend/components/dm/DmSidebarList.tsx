@@ -200,7 +200,7 @@ export function DmSidebarList({ filter = 'all', searchOpen = false }: DmSidebarL
         />
         <span className="min-w-0 flex-1 truncate text-sm text-theme-secondary group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary transition-colors">{labelFor(th.otherUserId)}</span>
         {th.unreadCount > 0 && (
-          <span className="flex-shrink-0 rounded-md bg-[var(--accent-primary)] px-1.5 text-xs font-medium text-white">
+          <span className="flex-shrink-0 rounded-md bg-[var(--accent-primary)] px-1.5 text-xs font-medium text-[var(--accent-foreground)]">
             {th.unreadCount}
           </span>
         )}

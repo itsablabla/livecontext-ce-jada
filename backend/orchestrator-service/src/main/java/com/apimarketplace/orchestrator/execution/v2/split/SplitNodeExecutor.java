@@ -78,6 +78,7 @@ public class SplitNodeExecutor {
             String nodeId,
             String sourceExpression,
             int maxItems,
+            String splitStrategy,
             int workflowItemIndex,
             ExecutionContext context) {
 
@@ -110,7 +111,7 @@ public class SplitNodeExecutor {
             logger.info("[SplitExecutor] Source expression evaluated to empty list: nodeId={}", nodeId);
             // Still create context (empty), split is COMPLETED
             contextManager.createContext(runId, nodeId, workflowItemIndex, parentScopeKey, items, epochOf(context));
-            return createSuccessResult(nodeId, items, "empty_list", sourceExpression, maxItems);
+            return createSuccessResult(nodeId, items, "empty_list", sourceExpression, maxItems, splitStrategy);
         }
 
         // 4. Create SplitContext with items (scoped to workflow item and parent scope)
@@ -120,7 +121,7 @@ public class SplitNodeExecutor {
             items.size(), nodeId, splitContext.splitNodeId());
 
         // 5. Return COMPLETED - split job is done
-        return createSuccessResult(nodeId, items, "items_spawned", sourceExpression, maxItems);
+        return createSuccessResult(nodeId, items, "items_spawned", sourceExpression, maxItems, splitStrategy);
     }
 
     /**
@@ -204,7 +205,8 @@ public class SplitNodeExecutor {
      * @see com.apimarketplace.orchestrator.services.persistence.schema.SplitOutputSchemaMapper
      */
     private NodeExecutionResult createSuccessResult(String nodeId, List<Object> items, String reason,
-                                                     String sourceExpression, int maxItems) {
+                                                     String sourceExpression, int maxItems,
+                                                     String splitStrategy) {
         Map<String, Object> output = new HashMap<>();
         output.put(ExecutionMetadataKeys.NODE_TYPE, "SPLIT");
         output.put("split_id", nodeId);
@@ -215,14 +217,22 @@ public class SplitNodeExecutor {
 
         // Persist resolved configuration as resolved_params for the inspector panel.
         // Without this, the split node shows empty "Resolved parameters" in the run view.
+        // Keys follow the PLAN vocabulary (list / maxItems / splitStrategy), which is
+        // what the builder form writes and what the inspector labels. They used to be
+        // source_expression / max_items / item_count, so the same three settings had
+        // three different names across the form, this executor and SplitNode - and two
+        // of them had no label, reaching the Params column as raw keys.
         Map<String, Object> resolvedParams = new LinkedHashMap<>();
         if (sourceExpression != null) {
-            resolvedParams.put("source_expression", sourceExpression);
+            resolvedParams.put("list", sourceExpression);
         }
         if (maxItems > 0) {
-            resolvedParams.put("max_items", maxItems);
+            resolvedParams.put("maxItems", maxItems);
         }
-        resolvedParams.put("item_count", items.size());
+        if (splitStrategy != null) {
+            resolvedParams.put("splitStrategy", splitStrategy);
+        }
+        resolvedParams.put("itemCount", items.size());
         output.put("resolved_params", resolvedParams);
 
         return new NodeExecutionResult(
@@ -307,7 +317,7 @@ public class SplitNodeExecutor {
         if (effectiveItems.isEmpty()) {
             logger.info("[SplitExecutor] Items list is empty: nodeId={}", nodeId);
             contextManager.createContext(runId, nodeId, workflowItemIndex, parentScopeKey, effectiveItems, epochOf(context));
-            return createSuccessResult(nodeId, effectiveItems, "empty_list", null, maxItems);
+            return createSuccessResult(nodeId, effectiveItems, "empty_list", null, maxItems, null);
         }
 
         // Create SplitContext with items
@@ -316,7 +326,7 @@ public class SplitNodeExecutor {
         logger.info("[SplitExecutor] Split spawned {} items (from pre-resolved): nodeId={}, contextKey={}",
             effectiveItems.size(), nodeId, splitContext.splitNodeId());
 
-        return createSuccessResult(nodeId, effectiveItems, "items_spawned", null, maxItems);
+        return createSuccessResult(nodeId, effectiveItems, "items_spawned", null, maxItems, null);
     }
 
     /**

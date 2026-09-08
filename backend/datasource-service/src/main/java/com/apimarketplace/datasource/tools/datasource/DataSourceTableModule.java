@@ -174,7 +174,8 @@ public class DataSourceTableModule implements ToolModule {
                     return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR,
                         "columns must contain at least one column definition");
                 }
-                String validationError = validateColumnDefinitions(columnsList, vectorFeatureGate.isVectorAllowed());
+                String validationError = validateColumnDefinitions(columnsList, vectorFeatureGate.isVectorAllowed(tenantId),
+                        () -> vectorFeatureGate.deniedMessage(tenantId));
                 if (validationError != null) {
                     return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR, validationError);
                 }
@@ -191,7 +192,8 @@ public class DataSourceTableModule implements ToolModule {
             } else if (columnsObj != null) {
                 List<Map<String, Object>> columnsList = parseColumnsArray(columnsObj, objectMapper, log);
                 if (!columnsList.isEmpty()) {
-                    String validationError = validateColumnDefinitions(columnsList, vectorFeatureGate.isVectorAllowed());
+                    String validationError = validateColumnDefinitions(columnsList, vectorFeatureGate.isVectorAllowed(tenantId),
+                        () -> vectorFeatureGate.deniedMessage(tenantId));
                     if (validationError != null) {
                         return ToolExecutionResult.failure(ToolErrorCode.VALIDATION_ERROR, validationError);
                     }
@@ -547,41 +549,68 @@ public class DataSourceTableModule implements ToolModule {
             Map.entry("sentiment", "Thumbs up/down. Values: 'up', 'down', 'neutral'. display: {labels: {up: 'Good', down: 'Bad'}}"),
             Map.entry("progress", "Progress bar 0-max. display: {max: 100}"),
             Map.entry("file", "A file: an upload, a file already in storage, or a link. Write the ref "
-                + "returned by files(action='get') as the cell value, or a public URL string. Reading the "
-                + "row back gives {_type:'file', id, url, name, mimeType, size}. See help.mediaColumns."),
+                + "returned by files(action='get') as the cell value, or a public URL string. query_rows "
+                + "gives the cell back as the file OBJECT {_type:'file', id, path, url, name, mimeType, "
+                + "size}, ready to hand to anything that takes a file - you never parse it. Use this "
+                + "type instead of storing a file reference as text. One cell holds ONE file. "
+                + "See help.mediaColumns."),
             Map.entry("image", "Same value as 'file', shown as a round thumbnail instead of a file card. "
                 + "display: {render: 'thumbnail'|'card'}. See help.mediaColumns."),
             Map.entry("email", "Email address with mailto: link"),
             Map.entry("phone", "Phone number with tel: link"),
             Map.entry("url", "Clickable URL (opens in new tab)")
         ));
-        if (vectorFeatureGate.isVectorAllowed()) {
-            columnTypes.put("vector", "Embedding vector for similarity search (RAG). display: {dimension: 1536, metric: 'cosine'|'l2'|'dot'}. " +
-                "Vectors are stored separately in a dedicated vector table (pgvector). " +
-                "Use with crud-find + similarity config for nearest-neighbor queries.");
-        }
+        columnTypes.put("vector", "Embedding vector for similarity search (RAG). display: {dimension: 1536, metric: 'cosine'|'l2'|'dot'}. " +
+            "Vectors are stored separately in a dedicated vector table (pgvector). " +
+            "Use with crud-find + similarity config for nearest-neighbor queries.");
         help.put("columnTypes", columnTypes);
 
         // The value shape of a media cell was documented nowhere, so an agent could see that the
         // column type existed and had to guess what to write into it.
-        help.put("mediaColumns", Map.of(
-            "appliesTo", "Columns of type 'file' and 'image'. They are ONE value contract; 'image' only "
-                + "changes how the cell is drawn.",
-            "whatToWrite", "Any of: (1) the ref object returned by files(action='get') - the usual case "
+        Map<String, Object> mediaColumns = new LinkedHashMap<>();
+        mediaColumns.put("appliesTo", "Columns of type 'file' and 'image'. They are ONE value contract; 'image' only "
+                + "changes how the cell is drawn.");
+        mediaColumns.put("whatToWrite", "Any of: (1) the ref object returned by files(action='get') - the usual case "
                 + "when the file already exists or a workflow produced it; (2) a public URL string such as "
-                + "'https://example.com/photo.png'; (3) an object {url, name, mimeType, size}.",
-            "whatYouReadBack", "{_type:'file', id, url, name, mimeType, size}. 'id' identifies a file held "
-                + "in this workspace and is absent when the cell holds an external link. 'url' is what "
-                + "renders the file.",
-            "externalUrls", "A URL that is not ours is stored as a link, not copied. It keeps working only "
-                + "as long as that address does, and it has no 'id'.",
-            "example", Map.of(
+                + "'https://example.com/photo.png'; (3) an object {url, name, mimeType, size}.");
+        mediaColumns.put("whatYouReadBack", "The file OBJECT itself, not a string you have to parse: "
+                + "{_type:'file', id, path, url, name, mimeType, size}. A cell holding something that "
+                + "is not one file - a list of them, or JSON that names no file at all - comes back "
+                + "exactly as it was stored, so check what you got before drilling into it. "
+                + "'id' identifies a file held in this workspace and is absent when the cell holds an "
+                + "external link. NEITHER 'path' NOR 'url' is guaranteed: 'path' is the field a "
+                + "workflow needs to reach the file's bytes and is present only when the file has one "
+                + "(a file known by id alone does not, an external link never does), while 'url' renders "
+                + "the file and is present whenever the cell names one this workspace holds by id or "
+                + "carries a link of its own - a reference that has only a storage path, the commonest "
+                + "shape a workflow produces, carries no 'url'. Read back the field you need rather "
+                + "than assuming it is there.");
+        mediaColumns.put("shapeChanged", "These cells used to be handed back as a JSON STRING, so older workflows "
+                + "parse them. If you are editing one, drop the parse step: the value is already an "
+                + "object, and parsing an object fails.");
+        mediaColumns.put("useTheCellDirectly", "Pass the whole cell wherever a file is expected, the same way you "
+                + "would pass the ref from files(action='get'). Do NOT read one field out of it, and do "
+                + "not rebuild it: the object you read back IS the reference.");
+        mediaColumns.put("preferThisOverTextJson", "Do not store a file reference as JSON text in a 'text' column and "
+                + "re-parse it later. That was the only option before this column type gave the object "
+                + "back, and it still silently works, so it is easy to copy from an older table. A 'file' "
+                + "or 'image' column is the supported way, and it comes back usable as-is.");
+        mediaColumns.put("externalUrls", "A URL that is not ours is stored as a link, not copied. It keeps working only "
+                + "as long as that address does, and it has no 'id'.");
+        mediaColumns.put("example", Map.of(
                 "step1", "files(action='list', query='invoice') then files(action='get', file_id=...) to get the ref",
                 "step2", "insert_rows with rows=[{columns: {invoice: <the ref from step 1>, customer: 'ACME'}}]"
-            ),
-            "commonMistake", "Do not write the file's name or its storage path on its own: neither can be "
-                + "resolved back to a file. Write the ref, or a URL."
-        ));
+            ));
+        mediaColumns.put("commonMistake", "Do not write the file's name or its storage path on its own: neither can be "
+                + "resolved back to a file. Write the ref, or a URL.");
+        mediaColumns.put("doNotFilterOnIt", "A where clause matches the STORED text, not the object you read back, "
+                + "so passing a media cell as a where value matches nothing. Filter and de-duplicate on "
+                + "a text or id column instead. For the same reason, do not copy a media cell into a "
+                + "text column: a cell that carries a url or an id lands there as a short readable "
+                + "summary rather than a reference you can reuse. Both of these USED to work while the cell came back as text, so a table you "
+                + "built earlier may still be doing one of them.");
+
+        help.put("mediaColumns", mediaColumns);
 
         help.put("examples", List.of(
             Map.of("action", "create (data + columns with types)",
@@ -607,14 +636,12 @@ public class DataSourceTableModule implements ToolModule {
         ));
 
         // Similarity-search examples only where the feature exists.
-        if (vectorFeatureGate.isVectorAllowed()) {
-            List<Map<String, String>> examples = new ArrayList<>((List<Map<String, String>>) help.get("examples"));
-            examples.add(Map.of("action", "query_rows (similarity search)",
-                "example", "table(action='query_rows', table_id=1, similarity={column: 'embedding', queryVector: [0.1, 0.2, ...], topK: 5, threshold: 0.8})"));
-            examples.add(Map.of("action", "query_rows (hybrid: similarity + where)",
-                "example", "table(action='query_rows', table_id=1, similarity={column: 'embedding', queryVector: [0.1, 0.2, ...], topK: 10}, where={column: 'category', operator: '=', value: 'recipes'})"));
-            help.put("examples", examples);
-        }
+        List<Map<String, String>> examples = new ArrayList<>((List<Map<String, String>>) help.get("examples"));
+        examples.add(Map.of("action", "query_rows (similarity search)",
+            "example", "table(action='query_rows', table_id=1, similarity={column: 'embedding', queryVector: [0.1, 0.2, ...], topK: 5, threshold: 0.8})"));
+        examples.add(Map.of("action", "query_rows (hybrid: similarity + where)",
+            "example", "table(action='query_rows', table_id=1, similarity={column: 'embedding', queryVector: [0.1, 0.2, ...], topK: 10}, where={column: 'category', operator: '=', value: 'recipes'})"));
+        help.put("examples", examples);
 
         return ToolExecutionResult.success(help);
     }

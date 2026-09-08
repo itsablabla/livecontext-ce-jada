@@ -188,6 +188,19 @@ public class TriggerNode extends BaseNode {
         // Event emission will be added later
     }
 
+    /**
+     * The trigger's declared type ({@code webhook}, {@code schedule}, {@code manual},
+     * {@code chat}, {@code form}, {@code datasource}), i.e. the value
+     * {@code node_type_documentation.type} uses for it. Every other node answers that
+     * question with {@link #schemaNodeType()}, which for a trigger only ever says
+     * "TRIGGER" - so anything keyed by node type has to ask here instead.
+     *
+     * @return the type, or {@code null} when this node was built from an id alone
+     */
+    public String getTriggerType() {
+        return trigger != null ? trigger.type() : null;
+    }
+
     public String getTriggerId() {
         return triggerId;
     }

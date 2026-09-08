@@ -16,9 +16,15 @@ import { markRunAsJustExecuted } from '@/app/workflows/builder/hooks/useWorkflow
 import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import {
   setPendingActivateTab,
+  INSPECTOR_TAB_ID,
   NODE_CREATOR_TAB_ID,
   RUN_TAB_ID,
 } from '@/components/app/WorkflowPanelContent';
+import {
+  OPEN_INSPECTOR_PANEL_EVENT,
+  isInspectorOpenRequestFor,
+  type OpenInspectorPanelDetail,
+} from '@/lib/workflow/inspectorDockBus';
 import { WORKFLOW_PANEL_TAB_ID } from '@/lib/sidePanel/workflowPanelTab';
 import {
   OPEN_NODE_CREATOR_EVENT,
@@ -157,11 +163,26 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
       if (detail.workflowId && detail.workflowId !== workflowId) return;
       openWorkflowPanelOnTab(NODE_CREATOR_TAB_ID);
     };
+    // Selecting a node while the inspector is docked to the panel. Same page-level
+    // handling as the two above, for the same reason: the panel body is unmounted
+    // while the panel is closed, so the FIRST selection has nothing in-panel to
+    // listen for it - and that is precisely the click that must open the panel.
+    const handleOpenInspector = (event: Event) => {
+      const detail = (event as CustomEvent<OpenInspectorPanelDetail>).detail;
+      // 'page' only: an embedded canvas (the Application panel, a sub-workflow
+      // tab) docks inside the panel that already shows it, and its own in-panel
+      // listener handles the focus. Reacting here would drag the side panel back
+      // to the workflow tab of the page behind it.
+      if (!isInspectorOpenRequestFor(detail, workflowId, 'page')) return;
+      openWorkflowPanelOnTab(INSPECTOR_TAB_ID);
+    };
     window.addEventListener(OPEN_RUN_PANEL_EVENT, handleOpenRun);
     window.addEventListener(OPEN_NODE_CREATOR_EVENT, handleOpenNodeCreator);
+    window.addEventListener(OPEN_INSPECTOR_PANEL_EVENT, handleOpenInspector);
     return () => {
       window.removeEventListener(OPEN_RUN_PANEL_EVENT, handleOpenRun);
       window.removeEventListener(OPEN_NODE_CREATOR_EVENT, handleOpenNodeCreator);
+      window.removeEventListener(OPEN_INSPECTOR_PANEL_EVENT, handleOpenInspector);
     };
   }, [workflowId, openWorkflowPanelOnTab]);
 
@@ -384,9 +405,14 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
   // ── Manual open sub-workflow in side panel (run mode button click) ──
   // In run mode: show the pinned run if one exists, otherwise fall back to builder.
   useEffect(() => {
-    const handleOpenSubWorkflow = async (event: CustomEvent<{ workflowId: string; workflowName: string; nodeId: string }>) => {
-      const { workflowId: subWfId, workflowName: wfName } = event.detail;
+    const handleOpenSubWorkflow = async (event: CustomEvent<{ workflowId: string; workflowName: string; nodeId: string; sourceWorkflowId?: string }>) => {
+      const { workflowId: subWfId, workflowName: wfName, sourceWorkflowId } = event.detail;
       if (!sidePanel || !subWfId) return;
+      // Twin of the panel's listener: both sit on `window` and build the same tab
+      // id, so an addressed request must be answered only by the view hosting the
+      // canvas that sent it. Refuses only a DIFFERENT source, so an unaddressed
+      // request still reaches every listener.
+      if (sourceWorkflowId && sourceWorkflowId !== workflowId) return;
 
       // Resolve pinned run via dedicated endpoint (same logic as ProductionRunResolver)
       let pinnedRunId: string | undefined;
@@ -412,7 +438,7 @@ export function WorkflowDetailView({ workflowId, runId: runIdProp, autoOpenApp }
     };
     window.addEventListener('workflowOpenSubWorkflow', handleOpenSubWorkflow as EventListener);
     return () => window.removeEventListener('workflowOpenSubWorkflow', handleOpenSubWorkflow as EventListener);
-  }, [sidePanel, isPreviewOnly]);
+  }, [sidePanel, isPreviewOnly, workflowId]);
 
   // Sub-workflow auto-open removed - persistent button on the node handles this.
 

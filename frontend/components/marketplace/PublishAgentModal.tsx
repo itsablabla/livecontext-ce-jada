@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useTranslations } from 'next-intl';
 import { publicationService } from '@/lib/api/orchestrator/publication.service';
+import { track } from '@/lib/analytics/analytics';
 import { AvatarDisplay } from '@/components/agents';
 import { heroGradientCss } from '@/components/agents/avatarColors';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
@@ -79,6 +80,13 @@ export default function PublishAgentModal({
       // Force price=0 while paid templates are disabled - UX backstop for the
       // greyed input; backend rejects independently.
       const effectivePrice = PAID_TEMPLATES_ENABLED ? price : 0;
+      track('publication_submitted', {
+        resource_type: 'AGENT',
+        resource_id: agentId,
+        visibility: 'PUBLIC',
+        credits_per_use: effectivePrice,
+        has_category: Boolean(categoryId),
+      });
       await publicationService.publishAgent({
         agentConfigId: agentId,
         title: title.trim() || agentName,
@@ -89,14 +97,23 @@ export default function PublishAgentModal({
         publisherName: publisherName,
         publisherEmail: publisherEmail,
       });
+      track('publication_result', { outcome: 'success', resource_type: 'AGENT', visibility: 'PUBLIC' });
       if (!mountedRef.current) return;
       setState('success');
       onSuccess?.();
     } catch (err: any) {
-      if (!mountedRef.current) return;
       // Structured 422 refusals (grant=all violations, snapshot size cap) are
       // rendered as readable explanations - never raw JSON.
-      setError(parsePublishAgentError(err, t('publishError')));
+      const parsed = parsePublishAgentError(err, t('publishError'));
+      track('publication_result', {
+        outcome: 'error',
+        resource_type: 'AGENT',
+        reason: parsed.kind !== 'generic'
+          ? parsed.kind
+          : (typeof err?.status === 'number' ? `http_${err.status}` : 'unknown'),
+      });
+      if (!mountedRef.current) return;
+      setError(parsed);
       setState('error');
     }
   };

@@ -7,6 +7,7 @@ import { AppHeader } from '@/components/app/AppHeader';
 import { SidePanel } from '@/components/app/SidePanel';
 import { ConversationActivityProvider } from '@/contexts/ConversationActivityContext';
 import { useSidePanelLayoutSafe } from '@/contexts/SidePanelLayoutContext';
+import { useQuickOpenShortcut } from '@/lib/sidebar/useQuickOpenShortcut';
 
 /** Header + routed page content: the primary column, to the right of the sidebar. */
 function MainContentColumn({ children }: { children: React.ReactNode }) {
@@ -53,6 +54,11 @@ function MainContentColumn({ children }: { children: React.ReactNode }) {
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { position, lastDock } = useSidePanelLayoutSafe();
+  // Bound here rather than on the home button that also carries it: the
+  // customize menu spells these keys out wherever the sidebar is, and the
+  // sidebar has no call site outside this shell. Called before the branch below
+  // so the arrangement cannot decide whether the shortcut exists.
+  useQuickOpenShortcut();
   // A detached panel keeps the arrangement of the dock it came from (see above).
   const arrangement = position === 'floating' ? lastDock : position;
 

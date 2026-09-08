@@ -90,6 +90,7 @@ public class ApplicationRunVersionBatchService {
         //    [id, pinnedVersion, tenantId, organizationId]. Reusing the helper (vs a duplicated SQL
         //    predicate) keeps SQL/Java from diverging and stays unit-testable for the org-null branch.
         Map<UUID, Integer> pinnedByWorkflow = new HashMap<>();
+        Map<UUID, Object[]> budgetByWorkflow = new HashMap<>();
         for (Object[] row : workflowRepository.findPinnedVersionScopeRows(workflowIds)) {
             if (!(row[0] instanceof UUID id)) {
                 continue;
@@ -100,6 +101,16 @@ public class ApplicationRunVersionBatchService {
                 continue; // outside the caller's active workspace -> no pinned version (no leak)
             }
             pinnedByWorkflow.put(id, row[1] instanceof Integer v ? v : null);
+            // [4] cap, [5] period mode, [6] stored period spend, [7] period start,
+            // fixed by the single projection this loop consumes. Indexing it
+            // positionally is the price of an Object[] query, so the positions
+            // are pinned against the REAL query in
+            // WorkflowRepositoryIntegrationTest.budgetColumnsHoldTheirPositions.
+            // Note what cannot catch a reorder: this service's own unit test
+            // builds the Object[] itself, so its row helper agrees with
+            // whatever the author assumed and stays green while a card shows
+            // the cadence in the cap field.
+            budgetByWorkflow.put(id, new Object[]{ row[4], row[5], row[6], row[7] });
         }
 
         // Emit an entry for every workflow that has a run OR a pinned-version row (i.e. exists). A
@@ -120,7 +131,25 @@ public class ApplicationRunVersionBatchService {
                 Instant lastFire = runId != null ? lastFireByRun.get(runId) : null;
                 lastExecuted = lastFire != null ? lastFire : run.getStartedAt();
             }
-            out.put(wfId, new ApplicationRunVersionSummary(runId, lastExecuted, pinnedByWorkflow.get(wfId)));
+            Object[] budget = budgetByWorkflow.get(wfId);
+            java.math.BigDecimal cap = budget != null && budget[0] instanceof java.math.BigDecimal b ? b : null;
+            String periodMode = budget != null && budget[1] instanceof String m ? m : null;
+            // Rolled over here, not on the client: the stored figure may belong to
+            // a period that has already expired (the reset is lazy).
+            java.math.BigDecimal periodSpent = budget == null ? null
+                    : com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod.effectiveSpent(
+                            periodMode,
+                            budget[3] instanceof Instant i ? i : null,
+                            budget[2] instanceof java.math.BigDecimal sp ? sp : null,
+                            Instant.now());
+            out.put(wfId, new ApplicationRunVersionSummary(
+                    runId, lastExecuted, pinnedByWorkflow.get(wfId),
+                    cap,
+                    com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                            .normaliseMode(periodMode),
+                    periodSpent,
+                    com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                            .nextPeriodStart(periodMode, Instant.now())));
         }
         return out;
     }

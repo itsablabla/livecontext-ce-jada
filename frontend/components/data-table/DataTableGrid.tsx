@@ -12,12 +12,13 @@ import { renderVisualCellContent } from '@/components/data-table/cells';
 import { formatUtcDateTime } from '@/lib/utils/dateFormatters';
 import { StatusBadge, mapBackendStatusToStatusType } from '@/components/ui/StatusBadge';
 import { AddRowForm } from '@/components/data-table/AddRowForm';
-import { calculateCheckboxColumnWidth, FIXED_COLUMN_WIDTH, MIN_ID_COLUMN_WIDTH, MAX_CHECKBOX_COLUMN_WIDTH } from '@/components/data-table/tableStyles';
+import { calculateCheckboxColumnWidth, COLUMN_REVEAL_CELL_CLASS, COLUMN_REVEAL_HEAD_CLASS, ROW_REVEAL_CLASS, FIXED_COLUMN_WIDTH, MIN_ID_COLUMN_WIDTH, MAX_CHECKBOX_COLUMN_WIDTH } from '@/components/data-table/tableStyles';
 import { FIXED_COLUMNS } from '@/components/data-table/hooks/useColumnOperations';
+import { idIsHiddenBehindCheckbox } from '@/components/data-table/viewConfig';
 import { PreviewActionMenu } from '@/components/chat/PreviewActionMenu';
 import { Button } from '@/components/ui/button';
 import { getRenderer, NoData } from '@/components/data-table/columnRenderers';
-import { serializeEditValue } from '@/components/data-table/utils/dataTableUtils';
+import { displayIdOf, serializeEditValue } from '@/components/data-table/utils/dataTableUtils';
 import { LoadOlderSentinel } from '@/components/agent-fleet/LoadOlderSentinel';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -195,23 +196,67 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
     setShowAddColumnModal,
     // Edit Column (per-column pencil-icon trigger from <th>)
     openEditColumn,
+    // The column just created, while the grid is still pointing at it
+    revealedColumnField,
+    // Ids of the rows a duplicate just produced, same window
+    revealedRowIds,
     // Readonly
     readOnly,
   } = controller;
+
+  /** Is this the column the user just created? */
+  const isRevealedColumn = (field: string) => !!revealedColumnField && field === revealedColumnField;
+
+  // Bring the new column into view. A table wide enough to scroll appends it off the right edge,
+  // where the highlight alone would announce nothing. Centred rather than `nearest`: the "+" header
+  // is sticky at the right edge, so a minimal scroll can stop with the new column tucked under it.
+  //
+  // Not `scrollToAndFlash`: that helper owns the class it applies (it removes it on `animationend`),
+  // and this cue is worn by the header AND every cell of the column, including cells that mount
+  // later. One piece of state drives all of them, so the scroll is all that is left to do here.
+  useEffect(() => {
+    if (!revealedColumnField) return;
+    const header = scrollContainerRef.current?.querySelector<HTMLElement>('th[data-column-reveal="true"]');
+    // An animated jump is the strongest motion in this cue, so it goes first for anyone who asked
+    // for less of it - the column is still brought into view, just instantly.
+    const behavior: ScrollBehavior =
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    // Optional-called: jsdom does not implement scrollIntoView.
+    header?.scrollIntoView?.({ block: 'nearest', inline: 'center', behavior });
+  }, [revealedColumnField]);
 
   // Calculate checkbox column width based on ID length
   const checkboxColumnWidth = useMemo(() => {
     return calculateCheckboxColumnWidth(rows, displayRows as Array<{ type?: string; parentId?: number }>);
   }, [rows, displayRows]);
 
-  // Calculate workflow ID column width (dynamic sizing with higher minimum than checkbox)
+  // Calculate workflow ID column width (dynamic sizing with higher minimum than checkbox).
+  // Measured on the id the lane SHOWS, not on `row.id`: during nested navigation the cell renders
+  // the item's own id while `row.id` is the 1..N expansion counter, so sizing on the counter clamps
+  // a real id like "CUST-4711" into the width of "1".
   const idColumnWidth = useMemo(() => {
     if (!workflowContext) return '100px';
-    const raw = calculateCheckboxColumnWidth(rows, displayRows as Array<{ type?: string; parentId?: number }>);
+    // A group header shows `displayIdOf` of its single child, and that child is one of `rows`, so
+    // measuring the rows already covers every value the lane can display.
+    const shown = rows.map(row => ({ id: displayIdOf(row) }));
+    const raw = calculateCheckboxColumnWidth(shown, displayRows as Array<{ type?: string; parentId?: number }>);
     const px = parseInt(raw, 10) || MIN_ID_COLUMN_WIDTH;
     const clamped = Math.max(MIN_ID_COLUMN_WIDTH, Math.min(MAX_CHECKBOX_COLUMN_WIDTH, px));
     return `${clamped}px`;
   }, [rows, displayRows, workflowContext]);
+
+  /**
+   * Is this column the FIXED ID lane (pinned left, clamped to `idColumnWidth`)?
+   *
+   * True when the view builds one itself (`showIdColumn`), and at workflow ROOT, where the backend
+   * always emits `id` as the step's row index and as its first column - it is the identity lane
+   * there whether or not the view asked for one.
+   *
+   * False while drilling into a nested path, where the columns come from the DATA: `id` is then an
+   * ordinary column, and pinning it to `left: 0` regardless of its position would overlay its
+   * neighbour on horizontal scroll.
+   */
+  const isIdLane = (field: string) => field === 'id' && viewConfig.idIsRowLevel;
 
   const renderVisualCell = (
     row: DataSourceItemRow,
@@ -305,7 +350,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
             <thead className="bg-theme-secondary border-b border-theme sticky top-0 z-40">
               <tr>
                 {getUniqueColumns().map(col => {
-                  const isFixed = ['checkbox', 'id'].includes(col.field);
+                  const isFixed = col.field === 'checkbox' || isIdLane(col.field);
                   const totalColumns = getUniqueColumns().length;
                   const isFewColumns = totalColumns <= 4;
 
@@ -315,7 +360,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                     width: checkboxColumnWidth,
                     minWidth: checkboxColumnWidth,
                     maxWidth: checkboxColumnWidth
-                  } : col.field === 'id' ? {
+                  } : isIdLane(col.field) ? {
                     width: idColumnWidth,
                     minWidth: idColumnWidth,
                     maxWidth: idColumnWidth,
@@ -339,16 +384,17 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                   return (
                     <th
                       key={col.field}
-                      className={`${col.field === 'checkbox' ? 'px-1' : col.field === 'id' ? 'px-2' : 'px-3'} py-3 text-center font-medium text-theme-primary select-none group ${dragOverColumn === col.field ? 'bg-blue-200 dark:bg-blue-800/40' : ''
+                      data-column-reveal={isRevealedColumn(col.field) ? 'true' : undefined}
+                      className={`${col.field === 'checkbox' ? 'px-1' : isIdLane(col.field) ? 'px-2' : 'px-3'} py-3 text-center font-medium text-theme-primary select-none group ${dragOverColumn === col.field ? 'bg-blue-200 dark:bg-blue-800/40' : ''
                         } ${draggedColumn === col.field ? 'opacity-40 scale-[0.98]' : ''} ${!isFixed ? 'hover:bg-theme-tertiary' : ''
-                        } ${selectedColumns.has(col.field) ? 'bg-theme-tertiary hover:bg-theme-tertiary' : ''} ${col.field === 'checkbox' ? 'sticky left-0 top-0 z-40 bg-theme-secondary' : col.field === 'id' ? 'sticky left-0 top-0 bg-theme-secondary' : 'sticky top-0 bg-theme-secondary'
-                        }`}
+                        } ${selectedColumns.has(col.field) ? 'bg-theme-tertiary hover:bg-theme-tertiary' : ''} ${col.field === 'checkbox' ? 'sticky left-0 top-0 z-40 bg-theme-secondary' : isIdLane(col.field) ? 'sticky left-0 top-0 bg-theme-secondary' : 'sticky top-0 bg-theme-secondary'
+                        } ${isRevealedColumn(col.field) ? COLUMN_REVEAL_HEAD_CLASS : ''}`}
                       style={{
                         ...fixedColumnStyle,
                         position: 'sticky',
                         top: 0,
                         ...(col.field === 'checkbox' ? { left: 0, zIndex: 40 } : {}),
-                        ...(col.field === 'id' ? { left: idLeftOffset, zIndex: 35 } : {}),
+                        ...(isIdLane(col.field) ? { left: idLeftOffset, zIndex: 35 } : {}),
                         cursor: col.field !== 'checkbox' && col.sortable !== false ? 'pointer' : (isFixed ? 'default' : 'pointer'),
                         minHeight: '60px',
                         ...(draggedColumn ? {
@@ -406,7 +452,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                               />
                             </div>
                           )
-                        ) : (col.field === 'id' && !workflowContext && viewConfig.showCheckbox) ? null : (
+                        ) : (col.field === 'id' && idIsHiddenBehindCheckbox(viewConfig)) ? null : (
                           <div className="flex items-center justify-center gap-2 flex-1">
                             {/* Icon based on column type */}
                             {col.type && COLUMN_TYPE_META[col.type] && (
@@ -425,7 +471,11 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                               * (PreviewActionMenu), so it always renders above everything else. The trigger
                               * button stops propagation to the th's onClick (sort).
                               * Stays visible when the column is selected (gives the user a clear signal). */}
-                            {!workflowContext && !readOnly && !FIXED_COLUMNS.includes(col.field) && (
+                            {/* `allowColumnManagement` is what keeps this off during nested
+                              * navigation, where `value` / `array_index` are synthesized lanes with
+                              * nothing to rename or delete. */}
+                            {!workflowContext && !readOnly && viewConfig.allowColumnManagement
+                              && !FIXED_COLUMNS.includes(col.field) && (
                               <div
                                 className={`${selectedColumns.has(col.field) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity flex items-center flex-shrink-0`}
                                 onClick={(e) => e.stopPropagation()}
@@ -508,7 +558,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                 Array.from({ length: 5 }).map((_, skeletonIndex) => (
                   <tr key={`skeleton-${skeletonIndex}`} className="border border-transparent">
                     {getUniqueColumns().map((col, colIndex) => {
-                      const isFixed = ['checkbox', 'id'].includes(col.field);
+                      const isFixed = col.field === 'checkbox' || isIdLane(col.field);
                       const hasCheckbox = getUniqueColumns().some(c => c.field === 'checkbox');
                       const idLeftOffset = hasCheckbox ? checkboxColumnWidth : '0px';
 
@@ -517,7 +567,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                         width: checkboxColumnWidth,
                         minWidth: checkboxColumnWidth,
                         maxWidth: checkboxColumnWidth
-                      } : col.field === 'id' ? {
+                      } : isIdLane(col.field) ? {
                         left: idLeftOffset,
                         width: idColumnWidth,
                         minWidth: idColumnWidth,
@@ -527,7 +577,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                       return (
                         <td
                           key={`skeleton-${skeletonIndex}-${col.field}`}
-                          className={`px-3 py-3 text-center ${col.field === 'checkbox' ? 'sticky left-0 z-30 bg-theme-secondary' : col.field === 'id' ? 'sticky left-0 z-20 bg-theme-secondary' : ''}`}
+                          className={`px-3 py-3 text-center ${col.field === 'checkbox' ? 'sticky left-0 z-30 bg-theme-secondary' : isIdLane(col.field) ? 'sticky left-0 z-20 bg-theme-secondary' : ''}`}
                           style={cellStyle}
                         >
                           <div className="flex items-center justify-center">
@@ -580,7 +630,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                             width: checkboxColumnWidth,
                             minWidth: checkboxColumnWidth,
                             maxWidth: checkboxColumnWidth
-                          } : col.field === 'id' ? {
+                          } : isIdLane(col.field) ? {
                             left: idLeftOffset,
                             width: idColumnWidth,
                             minWidth: idColumnWidth,
@@ -641,24 +691,41 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                             );
                           }
 
-                          // Only skip the fixed ID column (row.id displayed in checkbox column)
-                          // For data columns named 'id', we should display them normally
-                          if (col.field === 'id' && !workflowContext && viewConfig.showCheckbox) {
+                          // Skip only the ROOT-level fixed ID column (row.id is displayed inside the checkbox column).
+                          // A nested 'id' comes from the navigated data itself, so it renders normally.
+                          if (col.field === 'id' && idIsHiddenBehindCheckbox(viewConfig)) {
                             // Fixed ID column is already displayed in the checkbox column
                             return null;
                           }
 
-                          // Sticky ID column for workflow parent rows
-                          if (col.field === 'id' && workflowContext) {
+                          // Same single identity rule as the normal row below, pinned only as the
+                          // fixed lane.
+                          if (isIdLane(col.field)) {
                             return (
-                              <td key={`parent-${parent.parentId}-${col.field}`} className="px-2 py-2 text-center sticky left-0 z-20 bg-theme-secondary" style={cellStyle}>
-                                <span className="text-sm font-mono text-theme-secondary">{parent.parentId}</span>
+                              <td
+                                key={`parent-${parent.parentId}-${col.field}`}
+                                className="px-2 py-2 text-center sticky left-0 z-20 bg-theme-secondary"
+                                style={cellStyle}
+                              >
+                                <span className="text-sm font-mono text-theme-secondary">
+                                  {/* A single-child group takes its child's id, or the header
+                                      contradicts the one row underneath it. With several children
+                                      no single id describes the group, so it keeps its own.
+                                      (Nested workflow items get a unique row id each, so groups of
+                                      one are what production actually produces today.) */}
+                                  {parent.subRows.length === 1 && firstRow
+                                    ? displayIdOf(firstRow)
+                                    : parent.parentId}
+                                </span>
                               </td>
                             );
                           }
 
-                          // Pour les autres colonnes, afficher les valeurs de la première ligne
-                          if (col.field === 'priority') {
+                          // The row-level Priority and Created At lanes read row.priority /
+                          // row.created_at, never row.data - so they are correct only as the FIXED
+                          // lanes the view built. A data column that merely shares the name holds
+                          // the item's own value and falls through to the generic renderer.
+                          if (col.field === 'priority' && viewConfig.showPriority) {
                             return (
                               <td key={`parent-${parent.parentId}-${col.field}`} className={`px-3 py-2 text-center ${cellWidth}`}>
                                 <span className="text-sm text-theme-primary">{firstRow.priority}</span>
@@ -666,7 +733,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                             );
                           }
 
-                          if (col.field === 'created_at') {
+                          if (col.field === 'created_at' && viewConfig.showCreatedAt) {
                             return (
                               <td key={`parent-${parent.parentId}-${col.field}`} className={`px-3 py-2 text-center ${cellWidth}`}>
                                 <span className="text-sm text-theme-primary truncate block">
@@ -757,8 +824,15 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                   // Le même border que le header
                   const subRowClasses = isSubRow ? 'border-b border-theme' : '';
 
+                  // A copy a duplicate just produced. Matched on the row id the server assigned,
+                  // not on position: the copies land wherever the table's order puts them.
+                  const isRevealedRow = !!revealedRowIds?.has(row.id);
+
                   return (
-                    <tr key={rowKey} className={`border border-transparent hover-row-item ${selectedRows.has(getRowUniqueKey(row)) ? 'focus-selected' : ''} ${groupClasses} ${subRowClasses} ${groupBg} ${workflowContext ? 'h-12' : ''}`}>
+                    <tr
+                      key={rowKey}
+                      className={`border border-transparent hover-row-item ${selectedRows.has(getRowUniqueKey(row)) ? 'focus-selected' : ''} ${groupClasses} ${subRowClasses} ${groupBg} ${workflowContext ? 'h-12' : ''} ${isRevealedRow ? ROW_REVEAL_CLASS : ''}`}
+                    >
                       {getUniqueColumns().map(col => {
                         const hasCheckbox = getUniqueColumns().some(c => c.field === 'checkbox');
                         const idLeftOffset = hasCheckbox ? checkboxColumnWidth : '0px';
@@ -768,7 +842,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                           width: checkboxColumnWidth,
                           minWidth: checkboxColumnWidth,
                           maxWidth: checkboxColumnWidth
-                        } : col.field === 'id' ? {
+                        } : isIdLane(col.field) ? {
                           left: idLeftOffset,
                           width: idColumnWidth,
                           minWidth: idColumnWidth,
@@ -819,15 +893,19 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                           );
                         }
 
-                        // Only skip the fixed ID column (row.id displayed in checkbox column)
-                        // For data columns named 'id' (from row.data.id), we should display them normally
-                        if (col.field === 'id' && !workflowContext && viewConfig.showCheckbox) {
+                        // Skip only the ROOT-level fixed ID column (row.id is displayed inside the checkbox column).
+                        // A nested 'id' (row.data.id) comes from the navigated data, so it renders normally.
+                        if (col.field === 'id' && idIsHiddenBehindCheckbox(viewConfig)) {
                           // Fixed ID column is already displayed in the checkbox column
                           return null;
                         }
 
-                        // Sticky ID column for workflow context (leftmost fixed column)
-                        if (col.field === 'id' && workflowContext) {
+                        // The identity lane, decided once by viewConfig.idIsRowLevel and read the
+                        // same way by the export, so a cell and its exported column can never be two
+                        // different rules. Where `id` is NOT the lane it is ordinary data and falls
+                        // through to the generic renderer - which is also what keeps a non-scalar
+                        // value out of a bare span (an object there unmounts the whole table).
+                        if (isIdLane(col.field)) {
                           return (
                             <td
                               key={`${rowKey}-${col.field}`}
@@ -835,12 +913,17 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                               style={cellStyle}
                               onMouseEnter={handleNonJsonCellMouseEnter}
                             >
-                              <span className="text-sm font-mono text-theme-secondary">{getValueAtPath(row.data, 'id') ?? row.id}</span>
+                              {/* displayIdOf, not an open-coded `?? row.id`: it is the one place
+                                  that decides which id a row SHOWS, it rejects a non-scalar value
+                                  (an object here unmounts the whole table as an invalid React
+                                  child), and it keeps the cell and the export in agreement. */}
+                              <span className="text-sm font-mono text-theme-secondary">{displayIdOf(row)}</span>
                             </td>
                           );
                         }
 
-                        if (col.field === 'priority') {
+                        // Row-level lane, not row.data (see the parent-row branch above): the fixed one only.
+                        if (col.field === 'priority' && viewConfig.showPriority) {
                           // Pour les sous-lignes de tableaux seulement, ne rien afficher
                           // En mode JSON (objet nested), on garde la priority pour toutes les lignes
                           const isArraySubRow = isSubRow && row.data?.array_index !== undefined;
@@ -881,7 +964,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                           );
                         }
 
-                        if (col.field === 'created_at') {
+                        if (col.field === 'created_at' && viewConfig.showCreatedAt) {
                           // Pour les sous-lignes de tableaux seulement, ne rien afficher
                           // En mode JSON (objet nested), on garde created_at pour toutes les lignes
                           const isArraySubRow = isSubRow && row.data?.array_index !== undefined;
@@ -919,7 +1002,13 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                         const totalColumns = getUniqueColumns().length;
                         const isFewColumns = totalColumns <= 4;
                         const dynamicCellWidth = isFewColumns ? 'w-[200px] max-w-[200px]' : 'w-auto min-w-[120px] max-w-xs';
-                        const sharedCellClass = `px-3 py-2 ${dynamicCellWidth} ${selectedColumns.has(col.field) ? 'bg-theme-tertiary hover:bg-theme-tertiary' : ''}`;
+                        // A new column renders through the visual cell or through EditableCell
+                        // depending on the type the user picked, and each returns its own <td>, so
+                        // the reveal class has to ride along with both. It is on the navigable-JSON
+                        // cell too, which no preset can currently reach (every one of them is a
+                        // scalar), so that a JSON-shaped column would not be the one exception.
+                        const revealCellClass = isRevealedColumn(col.field) ? COLUMN_REVEAL_CELL_CLASS : '';
+                        const sharedCellClass = `px-3 py-2 ${dynamicCellWidth} ${selectedColumns.has(col.field) ? 'bg-theme-tertiary hover:bg-theme-tertiary' : ''} ${revealCellClass}`;
                         // Skip visual cell rendering for workflow steps - use backend renderType instead
                         if (!row._isWorkflowStep) {
                           const specialCell = renderVisualCell(row, col, value, String(rowKey), sharedCellClass, handleNonJsonCellMouseEnter);
@@ -928,8 +1017,10 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                           }
                         }
 
-                        // Pour array_index, rendre en lecture seule (même style que created_at)
-                        if (col.field === 'array_index') {
+                        // The array index injected during nested navigation is read-only (same style
+                        // as created_at). A table that simply owns a column called `array_index`
+                        // reaches this only outside nested navigation, where it is ordinary data.
+                        if (col.field === 'array_index' && viewConfig.isNestedNavigation) {
                           return (
                             <td
                               key={`${rowKey}-${col.field}`}
@@ -943,8 +1034,10 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                           );
                         }
 
-                        // Pour value (tableaux de primitifs), rendre avec le même style que created_at (moins visible)
-                        if (col.field === 'value') {
+                        // The synthesized `value` lane of a primitive array, like the array index
+                        // above: only while navigating. At root a column of that name is the table's
+                        // own and takes the generic path, so it keeps JSON drill-in and its renderer.
+                        if (col.field === 'value' && viewConfig.isNestedNavigation) {
                           return (
                             <EditableCell
                               key={`${rowKey}-${col.field}`}
@@ -1128,7 +1221,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                           return (
                             <td
                               key={`${rowKey}-${col.field}`}
-                              className={`px-3 py-2 text-center ${dynamicCellWidth} ${selectedColumns.has(col.field) ? 'bg-theme-tertiary hover:bg-theme-tertiary' : ''} cursor-pointer group relative`}
+                              className={`px-3 py-2 text-center ${dynamicCellWidth} ${selectedColumns.has(col.field) ? 'bg-theme-tertiary hover:bg-theme-tertiary' : ''} ${revealCellClass} cursor-pointer group relative`}
                               onClick={handleNavigate}
                               style={{ position: 'relative', zIndex: 10 }}
                             >
@@ -1282,7 +1375,7 @@ export function DataTableGrid({ controller, workflowContext, jsonPath, dataSourc
                             key={`${rowKey}-${col.field}`}
                             value={value}
                             onSave={(newValue) => handleSaveEdit(row.id, col.field, newValue, row.data?.array_index)}
-                            className={`text-center ${dynamicCellWidth} ${selectedColumns.has(col.field) ? 'bg-theme-tertiary hover:bg-theme-tertiary' : ''}`}
+                            className={`text-center ${dynamicCellWidth} ${selectedColumns.has(col.field) ? 'bg-theme-tertiary hover:bg-theme-tertiary' : ''} ${revealCellClass}`}
                             onMouseEnter={() => {
                               // Cacher la prévisualisation si on survole une cellule non-JSON
                               if (hoveredCell) {

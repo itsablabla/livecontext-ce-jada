@@ -25,6 +25,7 @@ import static org.hamcrest.Matchers.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -538,7 +539,7 @@ class InterfaceControllerTest {
             InterfaceEntity iface = createEntity();
             InterfaceRunSnapshotEntity snapshot = InterfaceRunSnapshotEntity.fromInterface(iface, runId);
             // Make the snapshot's parent interface visible (personal scope).
-            when(snapshotService.getSnapshotsForRun(runId)).thenReturn(List.of(snapshot));
+            when(snapshotService.getSnapshotsForRun(runId, null)).thenReturn(List.of(snapshot));
             when(interfaceService.findInScope(eq(snapshot.getInterfaceId()), eq(TENANT), isNull()))
                     .thenReturn(Optional.of(iface));
 
@@ -547,6 +548,49 @@ class InterfaceControllerTest {
                             .param("workflowRunId", runId.toString()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$", hasSize(1)));
+        }
+
+        @Test
+        @DisplayName("Asks the ORG-scoped query when the caller has an organization, rather "
+                + "than reading the whole run and filtering row by row")
+        void shouldReadSnapshotsInOrgScope() throws Exception {
+            UUID runId = UUID.randomUUID();
+            String orgId = UUID.randomUUID().toString();
+            InterfaceEntity iface = createEntity();
+            InterfaceRunSnapshotEntity snapshot = InterfaceRunSnapshotEntity.fromInterface(iface, runId);
+            when(snapshotService.getSnapshotsForRun(runId, orgId)).thenReturn(List.of(snapshot));
+            when(interfaceService.findInScope(eq(snapshot.getInterfaceId()), eq(TENANT), eq(orgId)))
+                    .thenReturn(Optional.of(iface));
+
+            mockMvc.perform(get("/api/interfaces/snapshots")
+                            .header("X-User-ID", TENANT)
+                            .header("X-Organization-ID", orgId)
+                            .param("workflowRunId", runId.toString()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$", hasSize(1)));
+
+            // The unscoped overload logs a warning and filters in Java; a run canvas opens
+            // this endpoint every time, so the scoped query is the one that must be used.
+            verify(snapshotService).getSnapshotsForRun(runId, orgId);
+            verify(snapshotService, never()).getSnapshotsForRun(any(UUID.class));
+        }
+
+        @Test
+        @DisplayName("Carries the format each snapshot froze: it is what the run's pages paint")
+        void shouldExposeTheFrozenFormat() throws Exception {
+            UUID runId = UUID.randomUUID();
+            InterfaceEntity iface = createEntity();
+            iface.setFormat("a4_portrait");
+            InterfaceRunSnapshotEntity snapshot = InterfaceRunSnapshotEntity.fromInterface(iface, runId);
+            when(snapshotService.getSnapshotsForRun(runId, null)).thenReturn(List.of(snapshot));
+            when(interfaceService.findInScope(eq(snapshot.getInterfaceId()), eq(TENANT), isNull()))
+                    .thenReturn(Optional.of(iface));
+
+            mockMvc.perform(get("/api/interfaces/snapshots")
+                            .header("X-User-ID", TENANT)
+                            .param("workflowRunId", runId.toString()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].format").value("a4_portrait"));
         }
     }
 

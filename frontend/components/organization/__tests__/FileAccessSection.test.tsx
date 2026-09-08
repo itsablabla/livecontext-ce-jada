@@ -71,7 +71,12 @@ describe('FileAccessSection - paginated infinite scroll + search (s3Only)', () =
     render(<FileAccessSection {...baseProps} />);
 
     await screen.findByText('file-0.txt');
-    // Simulate the infinite-scroll sentinel entering the viewport.
+    // Simulate the infinite-scroll sentinel entering the viewport. Assert the
+    // observer was registered first: an optional call on an unset callback is a
+    // silent no-op, and the failure then surfaces further down as "file-2.txt was
+    // never rendered" - which reads as a broken append rather than a sentinel that
+    // was never observed.
+    expect(ioCallback, 'the sentinel must be observed before it can intersect').not.toBeNull();
     await act(async () => {
       ioCallback?.([{ isIntersecting: true }]);
     });

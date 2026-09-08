@@ -72,6 +72,36 @@ public final class ToolAuthorizationScope {
         return agentOverride;
     }
 
+    /**
+     * True when a person is watching this execution and can answer a question put to them.
+     *
+     * <p>A different question from {@link #isCardRaised}, and deliberately a different
+     * predicate. That one asks "must this action be AUTHORIZED", and an agent-backed chat is
+     * exempt from authorization by product rule. This one asks "is there a human on the
+     * other end", and an agent-backed chat has one just as much as the general chat does.
+     * Reusing the authorization predicate here would make {@code ask_user} silently
+     * unavailable in exactly the chats it was built for.
+     *
+     * <p>Interactive means: not a sub-agent, not a workflow or task run, and a conversation
+     * with a live stream. Anything headless gets {@code false}, so a question raised there
+     * is answered with "nobody is watching" instead of a card nobody will see.
+     */
+    public static boolean isUserPromptable(Map<String, Object> credentials) {
+        if (credentials == null) {
+            return false;
+        }
+        if (agentDepth(credentials) >= 1) {
+            return false;
+        }
+        if (hasText(credentials.get(KEY_WORKFLOW_RUN_ID))
+                || hasText(credentials.get(KEY_WORKFLOW_RUN_ID_PLAIN))
+                || hasText(credentials.get(KEY_TASK_ID))) {
+            return false;
+        }
+        return hasText(credentials.get(KEY_CONVERSATION_ID))
+                && (hasText(credentials.get(KEY_STREAM_ID)) || hasText(credentials.get(KEY_STREAM_ID_PLAIN)));
+    }
+
     private static int agentDepth(Map<String, Object> credentials) {
         Object depth = credentials.get(KEY_AGENT_DEPTH);
         if (depth instanceof Number n) {

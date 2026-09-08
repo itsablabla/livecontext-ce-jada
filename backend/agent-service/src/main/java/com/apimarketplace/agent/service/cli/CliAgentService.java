@@ -2,6 +2,7 @@ package com.apimarketplace.agent.service.cli;
 
 import com.apimarketplace.agent.client.dto.AgentObservabilityRequest;
 import com.apimarketplace.agent.domain.AgentEntity;
+import com.apimarketplace.agent.domain.AgentStopReason;
 import com.apimarketplace.agent.domain.ToolCall;
 import com.apimarketplace.agent.domain.ToolDefinition;
 import com.apimarketplace.agent.domain.ToolParameter;
@@ -16,6 +17,7 @@ import com.apimarketplace.agent.service.AgentService;
 import com.apimarketplace.agent.service.execution.AgentToolsConfigCredentials;
 import com.apimarketplace.agent.service.execution.CoreToolsCache;
 import com.apimarketplace.agent.tool.ToolExecutionService;
+import com.apimarketplace.agent.service.execution.ParkRequests;
 import com.apimarketplace.agent.tools.authz.ToolAuthorizationScope;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -216,6 +218,14 @@ public class CliAgentService {
             credentials.put("__inactivityTimeoutSeconds__", request.inactivityTimeoutSeconds());
         }
 
+        // How long a call may be held on the CLI at the other end. The bridge writes that
+        // CLI's configuration, so it is the one place that knows; without it the gate holds
+        // a call no longer than the floor sized for the shortest CLI, which ends a question
+        // card while the person is still reading it.
+        if (request != null && request.maxToolHoldSeconds() != null && request.maxToolHoldSeconds() > 0) {
+            credentials.put(ParkRequests.KEY_CLI_MAX_PARK_MS, request.maxToolHoldSeconds() * 1000L);
+        }
+
         // Store conversation-service callback URL for conversation tool routing
         if (request != null && request.conversationServiceUrl() != null) {
             credentials.put("__toolCallbackUrl__",
@@ -394,8 +404,8 @@ public class CliAgentService {
             }
         }
 
-        // Record observability
-        recordObservability(session, totalDuration);
+        // Record observability - an explicit end is a COMPLETED session.
+        recordObservability(session, totalDuration, AgentStopReason.COMPLETED);
 
         log.info("Ended CLI session: {} (tools={}, calls={}, {}ms)",
             sessionId, uniqueTools, session.toolCallCount, totalDuration);
@@ -572,13 +582,21 @@ public class CliAgentService {
         return prop;
     }
 
-    private void recordObservability(CliSession session, long totalDuration) {
+    /**
+     * @param stopReason why the session ended: {@link AgentStopReason#COMPLETED} for an
+     *                   explicit end, {@link AgentStopReason#INACTIVITY_TIMEOUT} when the
+     *                   reaper expired it. A CLI session has no loop guard of its own, so
+     *                   the caller names the reason; leaving it blank made every CLI run
+     *                   unclassifiable in the agent-health and product-analytics views.
+     */
+    private void recordObservability(CliSession session, long totalDuration, AgentStopReason stopReason) {
         try {
             AgentObservabilityRequest request = new AgentObservabilityRequest();
             request.setTenantId(session.tenantId);
             // PR20 - workspace identity captured at session start.
             request.setOrganizationId(session.organizationId);
             request.setAgentType("CLI");
+            request.setStopReason(stopReason != null ? stopReason.name() : null);
             request.setNodeId("cli:" + session.sessionId);
             request.setProvider("external"); // Claude Code is the LLM
             request.setModel(session.model != null ? session.model : "claude-code");
@@ -641,7 +659,7 @@ public class CliAgentService {
                     // call so each expired session restores its own org binding.
                     com.apimarketplace.common.web.TenantResolver.runWithOrgScope(
                             expired.organizationId,
-                            () -> recordObservability(expired, duration));
+                            () -> recordObservability(expired, duration, AgentStopReason.INACTIVITY_TIMEOUT));
                     removed++;
                 }
             }

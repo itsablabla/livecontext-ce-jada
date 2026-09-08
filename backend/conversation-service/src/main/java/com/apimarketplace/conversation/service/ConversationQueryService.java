@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import com.apimarketplace.conversation.domain.ConversationKind;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -93,16 +94,39 @@ public class ConversationQueryService {
      * a non-null {@code organization_id} - personal-workspace users get their
      * personal org UUID and read through the same finder as team workspaces.
      */
+    /**
+     * The same listing, optionally narrowed to one {@link ConversationKind}.
+     *
+     * <p>The narrowing happens in the QUERY, not over the returned page. A page is chosen by
+     * {@code updated_at}, so filtering it afterwards answers "the studio conversations among the 20
+     * most recent" - which is empty for anyone whose recent activity is chat, and looks exactly
+     * like having none.
+     *
+     * @param kind wire value ({@code chat} / {@code studio}), or null for every kind. An
+     *             unrecognised value throws rather than being ignored: a filter nobody can satisfy
+     *             would otherwise render an empty list that reads as "you have none".
+     */
     public Page<ConversationDto> getConversationsByUserId(String userId, String organizationId,
-                                                           int page, int size, boolean includeInactive) {
+                                                           int page, int size, boolean includeInactive,
+                                                           String kind) {
         TenantResolver.requireOrgId(organizationId);
-        logger.info("🔍 [SERVICE] Getting conversations for user: {} (org: {}), page: {}, size: {}, includeInactive: {}",
-                userId, organizationId, page, size, includeInactive);
+        logger.info("🔍 [SERVICE] Getting conversations for user: {} (org: {}), page: {}, size: {}, includeInactive: {}, kind: {}",
+                userId, organizationId, page, size, includeInactive, kind);
 
         Pageable pageable = PageRequest.of(page, size);
-        Page<Conversation> conversations = includeInactive
-                ? conversationRepository.findByOrganizationIdStrictOrderByUpdatedAtDesc(organizationId, pageable)
-                : conversationRepository.findByOrganizationIdStrictAndActiveTrueOrderByUpdatedAtDesc(organizationId, pageable);
+        String kindFilter = (kind == null || kind.isBlank())
+                ? null
+                : ConversationKind.parse(kind).wireValue();
+        Page<Conversation> conversations;
+        if (kindFilter == null) {
+            conversations = includeInactive
+                    ? conversationRepository.findByOrganizationIdStrictOrderByUpdatedAtDesc(organizationId, pageable)
+                    : conversationRepository.findByOrganizationIdStrictAndActiveTrueOrderByUpdatedAtDesc(organizationId, pageable);
+        } else {
+            conversations = includeInactive
+                    ? conversationRepository.findByOrganizationIdStrictAndKindOrderByUpdatedAtDesc(organizationId, kindFilter, pageable)
+                    : conversationRepository.findByOrganizationIdStrictAndKindAndActiveTrueOrderByUpdatedAtDesc(organizationId, kindFilter, pageable);
+        }
 
         logger.info("✅ [SERVICE] Found {} conversations for user: {} (org: {}), page: {}, totalElements: {}, totalPages: {}",
                 conversations.getContent().size(), userId, organizationId, page,
@@ -116,6 +140,23 @@ public class ConversationQueryService {
 
         return enrichConversationPage(conversations, userId);
     }
+
+    // ------------------------------------------------------------------------------------------
+    // The four reads below are deliberately NOT narrowed by kind, and that is a decision rather
+    // than an omission - the paged listing above is narrowed because its caller, the sidebar, shows
+    // one kind at a time.
+    //
+    //   * both searches and the recent list feed surfaces that ROUTE BY KIND (the global search bar
+    //     and the sidebar both send a studio conversation to /app/studio and a chat to the chat
+    //     page). Narrowing them would hide a studio thread from a reader searching for words they
+    //     know they wrote, to no benefit.
+    //   * the count has no consumer at all today. Adding a kind to it would be inventing an answer
+    //     for a question nobody asks, and the shape of that answer should be decided by whichever
+    //     surface first needs it.
+    //
+    // If a surface ever shows one kind and calls one of these, it needs a kind argument HERE, in the
+    // query - post-filtering a page chosen by recency drops rows that were never fetched.
+    // ------------------------------------------------------------------------------------------
 
     /** Strict-isolation title search. */
     public Page<ConversationDto> searchConversationsByTitle(String userId, String organizationId,

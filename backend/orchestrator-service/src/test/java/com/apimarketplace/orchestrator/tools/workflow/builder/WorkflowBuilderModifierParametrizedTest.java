@@ -206,7 +206,7 @@ class WorkflowBuilderModifierParametrizedTest {
             Arguments.of("cores", "loop",   "loopCondition", "{{x}} < 5", "maxIterations", 10),
             Arguments.of("cores", "split",  "list",          "{{items}}", "maxItems",      20),
             Arguments.of("cores", "switch", "switchExpression", "{{x}}",   "defaultLabel",  "Other"),
-            Arguments.of("tables","table",  "tableId",        "tbl-1",     "operation",     "list_rows"),
+            Arguments.of("tables","table",  "dataSourceId",   "tbl-1",     "operation",     "list_rows"),
             Arguments.of("notes", "note",   "text",           "Hello",     "color",         "yellow")
         );
     }

@@ -11,10 +11,14 @@ import com.apimarketplace.orchestrator.controllers.dto.ActiveAutomationDto.Webho
 import com.apimarketplace.orchestrator.domain.WorkflowEntity;
 import com.apimarketplace.orchestrator.domain.WorkflowEntity.WorkflowType;
 import com.apimarketplace.orchestrator.domain.WorkflowRunEntity;
+import com.apimarketplace.orchestrator.domain.workflow.RunStatus;
 import com.apimarketplace.orchestrator.domain.workflow.Trigger;
 import com.apimarketplace.orchestrator.domain.workflow.WorkflowPlan;
 import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.repository.WorkflowRunRepository;
+import com.apimarketplace.orchestrator.services.WorkflowIconExtractor;
+import com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService;
+import com.apimarketplace.orchestrator.services.epoch.WorkflowEpochService.LatestEpochOutcome;
 import com.apimarketplace.trigger.client.TriggerClient;
 import com.apimarketplace.trigger.client.dto.ScheduledExecutionDto;
 import org.slf4j.Logger;
@@ -99,22 +103,87 @@ public class ActiveAutomationsService {
             "error-trigger", TriggerType.ERROR
     );
 
+    /**
+     * The same map plus schedule and webhook - used to name the kind that FIRED an epoch, where
+     * the two armed kinds are as valid an answer as the six declared ones. Kept separate rather
+     * than widening {@link #KIND_BY_NODE_ID}, whose omissions are load-bearing: reading schedule
+     * or webhook rows out of {@code nodeIcons} would double-emit them.
+     */
+    private static final Map<String, TriggerType> KIND_BY_NODE_ID_ALL = Map.of(
+            "manual-trigger", TriggerType.MANUAL,
+            "chat-trigger", TriggerType.CHAT,
+            "form-trigger", TriggerType.FORM,
+            "tables-trigger", TriggerType.DATASOURCE,
+            "workflows-trigger", TriggerType.WORKFLOW,
+            "error-trigger", TriggerType.ERROR,
+            "schedule-trigger", TriggerType.SCHEDULE,
+            "webhook-trigger", TriggerType.WEBHOOK
+    );
+
+    /**
+     * Run statuses under which an epoch that is still OPEN really is executing.
+     *
+     * <p>Enumerated rather than computed as "not terminal": an unknown value - one from a
+     * newer build, a status this list has not been taught - must not be read as "executing",
+     * which would put a live pulse on an automation that has settled. Mirrors the frontend's
+     * {@code EXECUTING_RUN_STATUSES} in {@code runFormatting.ts}, which badges the epoch rows
+     * of the run panel from the same reasoning. {@code WAITING_TRIGGER} is deliberately absent:
+     * the run is parked between fires, doing nothing.
+     */
+    private static final Set<RunStatus> EXECUTING_RUN_STATUSES = EnumSet.of(
+            RunStatus.PENDING, RunStatus.RUNNING, RunStatus.PAUSED, RunStatus.AWAITING_SIGNAL);
+
+    /**
+     * Run statuses whose ending ABANDONS whatever epoch was still open: the run was killed
+     * mid-flight, so that fire never reached the ending its own tally would suggest.
+     *
+     * <p>The frontend's {@code ABANDONING_RUN_STATUSES} minus {@code stopped}, which this
+     * enum has no member for. Deliberately NOT "every terminal status": a run that ended
+     * COMPLETED or FAILED with an epoch still open is the deferred-close case, and the
+     * frontend badges that epoch from its own (absent) outcome, i.e. with nothing. Handing
+     * over the RUN's verdict there would make the bell draw a green check on an epoch the
+     * run panel leaves blank, one click apart.
+     */
+    private static final Set<RunStatus> ABANDONING_RUN_STATUSES = EnumSet.of(
+            RunStatus.CANCELLED, RunStatus.TIMEOUT);
+
     private final WorkflowRepository workflowRepository;
     private final WorkflowRunRepository runRepository;
     private final TriggerClient triggerClient;
     private final AgentClient agentClient;
+    private final WorkflowEpochService epochService;
 
     public ActiveAutomationsService(WorkflowRepository workflowRepository,
                                     WorkflowRunRepository runRepository,
                                     TriggerClient triggerClient,
-                                    AgentClient agentClient) {
+                                    AgentClient agentClient,
+                                    WorkflowEpochService epochService) {
         this.workflowRepository = workflowRepository;
         this.runRepository = runRepository;
         this.triggerClient = triggerClient;
         this.agentClient = agentClient;
+        this.epochService = epochService;
     }
 
+    /**
+     * The bell's view: only automations that are armed and will fire.
+     */
     public List<ActiveAutomationDto> getActiveAutomations(String tenantId, String orgId, String orgRole) {
+        return getActiveAutomations(tenantId, orgId, orgRole, false);
+    }
+
+    /**
+     * @param includeDisabledSchedules when true, schedules that are paused or have
+     *        exhausted their max-executions cap are ALSO emitted, flagged
+     *        {@code schedule.armed = false}. The agenda draws them greyed so a user
+     *        wondering why a job stopped running can see it sitting there paused
+     *        instead of finding an unexplained hole in the calendar. ARCHIVED rows stay
+     *        excluded in both modes - they never dispatch again and cannot be moved or
+     *        resumed, so drawing them would promise something the platform cannot do.
+     *        The bell passes false and its behaviour is unchanged.
+     */
+    public List<ActiveAutomationDto> getActiveAutomations(String tenantId, String orgId, String orgRole,
+                                                          boolean includeDisabledSchedules) {
         // Post-V261 (2026-05-19): the gateway always injects X-Organization-ID
         // (personal workspaces resolve to the user's default personal org), so
         // orgId is never null/blank for normal traffic. The legacy personal-
@@ -135,27 +204,31 @@ public class ActiveAutomationsService {
         List<ScheduledExecutionDto> allSchedules = orgScope
                 ? triggerClient.getSchedulesByOrganization(orgId)
                 : triggerClient.getSchedulesByTenant(tenantId);
-        List<ScheduledExecutionDto> enabledSchedules = allSchedules.stream()
-                .filter(ScheduledExecutionDto::isEnabled)
-                .filter(s -> !s.hasReachedMaxExecutions())
+        // `isActive` is the archive flag, NOT the pause flag: TriggerLifecycleManager
+        // clears `enabled` on suspend but keeps `isActive` true, and clears both on
+        // archive. So this predicate reads as "everything but archived" in agenda mode
+        // and "armed only" in bell mode.
+        List<ScheduledExecutionDto> visibleSchedules = allSchedules.stream()
+                .filter(s -> includeDisabledSchedules ? s.getIsActive() : s.isEnabled())
+                .filter(s -> includeDisabledSchedules || !s.hasReachedMaxExecutions())
                 .filter(s -> orgScope
                         ? orgId.equals(s.getOrganizationId())
                         : s.getOrganizationId() == null)
                 .toList();
 
-        Map<UUID, List<ScheduledExecutionDto>> schedulesByWorkflow = enabledSchedules.stream()
+        Map<UUID, List<ScheduledExecutionDto>> schedulesByWorkflow = visibleSchedules.stream()
                 .filter(s -> s.getWorkflowId() != null)
                 .collect(Collectors.groupingBy(ScheduledExecutionDto::getWorkflowId));
-        Map<UUID, List<ScheduledExecutionDto>> schedulesByAgent = enabledSchedules.stream()
+        Map<UUID, List<ScheduledExecutionDto>> schedulesByAgent = visibleSchedules.stream()
                 .filter(s -> s.getAgentEntityId() != null)
                 .collect(Collectors.groupingBy(ScheduledExecutionDto::getAgentEntityId));
-        // By-id lookup over the SAME enabled+org-filtered list. Standalone
+        // By-id lookup over the SAME visibility+org-filtered list. Standalone
         // schedule rows carry a NULL workflow_id by design (V206
         // raise_immutable_workflow_id anti-hijack) and a NULL agentEntityId, so
         // they fall through BOTH maps above. They link to their workflow only
         // through the plan's schedule-trigger {@code scheduleId} param, resolved
         // per pinned workflow below against this map - no extra wire call.
-        Map<UUID, ScheduledExecutionDto> enabledScheduleById = enabledSchedules.stream()
+        Map<UUID, ScheduledExecutionDto> visibleScheduleById = visibleSchedules.stream()
                 .collect(Collectors.toMap(ScheduledExecutionDto::getId, s -> s, (a, b) -> a));
 
         // 2. Pull active workflows scoped to the active workspace using the
@@ -187,13 +260,29 @@ public class ActiveAutomationsService {
         //     DISTINCT ON across all pinned ids at the trusted statuses (see
         //     WorkflowRunRepository.findProductionRunsBatch). Returns at most
         //     one row per workflow; absent => fall back to edit mode on click.
-        Map<UUID, String> productionRunIdPublicByWorkflow = pinnedIds.isEmpty()
-                ? Collections.emptyMap()
-                : runRepository.findProductionRunsBatch(pinnedIds).stream()
-                        .collect(Collectors.toMap(
-                                r -> r.getWorkflow().getId(),
-                                WorkflowRunEntity::getRunIdPublic,
-                                (first, second) -> first));
+        List<WorkflowRunEntity> productionRuns = pinnedIds.isEmpty()
+                ? Collections.emptyList()
+                : runRepository.findProductionRunsBatch(pinnedIds);
+        Map<UUID, WorkflowRunEntity> productionRunByWorkflow = productionRuns.stream()
+                .collect(Collectors.toMap(
+                        r -> r.getWorkflow().getId(),
+                        r -> r,
+                        (first, second) -> first));
+
+        // 3c. The run whose epochs the last-run badge reads - FK FIRST, and the FK DECIDES,
+        //     exactly as ProductionRunResolver picks the run a trigger fires into. The scan
+        //     above cannot serve this: it orders by started_at DESC at the pinned version, and
+        //     an EDITOR run lives at that same version (EditorRunResolver mints its own rather
+        //     than adopting production), so a builder session out-sorts the real production run.
+        //     Reading its epochs would badge a schedule row with the time and verdict of a Play
+        //     click. The routing target above deliberately keeps the older scan behaviour.
+        Map<UUID, WorkflowRunEntity> epochRunByWorkflow = epochRunsByWorkflow(pinned, productionRunByWorkflow);
+
+        // 3d. Batch-resolve how each of those runs' LAST fire ended, so a row can badge its
+        //     last-run time with the same COMPLETED/FAILED icon the run panel draws on that
+        //     epoch. One query for the whole popover (see
+        //     WorkflowEpochService#getLatestEpochOutcomeByRunIds) - never one per row.
+        Map<String, LatestEpochOutcome> lastEpochByRun = lastEpochOutcomes(epochRunByWorkflow.values());
 
         // 4. Pull all agents + their active webhook tokens. Webhooks call is
         //    skipped entirely when the tenant has no agents (every agent webhook
@@ -215,7 +304,21 @@ public class ActiveAutomationsService {
                     ? ResourceType.APPLICATION
                     : ResourceType.WORKFLOW;
 
-            String productionRunIdPublic = productionRunIdPublicByWorkflow.get(w.getId());
+            WorkflowRunEntity productionRun = productionRunByWorkflow.get(w.getId());
+            String productionRunIdPublic = productionRun != null ? productionRun.getRunIdPublic() : null;
+            WorkflowRunEntity epochRun = epochRunByWorkflow.get(w.getId());
+            LatestEpochOutcome lastEpoch = epochRun != null
+                    ? lastEpochByRun.get(epochRun.getRunIdPublic())
+                    : null;
+            // The whole "Last: <verdict> <time>" line, from ONE event.
+            LastRun workflowLastRun = LastRun.of(lastEpoch,
+                    epochRun != null ? epochRun.getStatus() : null);
+            // Which KIND of trigger opened that epoch. Every trigger of a workflow fires into
+            // the same run, so a row must not claim a fire of another kind (see firedKind).
+            // Parsed once and handed to both readers below: this runs per pinned workflow on an
+            // endpoint the frontend polls, and WorkflowPlan.fromMap is not free.
+            WorkflowPlan plan = parsePlan(w.getPlan());
+            TriggerType firedKind = firedTriggerKind(plan, lastEpoch);
             // v5 F4-PUB-HIJACK observability: APPLICATION rows must route to
             // /app/applications/{publicationId} not /app/applications/{workflowId}.
             // The frontend route param is keyed by publication id.
@@ -227,7 +330,7 @@ public class ActiveAutomationsService {
             for (ScheduledExecutionDto s : schedules) {
                 emittedScheduleIds.add(s.getId());
                 items.add(toScheduleAutomation(type, w.getId(), w.getName(), null, s, true,
-                        w.getLastExecutedAt(), productionRunIdPublic, publicationId));
+                        scheduleLastRun(workflowLastRun, s, w), productionRunIdPublic, publicationId, w));
             }
             // Standalone schedules: workflow_id NULL by design, so absent from
             // schedulesByWorkflow. Resolve them from THIS workflow's plan via the
@@ -239,16 +342,18 @@ public class ActiveAutomationsService {
             // A scheduleId referenced by two pinned workflows in the same org
             // surfaces under each (de-dup is per-workflow) - bounded by the org
             // filter, and each workflow legitimately declares it.
-            for (UUID scheduleId : standaloneScheduleIds(w.getPlan())) {
+            for (UUID scheduleId : standaloneScheduleIds(plan)) {
                 if (!emittedScheduleIds.add(scheduleId)) continue;   // de-dup vs attached
-                ScheduledExecutionDto s = enabledScheduleById.get(scheduleId);
+                ScheduledExecutionDto s = visibleScheduleById.get(scheduleId);
                 if (s == null) continue;   // disabled / max-reached / other org / not found
                 items.add(toScheduleAutomation(type, w.getId(), w.getName(), null, s, true,
-                        w.getLastExecutedAt(), productionRunIdPublic, publicationId));
+                        scheduleLastRun(workflowLastRun, s, w), productionRunIdPublic, publicationId, w));
             }
             if (workflowIdsWithWebhooks.contains(w.getId())) {
                 items.add(toWebhookAutomation(type, w.getId(), w.getName(), null, true,
-                        w.getLastExecutedAt(), null, productionRunIdPublic, publicationId));
+                        workflowLastRun.forKind(firedKind, TriggerType.WEBHOOK)
+                                .orElseAt(w.getLastExecutedAt()), null,
+                        productionRunIdPublic, publicationId));
             }
 
             // Declared-kind rows for the 6 non-armed kinds (manual, chat, form,
@@ -272,7 +377,8 @@ public class ActiveAutomationsService {
                 if (kind == null) continue;            // schedule/webhook excluded by design
                 if (!declaredKinds.add(kind)) continue; // de-dup
                 items.add(toDeclaredKindAutomation(type, w.getId(), w.getName(), kind, true,
-                        w.getLastExecutedAt(), productionRunIdPublic, publicationId));
+                        workflowLastRun.forKind(firedKind, kind).orElseAt(w.getLastExecutedAt()),
+                        productionRunIdPublic, publicationId));
             }
         }
 
@@ -289,14 +395,17 @@ public class ActiveAutomationsService {
 
             // Agents have no pinning concept => no production run to route to.
             for (ScheduledExecutionDto s : schedulesByAgent.getOrDefault(agentId, List.of())) {
+                // An agent schedule has no workflow spending cap and no production run to read,
+                // so it carries the schedule's own fire time and no verdict.
                 items.add(toScheduleAutomation(ResourceType.AGENT, agent.getId(), agent.getName(),
-                        agent.getAvatarUrl(), s, null, null, null, null));
+                        agent.getAvatarUrl(), s, null, LastRun.NONE.orElseAt(s.getLastExecutionAt()),
+                        null, null));
             }
             List<ActiveAgentWebhookTokenDto> webhooks = webhooksByAgent.getOrDefault(agentId, List.of());
             if (!webhooks.isEmpty()) {
                 String httpMethod = webhooks.get(0).getHttpMethod();
                 items.add(toWebhookAutomation(ResourceType.AGENT, agent.getId(), agent.getName(),
-                        agent.getAvatarUrl(), null, null, httpMethod, null, null));
+                        agent.getAvatarUrl(), null, LastRun.NONE, httpMethod, null, null));
             }
         }
 
@@ -330,16 +439,358 @@ public class ActiveAutomationsService {
     }
 
     private ActiveAutomationDto toScheduleAutomation(ResourceType type, UUID resourceId, String name, String avatarUrl,
-                                                     ScheduledExecutionDto s, Boolean isPinned, Instant fallbackLastRun,
+                                                     ScheduledExecutionDto s, Boolean isPinned, LastRun lastRun,
                                                      String productionRunIdPublic, String publicationId) {
+        return toScheduleAutomation(type, resourceId, name, avatarUrl, s, isPinned, lastRun,
+                productionRunIdPublic, publicationId, null);
+    }
+
+    /**
+     * @param budgetOwner the workflow whose SPENDING cap governs these fires, or
+     *        {@code null} when nothing caps them (an agent's schedule: its budget
+     *        is a different subsystem, with its own counter and its own reset).
+     */
+    private ActiveAutomationDto toScheduleAutomation(ResourceType type, UUID resourceId, String name, String avatarUrl,
+                                                     ScheduledExecutionDto s, Boolean isPinned, LastRun lastRun,
+                                                     String productionRunIdPublic, String publicationId,
+                                                     WorkflowEntity budgetOwner) {
+        BudgetBlock block = budgetBlock(budgetOwner, Instant.now());
+        boolean budgetBlocked = block.blocked();
+        Instant budgetBlockedUntil = block.until();
         ScheduleInfo schedule = new ScheduleInfo(
                 s.getCronExpression(),
                 s.getTimezone(),
                 s.getNextExecutionAt(),
-                s.getExecutionCount());
-        Instant lastRun = s.getLastExecutionAt() != null ? s.getLastExecutionAt() : fallbackLastRun;
+                s.getExecutionCount(),
+                s.getId(),
+                // "Will it fire again", not the raw enabled column: an exhausted cap
+                // leaves enabled=true on a schedule that never runs again.
+                s.isEnabled() && !s.hasReachedMaxExecutions(),
+                pausedReason(s),
+                budgetBlocked,
+                budgetBlockedUntil);
         return new ActiveAutomationDto(type, resourceId, name, avatarUrl, TriggerType.SCHEDULE,
-                schedule, null, lastRun, isPinned, productionRunIdPublic, publicationId);
+                schedule, null, lastRun.at(), isPinned, productionRunIdPublic, publicationId,
+                lastRun.status());
+    }
+
+    /**
+     * Which run's epochs answer "how did this automation last fire", per workflow.
+     *
+     * <p>{@code WorkflowEntity.productionRunId} is the FK a trigger fire follows
+     * ({@code ProductionRunResolver}: FK first, and the FK decides). The pinned-version scan
+     * used for the row's click target is NOT interchangeable with it: it orders by
+     * {@code started_at DESC}, and an editor run sits at the same pinned version, so the
+     * newest builder session out-sorts the run the schedules actually fire into.
+     *
+     * <p>This is NOT the resolver, though: it only READS, so it declines an FK it cannot vouch
+     * for ({@link #usableAsProductionRun}) and falls back to the scan, where the resolver would
+     * repair the FK. It also does not re-check the pin or the run's terminal status the way the
+     * resolver does before FIRING - a run that has since drifted from the pin still fired the
+     * epoch this badge is describing, and describing it is the whole job.
+     */
+    private Map<UUID, WorkflowRunEntity> epochRunsByWorkflow(List<WorkflowEntity> pinned,
+                                                             Map<UUID, WorkflowRunEntity> scanned) {
+        // The scan usually already holds the FK row - these are full entities, JSONB columns
+        // included, so re-selecting them would be the most expensive query on the endpoint.
+        Map<UUID, WorkflowRunEntity> knownById = scanned.values().stream()
+                .filter(r -> r.getId() != null)
+                .collect(Collectors.toMap(WorkflowRunEntity::getId, r -> r, (a, b) -> a));
+        List<UUID> missingFkIds = pinned.stream()
+                .map(WorkflowEntity::getProductionRunId)
+                .filter(Objects::nonNull)
+                .filter(id -> !knownById.containsKey(id))
+                .distinct()
+                .toList();
+        Map<UUID, WorkflowRunEntity> fkRunsById = new HashMap<>(knownById);
+        if (!missingFkIds.isEmpty()) {
+            runRepository.findAllById(missingFkIds)
+                    .forEach(r -> fkRunsById.put(r.getId(), r));
+        }
+        Map<UUID, WorkflowRunEntity> resolved = new HashMap<>();
+        for (WorkflowEntity w : pinned) {
+            WorkflowRunEntity fkRun = w.getProductionRunId() != null
+                    ? fkRunsById.get(w.getProductionRunId())
+                    : null;
+            WorkflowRunEntity run = usableAsProductionRun(fkRun, w) ? fkRun : scanned.get(w.getId());
+            if (run != null && run.getRunIdPublic() != null) {
+                resolved.put(w.getId(), run);
+            }
+        }
+        return resolved;
+    }
+
+    /**
+     * Whether a workflow's {@code production_run_id} still points at something this badge may
+     * read, or the scan should answer instead.
+     *
+     * <p>Two rejections, both of them states {@code ProductionRunResolver} also refuses (it
+     * heals them; this read-only path just declines them). A SHOWCASE run is a published
+     * snapshot's replay - the pinned-version scan excludes those explicitly, so adopting one
+     * here would make this path LESS filtered than the one it supersedes. A run belonging to
+     * another workflow means the FK is stale or wrong, and the id is otherwise the only thing
+     * scoping the by-id read above. {@code getWorkflow().getId()} is safe on the LAZY proxy:
+     * reading the identifier does not initialize it.
+     */
+    private static boolean usableAsProductionRun(WorkflowRunEntity fkRun, WorkflowEntity w) {
+        if (fkRun == null) {
+            return false;
+        }
+        if (fkRun.getWorkflow() == null || !w.getId().equals(fkRun.getWorkflow().getId())) {
+            return false;
+        }
+        String runIdPublic = fkRun.getRunIdPublic();
+        return !"showcase".equalsIgnoreCase(fkRun.getSource())
+                && (runIdPublic == null || !runIdPublic.startsWith("showcase_"));
+    }
+
+    /**
+     * The workflow's draft plan, parsed, or null when it is absent or unreadable.
+     *
+     * <p>One parse per workflow, shared by every reader below - an unparseable plan costs those
+     * readers their answer, never the row.
+     */
+    private static WorkflowPlan parsePlan(Map<String, Object> planMap) {
+        if (planMap == null) {
+            return null;
+        }
+        try {
+            return WorkflowPlan.fromMap(planMap, null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * The KIND of trigger that opened the given epoch, or null when it cannot be named.
+     *
+     * <p>The epoch header records the trigger's normalized key, and a plan trigger derives the
+     * same key from its label ({@code Trigger.getNormalizedKey()}, the very value
+     * {@code ScheduleSyncService} stores on a schedule row), so the two are comparable without
+     * inventing a format. Null when the plan is unreadable, when no trigger carries that key
+     * (it was renamed or removed since the fire), or when its type is one this map does not
+     * cover - and a null kind matches no row, so the effect is a missing badge, never a wrong
+     * one.
+     */
+    private static TriggerType firedTriggerKind(WorkflowPlan plan, LatestEpochOutcome lastEpoch) {
+        if (plan == null || lastEpoch == null || lastEpoch.triggerId() == null) {
+            return null;
+        }
+        for (Trigger trigger : plan.getTriggers()) {
+            if (!lastEpoch.triggerId().equals(trigger.getNormalizedKey())) {
+                continue;
+            }
+            String nodeId = trigger.type() == null
+                    ? null
+                    : WorkflowIconExtractor.TRIGGER_TYPE_TO_NODE_ID.get(
+                            trigger.type().toLowerCase(java.util.Locale.ROOT));
+            return nodeId == null ? null : KIND_BY_NODE_ID_ALL.get(nodeId);
+        }
+        return null;
+    }
+
+    /**
+     * How each production run's LAST fire ended, or an empty map if that read fails.
+     *
+     * <p>Degrading is the point. This feeds a badge on one line of one popover, and the same
+     * endpoint serves the whole home payload - the inbox, the unread count, the automations
+     * themselves. A {@code workflow_epochs} hiccup must cost the badges, never the page.
+     */
+    private Map<String, LatestEpochOutcome> lastEpochOutcomes(Collection<WorkflowRunEntity> productionRuns) {
+        List<String> runIds = productionRuns.stream()
+                .map(WorkflowRunEntity::getRunIdPublic)
+                .filter(Objects::nonNull)
+                .toList();
+        try {
+            return epochService.getLatestEpochOutcomeByRunIds(runIds);
+        } catch (Exception e) {
+            logger.warn("[ActiveAutomations] Last-fire outcomes unavailable for {} run(s), rows keep their "
+                    + "timestamps without a status badge: {}", runIds.size(), e.getMessage());
+            return Map.of();
+        }
+    }
+
+    /**
+     * The last-run line of ONE schedule row, attributed to THAT schedule.
+     *
+     * <p>Every trigger of a workflow fires into the SAME production run, so its newest epoch
+     * belongs to whichever trigger fired last - not necessarily this one. A workflow with a
+     * daily and a weekly schedule would otherwise print the daily fire's time and verdict on
+     * the weekly row, which claims a run that row never caused. The epoch header records the
+     * trigger that opened it and a schedule row carries the same id
+     * ({@code ScheduledExecutionDto.getTriggerId()}, the very value
+     * {@code ScheduleExecutorService} passes to {@code executeTrigger}), so the two are
+     * comparable directly - no label normalisation, no plan parsing.
+     *
+     * <p>When they match, the epoch supplies both halves of the line. When they do not, the row
+     * keeps its own {@code lastExecutionAt} and shows NO verdict: the fire it is naming is one
+     * this service has no outcome for.
+     */
+    private static LastRun scheduleLastRun(LastRun workflowLastRun, ScheduledExecutionDto s, WorkflowEntity w) {
+        Instant scheduleFallback = s.getLastExecutionAt() != null
+                ? s.getLastExecutionAt()
+                : w.getLastExecutedAt();
+        return workflowLastRun.forTrigger(s.getTriggerId()).orElseAt(scheduleFallback);
+    }
+
+    /**
+     * When an automation last ran, and how that run ended - carried together because the bell
+     * prints them on one line and a verdict that describes a DIFFERENT fire than the timestamp
+     * beside it is worse than no verdict at all.
+     *
+     * <p>A non-null {@code status} therefore always comes with the {@code at} of the very epoch
+     * it was derived from, and {@link #orElseAt} - the only way to substitute another timestamp -
+     * drops the status when it does.
+     */
+    record LastRun(Instant at, String status, String triggerId) {
+
+        /** Nothing known: no production run, or a run that never opened an epoch. */
+        static final LastRun NONE = new LastRun(null, null, null);
+
+        static LastRun of(LatestEpochOutcome lastEpoch, RunStatus runStatus) {
+            if (lastEpoch == null || lastEpoch.startedAt() == null) return NONE;
+            return new LastRun(lastEpoch.startedAt(), resolveLastRunStatus(lastEpoch, runStatus),
+                    lastEpoch.triggerId());
+        }
+
+        /**
+         * This reading if the fire it describes came from a trigger of {@code rowKind}, else
+         * nothing at all.
+         *
+         * <p>Kind-level, because these rows ARE per kind: one webhook row, one row per declared
+         * kind. An unknown {@code firedKind} matches nothing, so an epoch this service cannot
+         * attribute costs a badge rather than misplacing one.
+         */
+        LastRun forKind(TriggerType firedKind, TriggerType rowKind) {
+            return firedKind != null && firedKind == rowKind ? this : NONE;
+        }
+
+        /**
+         * This reading if the fire it describes came from {@code triggerId}, else nothing at all.
+         *
+         * <p>For a row that speaks for ONE trigger among several sharing a run. A blank id on
+         * either side cannot be matched, so it answers {@link #NONE} rather than assuming.
+         */
+        LastRun forTrigger(String rowTriggerId) {
+            if (rowTriggerId == null || rowTriggerId.isBlank() || !rowTriggerId.equals(triggerId)) {
+                return NONE;
+            }
+            return this;
+        }
+
+        /**
+         * This reading if it has a time, else {@code fallback} - which arrives unbadged, because
+         * a timestamp from another source has no outcome of its own and cannot borrow one. The
+         * substitution therefore only ever happens on {@link #NONE} (a verdict never exists
+         * without the time it belongs to), and this is the single place a row's timestamp can
+         * come from anywhere but the epoch.
+         */
+        LastRun orElseAt(Instant fallback) {
+            return at != null ? this : new LastRun(fallback, null, null);
+        }
+    }
+
+    /**
+     * How the row's last fire ENDED - the badge drawn next to its last-run time.
+     *
+     * <p>Same reasoning as the run panel's per-epoch badge ({@code resolveEpochBadgeStatus} in
+     * {@code runFormatting.ts}), and deliberately kept to that one shape so the bell can never
+     * contradict the epoch row that is one click away:
+     * <ul>
+     *   <li>A CLOSED epoch states its own outcome ({@code COMPLETED} / {@code FAILED}), which
+     *       outranks the run - the run may already be executing the NEXT fire.</li>
+     *   <li>An OPEN epoch cannot: its stored state is the one written when it opened. Only the
+     *       run knows, because the close is DEFERRED (a blocking signal or an in-flight agent
+     *       leaves the epoch open long after its last node finished). So an executing run makes
+     *       it {@code RUNNING}, and a run KILLED mid-flight ({@link #ABANDONING_RUN_STATUSES})
+     *       hands over its own status - that fire never reached any ending of its own.</li>
+     *   <li>Anything else - no epoch at all, an open epoch under a run that ended normally or
+     *       is parked at {@code WAITING_TRIGGER}, a status this build does not know - answers
+     *       null, and the frontend renders the time with an empty badge slot. Silence beats a
+     *       guessed verdict, and it is also what the run panel shows for that same epoch.</li>
+     * </ul>
+     */
+    static String resolveLastRunStatus(LatestEpochOutcome lastEpoch, RunStatus runStatus) {
+        if (lastEpoch == null) return null;
+        if (lastEpoch.outcome() != null) return lastEpoch.outcome();
+        if (!lastEpoch.active() || runStatus == null) return null;
+        if (ABANDONING_RUN_STATUSES.contains(runStatus)) return runStatus.name();
+        return EXECUTING_RUN_STATUSES.contains(runStatus) ? RunStatus.RUNNING.name() : null;
+    }
+
+    /**
+     * Whether a workflow's SPENDING cap is refusing its fires, and when that
+     * lifts.
+     *
+     * @param blocked the cap is refusing fires right now
+     * @param until   when it stops refusing, or {@code null} while blocked to
+     *                mean "not on its own" (a cadence that never resets). Null
+     *                is therefore NOT "not blocked" - read it with
+     *                {@code blocked}, never alone.
+     */
+    record BudgetBlock(boolean blocked, Instant until) {}
+
+    /**
+     * Package-private and static so it can be tested the way
+     * {@link #pausedReason} is: this decides whether the agenda greys a
+     * schedule's future, and the mapper that consumes it is private, so keeping
+     * the decision inline would put it out of reach of any unit test.
+     *
+     * @param owner the workflow whose cap governs these fires, or {@code null}
+     *              when nothing caps them (an agent's schedule: its budget is a
+     *              different subsystem, with its own counter and its own reset)
+     */
+    static BudgetBlock budgetBlock(WorkflowEntity owner, Instant now) {
+        if (owner == null) {
+            return new BudgetBlock(false, null);
+        }
+        boolean blocked = com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod.isBlocked(
+                owner.getBudgetCredits(), owner.getBudgetPeriodMode(),
+                owner.getBudgetPeriodSpent(), owner.getBudgetPeriodStartedAt(), now);
+        return new BudgetBlock(blocked, blocked
+                ? com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                        .nextPeriodStart(owner.getBudgetPeriodMode(), now)
+                : null);
+    }
+
+    /**
+     * Why this schedule is not armed, or null when it is.
+     *
+     * <p>Three ways to sit un-armed, and only one of them is a pause the user can undo:
+     *
+     * <ul>
+     *   <li><b>The user disabled it</b> - {@code USER}. This is what the Resume button is
+     *       for.</li>
+     *   <li><b>Its cap is exhausted</b> - {@code CAP_REACHED}. {@code armSchedule}
+     *       short-circuits on an already-ACTIVE row and returns true WITHOUT writing, so
+     *       the UI announced a success while nothing changed and the schedule still could
+     *       not fire.</li>
+     *   <li><b>The platform suspended it</b> - {@code PLATFORM}. Its trigger left the
+     *       pinned plan, or the workflow was unpinned or deleted. Re-arming rebuilds
+     *       exactly the orphan the suspension sweep exists to retire, and the next tick
+     *       suspends it again; the cause is upstream, in the plan.</li>
+     * </ul>
+     *
+     * <p>The cap is checked BEFORE the reason, because a row can carry both: the sweep
+     * stamps {@code MAX_EXEC_REACHED}, but a schedule the user had also paused would
+     * otherwise report as resumable and resume into a state that still cannot fire.
+     */
+    static ActiveAutomationDto.PausedReason pausedReason(ScheduledExecutionDto s) {
+        if (s.isEnabled() && !s.hasReachedMaxExecutions()) {
+            return null;
+        }
+        if (s.hasReachedMaxExecutions()) {
+            return ActiveAutomationDto.PausedReason.CAP_REACHED;
+        }
+        String reason = s.getLastDisabledReason();
+        // A blank reason is a row disabled before reasons were recorded. Treat it as a user
+        // pause: refusing to resume a legacy row the user CAN fix is the worse error, and
+        // an arm that does not stick shows up on the next refresh rather than silently.
+        if (reason == null || reason.isBlank()
+                || "USER_DISABLED".equals(reason) || "LEGACY_DISABLED".equals(reason)) {
+            return ActiveAutomationDto.PausedReason.USER;
+        }
+        return ActiveAutomationDto.PausedReason.PLATFORM;
     }
 
     /**
@@ -369,16 +820,7 @@ public class ActiveAutomationsService {
      * standalone schedule; a malformed {@code scheduleId} value is skipped
      * individually without dropping the other triggers.
      */
-    private static Set<UUID> standaloneScheduleIds(Map<String, Object> planMap) {
-        if (planMap == null) {
-            return Set.of();
-        }
-        WorkflowPlan plan;
-        try {
-            plan = WorkflowPlan.fromMap(planMap, null);
-        } catch (Exception e) {
-            return Set.of();
-        }
+    private static Set<UUID> standaloneScheduleIds(WorkflowPlan plan) {
         if (plan == null) {
             return Set.of();
         }
@@ -401,24 +843,27 @@ public class ActiveAutomationsService {
     }
 
     private ActiveAutomationDto toWebhookAutomation(ResourceType type, UUID resourceId, String name, String avatarUrl,
-                                                    Boolean isPinned, Instant lastRun, String httpMethod,
+                                                    Boolean isPinned, LastRun lastRun, String httpMethod,
                                                     String productionRunIdPublic, String publicationId) {
         WebhookInfo webhook = new WebhookInfo(httpMethod);
         return new ActiveAutomationDto(type, resourceId, name, avatarUrl, TriggerType.WEBHOOK,
-                null, webhook, lastRun, isPinned, productionRunIdPublic, publicationId);
+                null, webhook, lastRun.at(), isPinned, productionRunIdPublic, publicationId,
+                lastRun.status());
     }
 
     /**
      * DTO for a "declared" trigger kind (manual, chat, form, datasource, workflow,
      * error). Neither {@code schedule} nor {@code webhook} is set - the frontend
-     * renders the kind's NodeIcon and a relative-time label from {@code lastRunAt}
-     * only. {@code lastRunAt} is the workflow-level {@code lastExecutedAt}; see
-     * {@link ActiveAutomationDto} Javadoc for the per-kind precision trade-off.
+     * renders the kind's NodeIcon and the last-run line. That line is the production
+     * run's last fire whatever trigger caused it, which is the same per-workflow
+     * granularity these rows have always had (see {@link ActiveAutomationDto} Javadoc),
+     * now read from the run rather than from a column any draft execution also stamps.
      */
     private ActiveAutomationDto toDeclaredKindAutomation(ResourceType type, UUID resourceId, String name,
-                                                        TriggerType kind, Boolean isPinned, Instant lastRun,
+                                                        TriggerType kind, Boolean isPinned, LastRun lastRun,
                                                         String productionRunIdPublic, String publicationId) {
         return new ActiveAutomationDto(type, resourceId, name, null, kind,
-                null, null, lastRun, isPinned, productionRunIdPublic, publicationId);
+                null, null, lastRun.at(), isPinned, productionRunIdPublic, publicationId,
+                lastRun.status());
     }
 }

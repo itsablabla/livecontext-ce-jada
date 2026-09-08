@@ -62,9 +62,10 @@ public class StandaloneScheduleService {
         planLimitHelper.checkLimit(userPlan, currentCount);
 
         // Validate cron
-        if (!cronParser.isValid(request.cron())) {
+        if (!cronParser.isAcceptableInput(request.cron())) {
             throw new IllegalArgumentException("Invalid cron expression: " + request.cron());
         }
+        requireResolvableTimezone(request.timezone());
 
         Instant nextExecutionAt = cronParser.getNextExecution(request.cron(), request.timezone());
         if (nextExecutionAt == null) {
@@ -104,17 +105,37 @@ public class StandaloneScheduleService {
         ScheduledExecutionEntity entity = scheduleRepository.findByIdAndOrganizationIdStrict(id, organizationId)
                 .orElseThrow(() -> new IllegalArgumentException("Schedule not found"));
 
-        if (request.cron() != null && !request.cron().isBlank()) {
-            if (!cronParser.isValid(request.cron())) {
-                throw new IllegalArgumentException("Invalid cron expression: " + request.cron());
-            }
-            entity.setCronExpression(request.cron());
-            Instant nextExecutionAt = cronParser.getNextExecution(request.cron(), request.timezone());
-            if (nextExecutionAt != null) {
-                entity.setNextExecutionAt(nextExecutionAt);
-            }
+        // The row's shape BEFORE anything is overwritten. The policy compares what is
+        // stored against what is arriving, so both have to be read first.
+        String storedCron = entity.getCronExpression();
+        String storedZone = entity.getTimezone();
+        Instant storedFire = entity.getNextExecutionAt();
+
+        boolean cronGiven = request.cron() != null && !request.cron().isBlank();
+        if (cronGiven && !cronParser.isAcceptableInput(request.cron())) {
+            throw new IllegalArgumentException("Invalid cron expression: " + request.cron());
         }
-        if (request.timezone() != null) entity.setTimezone(request.timezone());
+        requireResolvableTimezone(request.timezone());
+
+        // Resolved as a PAIR, and the policy applied once over both. The cron used to be
+        // handled inside its own block while the timezone was written after it, so a
+        // timezone-only update changed the schedule's shape and left next_execution_at
+        // pointing at the old zone's slot - the one case PendingFirePolicy exists to
+        // recompute, skipped because the two halves of "shape" lived in different places.
+        //
+        // request.timezone() is never null: StandaloneScheduleRequest's compact constructor
+        // normalises an absent zone to "UTC". So a caller cannot say "keep the zone" through
+        // this DTO, and a partial update re-zones the row to UTC. That is the DTO's contract
+        // rather than something this method can repair, but the fire time now at least
+        // FOLLOWS the zone instead of being left behind by it.
+        String newCron = cronGiven ? request.cron() : storedCron;
+        String newZone = request.timezone() != null ? request.timezone() : storedZone;
+
+        entity.setCronExpression(newCron);
+        entity.setTimezone(newZone);
+        Instant recomputed = cronParser.getNextExecution(newCron, newZone);
+        entity.setNextExecutionAt(PendingFirePolicy.resolve(
+                storedFire, storedCron, storedZone, newCron, newZone, recomputed));
         if (request.name() != null) entity.setName(request.name());
         if (request.description() != null) entity.setDescription(request.description());
         if (request.maxExecutions() != null) entity.setMaxExecutions(request.maxExecutions());
@@ -190,6 +211,21 @@ public class StandaloneScheduleService {
         return toDto(entity);
     }
 
+    /**
+     * Refuse a timezone the platform cannot resolve.
+     *
+     * <p>Not cosmetic. The arming maths answers null for an unresolvable zone and every
+     * caller falls back to "in 60 seconds", so the row is armed a minute out, recomputed a
+     * minute out, and fires every minute forever. The cron reaper cannot save it either -
+     * it asks whether the CRON is valid, and the cron is fine.
+     */
+    private static void requireResolvableTimezone(String timezone) {
+        if (timezone != null && !com.apimarketplace.common.schedule.CronOccurrences
+                .isResolvableTimezone(timezone)) {
+            throw new IllegalArgumentException("Unknown timezone: " + timezone);
+        }
+    }
+
     /** Strict-isolation toggle. */
     @Transactional
     public ScheduledExecutionDto toggle(String tenantId, String organizationId, UUID id, boolean enabled) {
@@ -198,10 +234,12 @@ public class StandaloneScheduleService {
                 .orElseThrow(() -> new IllegalArgumentException("Schedule not found"));
         entity.setEnabled(enabled);
         if (enabled) {
-            Instant nextExecutionAt = cronParser.getNextExecution(entity.getCronExpression(), entity.getTimezone());
-            if (nextExecutionAt != null) {
-                entity.setNextExecutionAt(nextExecutionAt);
-            }
+            // Resuming does not redefine the cadence, so a fire time still ahead is the
+            // user's move and survives; only an expired one is recomputed.
+            Instant recomputed = cronParser.getNextExecution(entity.getCronExpression(), entity.getTimezone());
+            entity.setNextExecutionAt(PendingFirePolicy.resolve(
+                    entity.getNextExecutionAt(), entity.getCronExpression(), entity.getTimezone(),
+                    entity.getCronExpression(), entity.getTimezone(), recomputed));
         }
         entity.setUpdatedAt(Instant.now());
         return toDto(scheduleRepository.save(entity));

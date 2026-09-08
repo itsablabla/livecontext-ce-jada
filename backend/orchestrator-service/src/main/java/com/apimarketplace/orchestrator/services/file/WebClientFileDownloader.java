@@ -11,6 +11,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.concurrent.TimeoutException;
 
@@ -58,7 +59,15 @@ public class WebClientFileDownloader implements FileDownloader {
 
         try {
             byte[] content = webClient.get()
-                .uri(url)
+                // URI.create, never the String overload. WebClient.uri(String) runs the value
+                // through the UriBuilderFactory, which re-encodes an already-encoded query: the
+                // '%' of a '%2F' becomes '%25', so '%2F' ships as '%252F'. That silently breaks
+                // EVERY provider-presigned download URL, because their signature covers the exact
+                // query string - BytePlus TOS (X-Tos-Credential), AWS S3 (X-Amz-Credential),
+                // Azure SAS and GCS signed URLs all carry '%2F' there. The provider then answers
+                // 400 AuthorizationHeaderMalformed, which reads like a broken credential rather
+                // than a mangled URL. A URI built here is used verbatim.
+                .uri(URI.create(url))
                 .retrieve()
                 .onStatus(status -> status.isError() || status.is3xxRedirection(), response ->
                     response.bodyToMono(String.class)

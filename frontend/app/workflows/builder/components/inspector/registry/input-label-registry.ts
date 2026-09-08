@@ -25,8 +25,9 @@ export const inputLabelRegistry: Partial<Record<InspectorNodeType, Record<string
     duration: 'Duration (ms)',
   },
   'loop': {
-    condition: 'Condition',
+    loopCondition: 'Condition',
     maxIterations: 'Max Iterations',
+    strategy: 'Strategy',
     list: 'Items',
   },
   'while-group': {
@@ -40,18 +41,24 @@ export const inputLabelRegistry: Partial<Record<InspectorNodeType, Record<string
     splitStrategy: 'Strategy',
   },
   'aggregate': {
-    // Dynamic keys from field labels → humanizeKey fallback handles them
+    fields: 'Collected Fields',
+    // Plus ONE KEY PER AUTHOR LABEL, which no registry can label: those fall
+    // through to humanizeKey, which is the right rendering for a name the user
+    // chose. The COLLECTED values live in the node's output, not here.,
+    // under the field labels, which is where a reader looks for them.
   },
   'decision': {
     // Dynamic keys: if, elsif_N, else → humanizeKey fallback handles them
     branches: 'Branches',
   },
   'switch': {
-    expression: 'Expression',
+    switchExpression: 'Expression',
     resolved_value: 'Resolved Value',
-    cases: 'Cases',
+    switchCases: 'Cases',
   },
   'filter': {
+    input: 'Input',
+    input_count: 'Items received',
     conditions: 'Conditions',
     mode: 'Mode',
     expression: 'Filter Expression',
@@ -60,11 +67,16 @@ export const inputLabelRegistry: Partial<Record<InspectorNodeType, Record<string
     value: 'Value',
   },
   'sort': {
+    input: 'Input',
+    input_count: 'Items received',
+    fields: 'Sort Fields',
     field: 'Sort Field',
     order: 'Order',
     expression: 'Expression',
   },
   'limit': {
+    input: 'Input',
+    input_count: 'Items received',
     count: 'Limit',
     from: 'From',
     offset: 'Offset',
@@ -73,11 +85,18 @@ export const inputLabelRegistry: Partial<Record<InspectorNodeType, Record<string
     strategy: 'Strategy',
     sources: 'Sources',
   },
+  'exit': {
+    reason: 'Reason',
+  },
   'fork': {
-    branches: 'Branches',
+    forkOutputs: 'Branches',
   },
   'response': {
     message: 'Message',
+  },
+  'stop_on_error': {
+    errorCode: 'Error Code',
+    errorMessage: 'Error Message',
   },
   'http_request': {
     method: 'Method',
@@ -152,6 +171,19 @@ export const inputLabelRegistry: Partial<Record<InspectorNodeType, Record<string
     opacity: 'Opacity',
     start_seconds: 'Start (s)',
     end_seconds: 'End (s)',
+    cues: 'Captions',
+    font_family: 'Font',
+    font_size_percent: 'Font Size (% of height)',
+    position_percent: 'Position (% from top)',
+    text_color: 'Text Colour',
+    outline_color: 'Outline Colour',
+  },
+  // No 'option' block: `option` is not an InspectorNodeType, so detectNodeType
+  // resolves an option node to 'unknown' and no entry here could ever be read.
+  // Its keys humanise instead - `choices` reads "Choices", the author-named
+  // choice labels read as themselves, which is the right rendering anyway.
+  'sftp': {
+    localContentSize: 'Upload size (chars)',
   },
   'respond_to_webhook': {
     statusCode: 'Status Code',
@@ -217,9 +249,16 @@ export const inputLabelRegistry: Partial<Record<InspectorNodeType, Record<string
   'extract_from_file': {
     format: 'Format',
     file: 'File',
+    value: 'Source',
+    mode: 'Mode',
     delimiter: 'Delimiter',
     sheetName: 'Sheet Name',
     hasHeaders: 'Has Headers',
+    chunking: 'Chunking',
+    chunkingStrategy: 'Chunking Strategy',
+    chunkSize: 'Chunk Size',
+    chunkUnit: 'Chunk Unit',
+    overlap: 'Overlap',
   },
   'xml': {
     operation: 'Operation',
@@ -240,9 +279,20 @@ export const inputLabelRegistry: Partial<Record<InspectorNodeType, Record<string
     url: 'URL',
     maxItems: 'Max Items',
   },
+  'html_extract': {
+    sourceHtml: 'Source HTML',
+    sourceHtmlLength: 'Source length (chars)',
+    extractionMode: 'Extraction Mode',
+    rootSelector: 'Root Selector',
+    cleanWhitespace: 'Clean Whitespace',
+    field_count: 'Fields configured',
+    fields: 'Fields',
+  },
   'compare_datasets': {
     inputA: 'Input A',
     inputB: 'Input B',
+    inputACount: 'Input A rows',
+    inputBCount: 'Input B rows',
     left: 'Left Dataset',
     right: 'Right Dataset',
     matchFields: 'Match Fields',
@@ -268,16 +318,24 @@ export const inputLabelRegistry: Partial<Record<InspectorNodeType, Record<string
   'crypto_jwt': {
     operation: 'Operation',
     algorithm: 'Algorithm',
+    value: 'Value',
     secret: 'Secret',
     token: 'Token',
     payload: 'Payload',
   },
   'remove_duplicates': {
+    input: 'Input',
+    input_count: 'Items received',
+    fields: 'Compared Fields',
+    keep: 'Keep',
     field: 'Field',
     expression: 'Expression',
   },
   'summarize_data': {
+    input: 'Input',
+    input_count: 'Items received',
     aggregations: 'Aggregations',
+    aggregation_count: 'Aggregations configured',
     field: 'Field',
     operation: 'Operation',
     groupBy: 'Group By',
@@ -287,6 +345,25 @@ export const inputLabelRegistry: Partial<Record<InspectorNodeType, Record<string
   },
   'transform': {
     // Dynamic keys from mapping labels → humanizeKey fallback handles them
+  },
+  'set': {
+    input: 'Input',
+    keepOnlySet: 'Keep only set fields',
+    assignmentCount: 'Assignments',
+    // Beyond these, the keys are the assignment names → humanizeKey fallback.
+  },
+  'task': {
+    operation: 'Operation',
+    taskId: 'Task',
+    title: 'Title',
+    instructions: 'Instructions',
+    priority: 'Priority',
+    status: 'Status',
+    taskContext: 'Context',
+    agentId: 'Agent',
+    reviewerAgentId: 'Reviewer Agent',
+    search: 'Search',
+    limit: 'Limit',
   },
 
   // ============================================================================

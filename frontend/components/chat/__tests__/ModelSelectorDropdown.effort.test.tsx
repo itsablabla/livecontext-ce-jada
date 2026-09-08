@@ -17,6 +17,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 //  - a zero-size trigger (the display:none mobile composer copy in the welcome
 //    view) renders NO menu, so no stray menu is pinned at the viewport's 0,0,
 //  - the trigger model name uses the primary text color.
+vi.mock('@/lib/hooks/useModelCostBasis', () => ({
+  // The picker asks once for the credit-estimate basis; these tests are not
+  // about the estimate, and an unanswered basis renders no estimate at all.
+  useModelCostBasis: () => ({ basis: null, isLoading: false }),
+}));
 vi.mock('next/image', () => ({
   // eslint-disable-next-line @next/next/no-img-element
   default: ({ src, alt }: { src: string; alt: string }) => <img src={src} alt={alt} />,

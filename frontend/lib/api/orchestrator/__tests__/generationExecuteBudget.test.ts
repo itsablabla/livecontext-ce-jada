@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 /**
  * The third caller of a generation, and the one the budget rule forgot.
  *
- * <p>The MCP tool and the `core:generate` node were both sized on how long
+ * <p>The MCP tool and the `agent:generate` node were both sized on how long
  * catalog can legitimately take (a submit that can burn the upstream read
  * ceiling, then a poll loop). The browser was left on the API client's default
  * 30 seconds, which is shorter than the operation by more than an order of

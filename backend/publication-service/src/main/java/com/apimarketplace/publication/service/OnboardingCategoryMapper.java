@@ -57,6 +57,26 @@ public class OnboardingCategoryMapper {
     );
 
     /** profession token → category slug(s). */
+    /** primaryGoal ("what do you want to automate first") token → category slug(s). */
+    private static final Map<String, List<String>> PRIMARY_GOAL_TO_CATEGORIES = Map.ofEntries(
+            Map.entry("email-follow-ups", List.of("sales-crm", "communication")),
+            Map.entry("content-publishing", List.of("content", "marketing")),
+            Map.entry("lead-generation", List.of("sales-crm", "marketing")),
+            Map.entry("customer-support", List.of("customer-support")),
+            Map.entry("reporting", List.of("data-analytics")),
+            Map.entry("data-sync", List.of("automation", "data-analytics")),
+            Map.entry("monitoring-alerts", List.of("monitoring")),
+            Map.entry("ai-assistant", List.of("ai-automation")),
+            // self-hosted goals (the CE use-case vocabulary)
+            Map.entry("internal-automation", List.of("automation")),
+            Map.entry("private-assistants", List.of("ai-automation")),
+            Map.entry("data-pipelines", List.of("data-analytics")),
+            Map.entry("tool-orchestration", List.of("automation")),
+            Map.entry("team-workspaces", List.of("productivity", "communication")),
+            Map.entry("marketplace-publishing", List.of("content")),
+            Map.entry("evaluation-sandbox", List.of("automation"))
+    );
+
     private static final Map<String, List<String>> PROFESSION_TO_CATEGORIES = Map.ofEntries(
             Map.entry("sales", List.of("sales-crm")),
             Map.entry("marketing", List.of("marketing")),
@@ -81,7 +101,23 @@ public class OnboardingCategoryMapper {
     public List<String> toCategorySlugs(List<String> interests,
                                         List<String> useCases,
                                         String profession) {
+        return toCategorySlugs(interests, useCases, profession, null);
+    }
+
+    /**
+     * The primary goal is the strongest signal the newer onboarding form gives
+     * (one deliberate choice), so it is mapped first; the older lists and the
+     * profession follow, so a user who answered either form gets suggestions.
+     */
+    public List<String> toCategorySlugs(List<String> interests,
+                                        List<String> useCases,
+                                        String profession,
+                                        String primaryGoal) {
         Set<String> slugs = new LinkedHashSet<>();
+        if (primaryGoal != null) {
+            List<String> mapped = PRIMARY_GOAL_TO_CATEGORIES.get(normalize(primaryGoal));
+            if (mapped != null) slugs.addAll(mapped);
+        }
         addAll(slugs, interests, INTEREST_TO_CATEGORIES);
         addAll(slugs, useCases, USECASE_TO_CATEGORIES);
         if (profession != null) {

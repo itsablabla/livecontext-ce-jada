@@ -46,6 +46,7 @@ import {
   monoDarkInvertClass,
 } from "@/lib/credentials/monoIconSlugs";
 import { useTranslations } from "next-intl";
+import { track } from "@/lib/analytics/analytics";
 
 // ============================================
 // Types
@@ -915,11 +916,13 @@ export function CredentialWizard({
 
     if (success === "true") {
       markCurrentAsCompleted();
+      track('credential_oauth_result', { integration: currentRequirement?.iconSlug ?? null, result: 'success' });
       const cleanUrl = window.location.pathname;
       window.history.replaceState({}, "", cleanUrl);
     } else if (errorParam) {
       setError(decodeURIComponent(errorParam));
       setStep("error");
+      track('credential_oauth_result', { integration: currentRequirement?.iconSlug ?? null, result: 'error' });
       const cleanUrl = window.location.pathname;
       window.history.replaceState({}, "", cleanUrl);
     }
@@ -1091,6 +1094,22 @@ export function CredentialWizard({
   );
   const [oauthHostVars, setOauthHostVars] = useState<Record<string, string>>({});
 
+  // What the API says about its OWN key, shown under the input. An api_key credential
+  // is not always "paste the token": Higgsfield's is a key id and a key secret that
+  // must be entered joined by a colon, and pasting the id alone returns 401 with no
+  // hint. That sentence reaches here as the field's description (the importer fills it
+  // from the seed's auth[].notes). The dialog's own description cannot carry it: it is
+  // clamped to two lines, so anything past the opening sentence is invisible.
+  // The importer's generic filler is skipped: it only restates the label.
+  // Matched on the "password" type the importer writes for the secret itself, so a
+  // url-variable property registered alongside it (a {subdomain}, a {shop}) cannot be
+  // picked up instead. That one is rendered on its own below.
+  const apiKeyHelp = useMemo<string>(() => {
+    const help = getTemplateProperties()
+      .find((p) => String(p.type) === "password")?.description?.trim();
+    return !help || help === "API key for authentication" ? "" : help;
+  }, [getTemplateProperties]);
+
   // Credential properties BEYOND the primary auth field(s) - i.e. importer-registered
   // URL-template / account identifiers (Bandwidth account_id, Sinch project + service-plan
   // id, base-URL {domain}/{instance}/{shop} vars …). The basic_auth / bearer / api_key
@@ -1131,10 +1150,11 @@ export function CredentialWizard({
 
     setIsSubmitting(true);
     setError(null);
+    // Declared outside the try so the failure branch can still report the bounded auth type.
+    let credType: string = template.auth_type || "API Key";
 
     try {
       let credentialData: Record<string, unknown> = {};
-      let credType: string = template.auth_type || "API Key";
 
       if (isApiKey) {
         if (!apiKey.trim()) {
@@ -1222,9 +1242,18 @@ export function CredentialWizard({
       });
 
       markCurrentAsCompleted();
+      track('credential_saved', { auth_type: credType, integration: template.icon_slug ?? null, result: 'success' });
     } catch (err) {
       console.error("Failed to save credential:", err);
       setError(err instanceof Error ? err.message : t("errors.saveFailed"));
+      // Bounded kind only (an HTTP status or 'unknown'): never the error message.
+      const status = (err as { status?: unknown } | null)?.status;
+      track('credential_saved', {
+        auth_type: credType,
+        integration: template.icon_slug ?? null,
+        result: 'error',
+        error_kind: typeof status === 'number' ? String(status) : 'unknown',
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -1543,6 +1572,9 @@ export function CredentialWizard({
           <Label htmlFor="apiKey" className="text-sm font-semibold text-slate-500 dark:text-slate-400">
             {t("apiKey")}
           </Label>
+          {apiKeyHelp && (
+            <p className="text-sm text-theme-secondary whitespace-pre-line">{apiKeyHelp}</p>
+          )}
           <div className="relative">
             <Input
               id="apiKey"

@@ -39,6 +39,9 @@ public class PlanLimitService {
 
     private static final Logger log = LoggerFactory.getLogger(PlanLimitService.class);
 
+    /** All-digits = the gateway's internal user id. Keycloak subs are UUIDs. */
+    private static final java.util.regex.Pattern NUMERIC_ID = java.util.regex.Pattern.compile("[0-9]{1,19}");
+
     /** Sentinel: user has no active subscription. Treated as FREE-equivalent (default block). */
     public static final String NO_SUBSCRIPTION = "__NONE__";
 
@@ -157,12 +160,112 @@ public class PlanLimitService {
         return plan.getResourceLimit(resourceType);
     }
 
+    /**
+     * The caller's user row, whichever id shape they were addressed by.
+     *
+     * <p><b>Two shapes reach auth-service and they are not interchangeable.</b> The
+     * gateway sets {@code X-User-ID} to the INTERNAL numeric id and puts the Keycloak
+     * sub in {@code X-Provider-Id}; a service calling auth-service internally forwards
+     * whatever it holds, which is that same numeric id. Resolving by provider id alone
+     * therefore found NOBODY for any request that came through the gateway, and
+     * answered {@link #NO_SUBSCRIPTION} for a paying customer - which reads as "free"
+     * to every caller and refused a TEAM account the endpoints it had paid for.
+     *
+     * <p>An all-digits value is an internal id: Keycloak subs are UUIDs, so the two
+     * shapes cannot collide.
+     *
+     * <p><b>Deliberately used by the plan-code path only.</b> {@link #loadLimit} has
+     * the same mismatch and is left as it is on purpose: it fails OPEN (unknown user
+     * -> null -> unlimited), so repairing it here would silently switch per-plan
+     * resource quotas ON for every cloud account, including accounts already over a
+     * limit. That is a product decision, not a side effect of a bug fix.
+     */
+    private Optional<User> resolveUserForPlanCode(String id) {
+        if (id == null || id.isBlank()) {
+            return Optional.empty();
+        }
+        String trimmed = id.trim();
+        if (NUMERIC_ID.matcher(trimmed).matches()) {
+            try {
+                Optional<User> byId = userRepository.findById(Long.parseLong(trimmed));
+                if (byId.isPresent()) {
+                    return byId;
+                }
+            } catch (NumberFormatException ignored) {
+                // Longer than a long: fall through and try it as a provider id.
+            }
+        }
+        return userRepository.findByProviderId(trimmed);
+    }
+
+    /**
+     * The plan code AND whether the account behind {@code id} was found at all.
+     *
+     * <p><b>Why this exists.</b> {@link #getPlanCode(String)} answers
+     * {@link #NO_SUBSCRIPTION} for two situations that are not the same thing:
+     * "this account exists and is on no paid plan" and "no account matched this
+     * id". Every entitlement caller may safely conflate them, because both mean
+     * "grant nothing extra" and the cost of being wrong is a refused feature.
+     *
+     * <p>A caller that DELETES cannot conflate them: a job that applies the
+     * shortest window to a FREE account would erase a paying customer's data on
+     * the strength of a failed lookup - the 2026-08 id-form incident, destructive
+     * instead of merely blocking. {@code accountResolved} is what lets such a
+     * caller retain instead. (Execution-log retention was the first such caller;
+     * it now resolves per WORKSPACE through {@code PlanResolutionService} and no
+     * longer uses this method, but the distinction stays for the next one.)
+     *
+     * @param id either id shape, exactly as {@link #getPlanCode(String)} accepts
+     */
+    public PlanCodeResolution resolvePlanCode(String id) {
+        if (editionProvider.isSelfHostedEnterprise()) {
+            var status = enterpriseLicenseService.currentStatus();
+            if (!status.active()) {
+                // NOT resolved. This branch answers for ANY id, including one no
+                // account matches, so reporting it as resolved would let a
+                // destructive caller read the lapsed licence as "free tier" and
+                // apply the shortest window to the whole install. A licence lapse
+                // must degrade features, never shorten retention.
+                return new PlanCodeResolution(false, NO_SUBSCRIPTION, null);
+            }
+            return new PlanCodeResolution(true, status.planCode(), null);
+        }
+        Optional<User> userOpt = resolveUserForPlanCode(id);
+        if (userOpt.isEmpty()) {
+            return new PlanCodeResolution(false, NO_SUBSCRIPTION, null);
+        }
+        Long userId = userOpt.get().getId();
+        return new PlanCodeResolution(true, planCodeForUser(userId), userId);
+    }
+
+    /**
+     * Outcome of a plan lookup.
+     *
+     * @param accountResolved whether an account actually matched the id; when
+     *                        {@code false}, {@code planCode} carries no
+     *                        information about the customer and a destructive
+     *                        caller must not act on it
+     * @param planCode        the effective plan code, or {@link #NO_SUBSCRIPTION}
+     * @param userId          the internal id of the account that matched, so a
+     *                        caller that needs to go on and read something else
+     *                        about that account does not have to redo the
+     *                        two-id-shape resolution and risk doing it
+     *                        differently; {@code null} when nothing matched, and
+     *                        also on the self-hosted-enterprise branch, which
+     *                        answers from a licence rather than from a user row
+     */
+    public record PlanCodeResolution(boolean accountResolved, String planCode, Long userId) {
+    }
+
     private String loadPlanCode(String providerId) {
-        Optional<User> userOpt = userRepository.findByProviderId(providerId);
+        Optional<User> userOpt = resolveUserForPlanCode(providerId);
         if (userOpt.isEmpty()) {
             return NO_SUBSCRIPTION;
         }
-        Long userId = userOpt.get().getId();
+        return planCodeForUser(userOpt.get().getId());
+    }
+
+    private String planCodeForUser(Long userId) {
         String localPlan = subscriptionRepository.findActiveByUserId(userId)
                 .map(s -> s.getPlan() != null ? s.getPlan().getCode() : NO_SUBSCRIPTION)
                 .orElse(NO_SUBSCRIPTION);

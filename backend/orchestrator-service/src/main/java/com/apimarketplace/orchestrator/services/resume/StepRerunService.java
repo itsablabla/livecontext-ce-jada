@@ -467,17 +467,40 @@ public class StepRerunService {
 
         // Sync dagLastEpoch and global currentEpoch in metadata to match snapshot.
         //
-        // NOT when the caller chose the epoch. dagLastEpoch is what the NEXT trigger fire
-        // counts from (resetDagWithRerunPattern: nextEpoch = getCurrentEpoch + 1), so pointing
-        // it at an older fire would make the next fire reuse an epoch number that already has
-        // history - its rows would be written under a higher spawn and supersede that epoch's
-        // real outputs in every per-epoch view. The replay itself does not need the pointer:
-        // AutoRestartExecutionService drives it with the explicit (epoch, triggerId) this
-        // method returns, and a node that yields records that same epoch on its signal.
-        if (ownerTriggerId != null && epochChosenByCaller) {
-            logger.info("[RerunService] Replaying chosen epoch {} for runId={}, triggerId={}: "
-                    + "metadata.dagLastEpoch stays at {} so the next fire keeps counting forward",
-                    currentEpoch, runId, ownerTriggerId, dagLastEpochBeforeChoice);
+        // NOT when the replay REOPENED an older epoch. dagLastEpoch is what the NEXT trigger
+        // fire counts from (resetDagWithRerunPattern: nextEpoch = getCurrentEpoch + 1), so
+        // pointing it at an older fire would make the next fire reuse an epoch number that
+        // already has history - its rows would be written under a higher spawn and supersede
+        // that epoch's real outputs in every per-epoch view. The replay itself does not need
+        // the pointer: AutoRestartExecutionService drives it with the explicit (epoch,
+        // triggerId) this method returns, and a node that yields records that same epoch on
+        // its signal.
+        //
+        // Keyed on the caller's epoch AND on the pointer moving BACKWARD. Neither half alone is
+        // right, and each covers a different failure:
+        //  - the default path resolves its own epoch (reopening the executed one when the cycle
+        //    already closed, or syncing to the snapshot) and MUST still write the pointer -
+        //    context loading filters by it, so drifting it is what empties every upstream
+        //    template;
+        //  - naming an epoch the DAG has NOT moved past reopens nothing and replays exactly what
+        //    omitting it would have replayed, so it must leave the same metadata behind. Keyed
+        //    on the caller's mere use of the parameter, that call silently kept a STALE
+        //    dagLastEpoch, and a later fire of that DAG counts from it - reusing a number that
+        //    already has history. Reachable from any caller naming a DAG's current epoch, which
+        //    is what a client comparing against a RUN-wide epoch does: the canvas takes the max
+        //    across DAGs, and on a settled run that max is the epoch STAGED for the next fire.
+        // The DEFAULT path must keep writing unconditionally, which is why the caller's choice
+        // is still part of the key. Step 5b can sync `currentEpoch` DOWN there (an epoch still
+        // ACTIVE below a higher metadata pointer - reachable precisely because a targeted
+        // replay moved DagState.currentEpoch backward earlier on this run), and skipping the
+        // write in that shape leaves execution running in the synced epoch while
+        // RunContextService loads its context from the stale pointer: every upstream template
+        // resolves to another fire's rows, on a run that reports success.
+        boolean replayIsBehindThePointer = currentEpoch < dagLastEpochBeforeChoice;
+        if (ownerTriggerId != null && epochChosenByCaller && replayIsBehindThePointer) {
+            logger.info("[RerunService] Replaying epoch {} behind the pointer for runId={}, "
+                    + "triggerId={}: metadata.dagLastEpoch stays at {} so the next fire keeps "
+                    + "counting forward", currentEpoch, runId, ownerTriggerId, dagLastEpochBeforeChoice);
         } else if (ownerTriggerId != null) {
             @SuppressWarnings("unchecked")
             Map<String, Object> dagLastEpoch = metadata.get("dagLastEpoch") instanceof Map
@@ -694,11 +717,22 @@ public class StepRerunService {
                 + "available here. Omit the epoch to replay the run's most recent state.");
         }
         EpochState header = workflowEpochService.getFullEpochState(runId, ownerTriggerId, requestedEpoch);
+        // No header covers two different things, and the caller can act on both the same way.
+        // Either the epoch is not one this run has, or it is one whose record was never written
+        // (a run from before epoch headers existed, or a fire that never closed through the
+        // epoch service) - and a caller reading THAT run sees the epoch listed, because the
+        // listing is built from counter rows which survive without a header. Saying only "does
+        // not exist" sends such a caller back to a list that still shows it.
+        //
+        // Deliberately a refusal rather than the epoch-less path's degrade: that path falls back
+        // to the DORMANT epoch, where the node would run with every upstream template resolving
+        // to nothing, on a run that reports success. Refusing keeps the bad outcome visible.
         if (header == null) {
             throw new IllegalArgumentException(
-                "Epoch " + requestedEpoch + " does not exist on this run for trigger " + ownerTriggerId
-                + ". Read the epochs the run actually has with workflow(action='get_run', run_id='"
-                + runId + "') and pass one of those, or omit the epoch to replay the most recent one.");
+                "Epoch " + requestedEpoch + " cannot be restarted on its own for trigger " + ownerTriggerId
+                + ": this run kept no restorable record of it. Read the epochs the run has with "
+                + "workflow(action='get_run', run_id='" + runId + "') and pass one of those, or omit "
+                + "the epoch to replay the most recent state.");
         }
         // A header with nothing in it is a fire that opened and executed nothing yet, so get_run
         // DOES list it - saying "does not exist" there would send the agent back to a list that

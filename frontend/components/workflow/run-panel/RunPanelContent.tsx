@@ -6,6 +6,8 @@ import { ArrowLeft, History, Loader2, Play, Workflow } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { WorkflowRun } from '@/lib/api/orchestrator';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
+import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
+import { usePathname } from '@/i18n/navigation';
 import { RunSummaryBar } from './RunSummaryBar';
 import { RunStepsPanel } from './RunStepsPanel';
 import { RunHistoryList } from './RunHistoryList';
@@ -14,10 +16,10 @@ import { markEpochPickedByUser, useDefaultEpochSelection } from './useDefaultEpo
 import {
   getCachedRunPanelData,
   requestBindRun,
-  requestRunAction,
   subscribeRunPanelData,
   type RunPanelData,
 } from './runPanelBus';
+import { useRunActions } from './useRunActions';
 
 export type RunPanelView = 'history' | 'run';
 
@@ -191,9 +193,30 @@ export function RunPanelContent({ workflowId, allowHistory = false, viewRequest,
     requestBindRun({ workflowId, runId: nextRunId, surfaceId });
   }, [workflowId, setRunId, surfaceId]);
 
-  const runAction = useCallback((action: 'stop' | 'cancel' | 'reactivate') => {
-    requestRunAction({ action, workflowId, runId });
-  }, [workflowId, runId]);
+  // Routed through the shared performer, not a bare event dispatch: the canvas
+  // acts when it is mounted, and the REST call is made when it is not. The panel
+  // is reachable from surfaces the canvas is not (and can outlive its unmount),
+  // where the event alone was a click that did nothing at all.
+  const { pending: actionPending, failed: actionFailed, perform } = useRunActions(workflowId, runId);
+  /**
+   * Same gate the two new surfaces carry, and it belongs here MORE, not less:
+   * this bar offers the hard cancel and the reactivate as well as the stop. A
+   * gate that stopped a VIEWER pressing stop in the tab bar while leaving them
+   * free to CANCEL the same run one tab away closed nothing.
+   */
+  const canMutate = useCanMutateInCurrentOrg();
+  /**
+   * And the same share-route exclusion the two new surfaces carry.
+   *
+   * This bar sits in the very subtree those guard, and offers MORE: cancel and
+   * reactivate as well as stop. What keeps it off a share page today is a
+   * `display:none` wrapper, which is layout, not authorization - and the role
+   * check does not help, because an anonymous visitor has no organisation and
+   * reads as a personal workspace. Stopping is not in the gateway's share
+   * allow-list, so every one of these would 403.
+   */
+  const pathname = usePathname();
+  const canAct = canMutate && !data.isPreviewOnly && !(pathname ?? '').startsWith('/s/');
 
   const isRunActive = useMemo(() => isRunStatusActive(data.runInfo?.status), [data.runInfo?.status]);
 
@@ -293,9 +316,11 @@ export function RunPanelContent({ workflowId, allowHistory = false, viewRequest,
         epochCount={data.epochTimestamps?.length ?? 0}
         selectedEpoch={viewingEpoch}
         isStepByStep={data.isStepByStep}
-        onStop={data.isPreviewOnly ? undefined : () => runAction('stop')}
-        onCancel={data.isPreviewOnly ? undefined : () => runAction('cancel')}
-        onReactivate={data.isPreviewOnly ? undefined : () => runAction('reactivate')}
+        onStop={canAct ? () => perform('stop') : undefined}
+        onCancel={canAct ? () => perform('cancel') : undefined}
+        onReactivate={canAct ? () => perform('reactivate') : undefined}
+        actionPending={actionPending}
+        actionFailed={actionFailed}
         onVersionClick={canBrowseHistory ? () => setView('history') : undefined}
         size="panel"
         className="border-b border-theme"

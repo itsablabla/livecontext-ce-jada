@@ -8,6 +8,7 @@ import { publicationService } from '@/lib/api/orchestrator/publication.service';
 import { getActivePublicPreview } from '@/contexts/PublicationSnapshotContext';
 import type { EpochState, EpochSignalInfo } from '@/lib/api/orchestrator/types';
 import { edgeMatchesBatchEdge, type BatchEdgeData } from '../services/edgeMatcher';
+import { applyAwaitingSourceToEdges, coerceStatusForFailedSource } from '../services/edgeStatusService';
 import {
   normalizeLabel,
   extractCoreLabelWithoutPort,
@@ -576,9 +577,17 @@ export function useEpochStateViewing({
           resetEdges.push(`${edgeDesc} ← NO MATCH (tried: ${backendEdgeKeys.join(', ')})`);
           return { ...edge, data: { ...edge.data, status: undefined, statusCounts: undefined } };
         }
+        // Same failed-source recolouring the live pass applies (see
+        // edgeStatusService.coerceStatusForFailedSource). Without it, the red edges
+        // out of a failed node turned grey the moment the run was reopened on one of
+        // its epoch tabs - the same run telling two different stories.
         return {
           ...edge,
-          data: { ...edge.data, status: deriveStatusFromCounts(counts), statusCounts: counts },
+          data: {
+            ...edge.data,
+            status: coerceStatusForFailedSource(deriveStatusFromCounts(counts), sourceNode),
+            statusCounts: counts,
+          },
         };
       });
 
@@ -601,11 +610,16 @@ export function useEpochStateViewing({
         edges: edgesWithStatusAfter,
       });
 
+      // The signal override above may have turned nodes `awaiting_signal`; carry that
+      // onto their un-traversed outgoing edges, exactly as the live pass does, so an
+      // epoch tab does not go still on a run that is still parked on a user.
+      const finalEdges = applyAwaitingSourceToEdges(updatedEdges, updatedNodes as Node<BuilderNodeData>[]);
+
       // Apply to canvas
       setNodes(updatedNodes as Node<BuilderNodeData>[]);
       nodesRef.current = updatedNodes as Node<BuilderNodeData>[];
-      setEdges(updatedEdges);
-      edgesRef.current = updatedEdges;
+      setEdges(finalEdges);
+      edgesRef.current = finalEdges;
     }
 
     fetchAndApply();

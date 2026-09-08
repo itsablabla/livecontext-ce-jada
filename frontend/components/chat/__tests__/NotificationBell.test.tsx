@@ -14,6 +14,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import * as React from 'react';
 import { NotificationBell } from '../NotificationBell';
 import type { NotificationItem } from '@/lib/api/orchestrator/home-status.service';
+import { TRIGGER_ROW_ACTIONS_YIELD } from '../TriggerRowActions';
 
 const pushMock = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -31,8 +32,12 @@ vi.mock('next-intl', () => ({
 // reaches into the ThemeProvider context. Mock it so tests don't need to
 // wrap render() in <ThemeProvider>. Returning a stable light theme is
 // sufficient - NodeIcon only reads `theme` for dark-mode image fallback.
+// `useOptionalTheme` is mocked alongside `useTheme`: the icons in this tree render
+// through `useThemeSafely`, which reads the context OPTIONALLY so the same icons can
+// render on the public marketplace outside any ThemeProvider. A mock missing it throws.
 vi.mock('@/components/ThemeProvider', () => ({
   useTheme: () => ({ theme: 'light', toggleTheme: () => {}, setTheme: () => {} }),
+  useOptionalTheme: () => ({ theme: 'light', toggleTheme: () => {}, setTheme: () => {} }),
 }));
 
 // R10 - TriggerType widened 2→8 to match backend `ActiveAutomationDto.TriggerType`.
@@ -50,8 +55,14 @@ type AutomationMock = {
     timezone: string;
     executionCount: number;
     nextFireAt?: string;
+    // Present on a real armed schedule, and what the row menu keys off: a row without it
+    // renders no menu, which is the case the yield rule must not touch.
+    scheduleId?: string;
   };
+  /** Agent webhooks carry a method; workflow ones may not. Presence is what the row reads. */
+  webhook?: { httpMethod?: string };
   lastRunAt?: string;
+  lastRunStatus?: string;
   productionRunIdPublic?: string;
 };
 
@@ -80,6 +91,10 @@ const homeStatusMock = vi.hoisted(() => ({
 }));
 vi.mock('@/hooks/useHomeStatus', () => ({
   useHomeStatus: () => homeStatusMock.current,
+  // The row menu asks for the automations again after acting on a schedule, and the real
+  // hook reaches for a QueryClient this suite has no provider for. Its behaviour is pinned
+  // in TriggerRowActions' own tests, against a real client and the org-scoped key.
+  useRefreshHomeStatus: () => () => {},
 }));
 
 // Inbox items live behind useNotificationsPaged (split out from useHomeStatus
@@ -274,7 +289,10 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     render(<NotificationBell />);
     fireEvent.click(screen.getByRole('button', { name: 'title' }));
     fireEvent.click(screen.getByText('triggersTab'));
-    fireEvent.click(screen.getByText('Daily Digest'));
+    // The row-click target is an overlay button labelled with the automation name, not
+    // the name text itself: the row also carries a schedule-actions menu, and a button
+    // inside a button is invalid HTML. Same shape as the Shared tab rows.
+    fireEvent.click(screen.getByRole('button', { name: 'Daily Digest' }));
 
     expect(pushMock).toHaveBeenCalledWith('/app/workflow/wf-99');
   });
@@ -295,7 +313,7 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     render(<NotificationBell />);
     fireEvent.click(screen.getByRole('button', { name: 'title' }));
     fireEvent.click(screen.getByText('triggersTab'));
-    fireEvent.click(screen.getByText('Daily Digest'));
+    fireEvent.click(screen.getByRole('button', { name: 'Daily Digest' }));
 
     expect(pushMock).toHaveBeenCalledWith(
       '/app/workflow/wf-99/run/run_<id>'
@@ -332,8 +350,7 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     fireEvent.click(screen.getByText('triggersTab'));
 
     // The i18n mock returns the bare key for `t('lastRan')` → 'lastRan'.
-    // Asserting the prefix appears in the DOM proves the new subtitle line
-    // rendered (matches the SCHEDULE-only conditional in NotificationBell.tsx).
+    // Asserting the prefix appears in the DOM proves the subtitle line rendered.
     expect(screen.getByText(/lastRan/)).toBeTruthy();
   });
 
@@ -367,11 +384,58 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     expect(screen.getByText(/neverRan/)).toBeTruthy();
   });
 
-  it('Non-SCHEDULE rows (WEBHOOK) do NOT render the lastRan subtitle (Part 1)', () => {
-    // Part 1 explicitly scopes the dual-label to SCHEDULE rows only. Other
-    // trigger kinds keep their existing single-line right label (kind label
-    // or relative-past via lastRunAt) - adding a 2nd line everywhere would
-    // bloat the popover vertical density.
+  it('hovers to a light ground, not to the black tile `ghost` gives it by default', () => {
+    // What the user saw: pointing at the bell turned it into a near-black square with a
+    // pale glyph. `ghost` hovers by INVERTING (`hover:bg-[var(--text-primary)]`), which is
+    // the app's legacy behaviour that dozens of call sites rely on, so the variant is left
+    // alone and this one control overrides it. Measured in a browser: the old pair computed
+    // to rgb(17,24,39) with white text, the new one to rgb(229,231,235) with black.
+    render(<NotificationBell />);
+    const bell = screen.getByRole('button', { name: 'title' });
+
+    expect(bell.className).toContain('hover:bg-surface-hover');
+    expect(bell.className).not.toContain('hover:bg-[var(--text-primary)]');
+  });
+
+  it('a schedule row hands its fire-time column the rule the row menu exports', () => {
+    // The link between two files, asserted where it can actually break. The dots are
+    // revealed ON TOP of this column, so the column has to step aside in exactly the
+    // situations the menu appears in - and the rule that says which those are lives in
+    // TriggerRowActions. Retyping it here would test a copy; reading the export means
+    // deleting the class from the bell fails this, which is the regression it guards.
+    homeStatusMock.current = {
+      ...homeStatusMock.current,
+      automations: [
+        {
+          resourceType: 'WORKFLOW' as const,
+          resourceId: 'wf-sched',
+          name: 'Nightly report',
+          triggerType: 'SCHEDULE' as const,
+          schedule: {
+            cronExpression: '0 3 * * *',
+            timezone: 'UTC',
+            executionCount: 2,
+            scheduleId: 'sched-1',
+            nextFireAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+          },
+        },
+      ],
+    };
+    render(<NotificationBell />);
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+    fireEvent.click(screen.getByText('triggersTab'));
+
+    const column = screen.getByText(/lastRan|neverRan/).closest('span.flex-col')!;
+    for (const token of TRIGGER_ROW_ACTIONS_YIELD.split(/\s+/)) {
+      expect(column.className).toContain(token);
+    }
+  });
+
+  it('a row with no menu keeps its label on hover, because nothing is revealed over it', () => {
+    // Regression: the rule was applied to every row while the button renders only for
+    // schedules. Hovering a webhook row therefore faded its own "Live" badge to nothing and
+    // put no control in its place - a label that vanishes under the pointer, for no reason
+    // the user can see.
     homeStatusMock.current = {
       ...homeStatusMock.current,
       automations: [
@@ -387,8 +451,235 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     fireEvent.click(screen.getByRole('button', { name: 'title' }));
     fireEvent.click(screen.getByText('triggersTab'));
 
+    // The Triggers tab opens filtered to SCHEDULE, so a webhook-only fixture is behind
+    // its chip. (Worth knowing: the older webhook test above passes without this because
+    // it only asserts an ABSENCE, which an empty list satisfies for free.)
+    fireEvent.click(screen.getByRole('button', { name: 'kindLabel.webhook' }));
+
+    const column = screen.getByText('liveBadge').closest('span.flex-col')!;
+    expect(column.className).not.toContain('group-hover:opacity-0');
+  });
+
+  it('WEBHOOK row renders the lastRan line too - every kind answers "when did this last run"', () => {
+    // The line used to be SCHEDULE-only, so a webhook row said "live" and nothing
+    // about its history. A webhook that fired 2 minutes ago now says so, on the
+    // same line shape as every other kind. It costs no row height: the left column
+    // (name + subtitle) is already two lines tall.
+    const twoMinAgo = new Date(Date.now() - 2 * 60_000).toISOString();
+    homeStatusMock.current = {
+      ...homeStatusMock.current,
+      automations: [
+        {
+          resourceType: 'WORKFLOW' as const,
+          resourceId: 'wf-webhook',
+          name: 'Webhook flow',
+          triggerType: 'WEBHOOK' as const,
+          lastRunAt: twoMinAgo,
+          lastRunStatus: 'COMPLETED',
+        },
+      ],
+    };
+    render(<NotificationBell />);
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+    fireEvent.click(screen.getByText('triggersTab'));
+    // The tab opens filtered to SCHEDULE - reach the webhook row through its chip.
+    fireEvent.click(screen.getByRole('button', { name: 'kindLabel.webhook' }));
+
+    // Both the forward-looking "live" badge and the backward-looking last-run line.
+    expect(screen.getByText('liveBadge')).toBeTruthy();
+    expect(screen.getByText(/lastRan/)).toBeTruthy();
+  });
+
+  it('lastRunStatus COMPLETED draws the emerald check the run panel uses; FAILED draws the red cross', () => {
+    // The whole point of the badge: the bell must show the SAME verdict icon as
+    // the epoch row it links to, so the two surfaces cannot disagree. Asserting on
+    // the lucide class names is asserting on EpochStatusIcon's own branches - a
+    // future divergence (a different icon, a different colour) fails here.
+    const twoMinAgo = new Date(Date.now() - 2 * 60_000).toISOString();
+    homeStatusMock.current = {
+      ...homeStatusMock.current,
+      automations: [
+        {
+          resourceType: 'WORKFLOW' as const,
+          resourceId: 'wf-ok',
+          name: 'Good flow',
+          triggerType: 'MANUAL' as const,
+          lastRunAt: twoMinAgo,
+          lastRunStatus: 'COMPLETED',
+        },
+        {
+          resourceType: 'WORKFLOW' as const,
+          resourceId: 'wf-ko',
+          name: 'Broken flow',
+          triggerType: 'MANUAL' as const,
+          lastRunAt: twoMinAgo,
+          lastRunStatus: 'FAILED',
+        },
+      ],
+    };
+    render(<NotificationBell />);
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+    fireEvent.click(screen.getByText('triggersTab'));
+    // The tab opens filtered to SCHEDULE - reach the manual rows through their chip.
+    fireEvent.click(screen.getByRole('button', { name: 'kindLabel.manual' }));
+
+    // The popover renders through a portal, so query the document, not the container.
+    // Asserting on the colour classes EpochStatusIcon itself applies (rather than on
+    // lucide's own class names) keeps the test pinned to OUR verdict-to-icon mapping.
+    expect(document.body.querySelectorAll('svg.text-emerald-500')).toHaveLength(1);
+    expect(document.body.querySelectorAll('svg.text-red-500')).toHaveLength(1);
+    // The icon is aria-hidden, so the verdict also has to exist as a WORD. The i18n mock
+    // echoes keys, so getRunStatusLabel resolves to 'status.completed' / 'status.failed'.
+    expect(document.body.querySelector('[data-last-run-status="COMPLETED"]')?.textContent)
+      .toBe('status.completed');
+    expect(document.body.querySelector('[data-last-run-status="FAILED"]')?.textContent)
+      .toBe('status.failed');
+  });
+
+  it('a WEBHOOK row that has never run shows NO last-run line', () => {
+    // The line speaks about a run. A webhook nobody has called yet has none, and it is not
+    // waiting for one either, so a permanent "Last: -" would be noise. (A SCHEDULE row is the
+    // exception and keeps saying "never" - it IS waiting for a fire that is scheduled.)
+    homeStatusMock.current = {
+      ...homeStatusMock.current,
+      automations: [
+        {
+          resourceType: 'AGENT' as const,
+          resourceId: 'agent-1',
+          name: 'Briefing agent',
+          triggerType: 'WEBHOOK' as const,
+          webhook: { httpMethod: 'POST' },
+        },
+      ],
+    };
+    render(<NotificationBell />);
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+    fireEvent.click(screen.getByText('triggersTab'));
+    fireEvent.click(screen.getByRole('button', { name: 'kindLabel.webhook' }));
+
+    expect(screen.getByText('Briefing agent')).toBeTruthy();
     expect(screen.queryByText(/lastRan/)).toBeNull();
     expect(screen.queryByText(/neverRan/)).toBeNull();
+  });
+
+  it('an AGENT schedule row DOES show its last-run line - the schedule knows when it fired', () => {
+    // Agents have no production run, so they are never badged. They do have a schedule with a
+    // lastExecutionAt, and hiding that would drop information the row used to show.
+    const twoMinAgo = new Date(Date.now() - 2 * 60_000).toISOString();
+    homeStatusMock.current = {
+      ...homeStatusMock.current,
+      automations: [
+        {
+          resourceType: 'AGENT' as const,
+          resourceId: 'agent-2',
+          name: 'Morning briefing',
+          triggerType: 'SCHEDULE' as const,
+          schedule: {
+            cronExpression: '0 7 * * *',
+            timezone: 'UTC',
+            executionCount: 4,
+            nextFireAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+          },
+          lastRunAt: twoMinAgo,
+        },
+      ],
+    };
+    render(<NotificationBell />);
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+    fireEvent.click(screen.getByText('triggersTab'));
+
+    expect(screen.getByText(/lastRan/)).toBeTruthy();
+    // ...and no verdict: there is no epoch behind an agent row to have one.
+    expect(document.body.querySelectorAll('svg.text-emerald-500')).toHaveLength(0);
+    expect(document.body.querySelectorAll('svg.text-red-500')).toHaveLength(0);
+  });
+
+  it('lastRunStatus RUNNING draws the live pulse, not a verdict glyph', () => {
+    // RUNNING is a value the bell never used to receive: an epoch still open under an
+    // executing run. It is also the only one carrying an animation into a popover that
+    // refreshes on a timer, so it is the branch most worth pinning. EpochStatusIcon renders
+    // it as pulsing spans, NOT an <svg> - the check/cross assertions elsewhere cannot see it.
+    const secondsAgo = new Date(Date.now() - 30_000).toISOString();
+    homeStatusMock.current = {
+      ...homeStatusMock.current,
+      automations: [
+        {
+          resourceType: 'WORKFLOW' as const,
+          resourceId: 'wf-live',
+          name: 'Running flow',
+          triggerType: 'MANUAL' as const,
+          lastRunAt: secondsAgo,
+          lastRunStatus: 'RUNNING',
+        },
+      ],
+    };
+    render(<NotificationBell />);
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+    fireEvent.click(screen.getByText('triggersTab'));
+    fireEvent.click(screen.getByRole('button', { name: 'kindLabel.manual' }));
+
+    expect(document.body.querySelectorAll('span.animate-ping').length).toBeGreaterThan(0);
+    expect(document.body.querySelectorAll('svg.text-emerald-500')).toHaveLength(0);
+    expect(document.body.querySelector('[data-last-run-status="RUNNING"]')?.textContent)
+      .toBe('status.running');
+  });
+
+  it('a declared-kind row states its last run ONCE - the top label is the kind icon alone', () => {
+    // The relative time used to be the row's top-right label. It moved into the "Last:" line
+    // with the verdict beside it; leaving a copy behind would print the same timestamp twice,
+    // one of them with no verdict, which reads as two different runs.
+    const twoMinAgo = new Date(Date.now() - 2 * 60_000).toISOString();
+    homeStatusMock.current = {
+      ...homeStatusMock.current,
+      automations: [
+        {
+          resourceType: 'WORKFLOW' as const,
+          resourceId: 'wf-once',
+          name: 'Manual flow',
+          triggerType: 'MANUAL' as const,
+          lastRunAt: twoMinAgo,
+          lastRunStatus: 'COMPLETED',
+        },
+      ],
+    };
+    render(<NotificationBell />);
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+    fireEvent.click(screen.getByText('triggersTab'));
+    fireEvent.click(screen.getByRole('button', { name: 'kindLabel.manual' }));
+
+    // The i18n mock renders a count-carrying key as "N item(s)", which is what
+    // formatRelativePast produces here. It must appear exactly once in the row's right column.
+    const column = screen.getByText(/lastRan/).closest('span.flex-col')!;
+    expect(column.textContent!.match(/item\(s\)/g) ?? []).toHaveLength(1);
+  });
+
+  it('A row whose backend sends no lastRunStatus renders the time with NO verdict icon', () => {
+    // Null is not "unknown status", it is "the backend has nothing honest to say"
+    // (never fired, no production run, an epoch that ran nothing but its trigger).
+    // Drawing any icon there would be an invented verdict - EpochStatusIcon keeps
+    // the slot's width and draws nothing.
+    const twoMinAgo = new Date(Date.now() - 2 * 60_000).toISOString();
+    homeStatusMock.current = {
+      ...homeStatusMock.current,
+      automations: [
+        {
+          resourceType: 'WORKFLOW' as const,
+          resourceId: 'wf-silent',
+          name: 'Silent flow',
+          triggerType: 'MANUAL' as const,
+          lastRunAt: twoMinAgo,
+          // lastRunStatus deliberately omitted
+        },
+      ],
+    };
+    render(<NotificationBell />);
+    fireEvent.click(screen.getByRole('button', { name: 'title' }));
+    fireEvent.click(screen.getByText('triggersTab'));
+    fireEvent.click(screen.getByRole('button', { name: 'kindLabel.manual' }));
+
+    expect(screen.getByText(/lastRan/)).toBeTruthy();
+    expect(document.body.querySelectorAll('svg.text-emerald-500')).toHaveLength(0);
+    expect(document.body.querySelectorAll('svg.text-red-500')).toHaveLength(0);
   });
 
   it('Bell pulses imminent + zero unread → opening lands directly on Activity tab (regression: Issue 1)', () => {
@@ -1181,7 +1472,10 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     expect(screen.getByText('emptyForKind')).toBeTruthy();
   });
 
-  it('Declared-kind row with null lastRunAt renders "-" (never-fired sentinel)', () => {
+  it('Declared-kind row with null lastRunAt says so on the lastRan line (never-fired sentinel)', () => {
+    // The sentinel used to be the row's whole right-hand label. It now lives inside
+    // the "Last:" line - a pinned-but-never-executed workflow still has to say that,
+    // rather than render an empty right column.
     homeStatusMock.current = {
       ...homeStatusMock.current,
       automations: [
@@ -1200,7 +1494,10 @@ describe('NotificationBell - tabs Inbox/Activity', () => {
     // Clear the default SCHEDULE chip - the row under test is a MANUAL one.
     fireEvent.click(screen.getByRole('button', { name: 'kindLabel.schedule', pressed: true }));
 
-    expect(screen.getByText('-')).toBeTruthy();
+    // The i18n mock echoes keys, so the line reads "lastRan" + "neverRan".
+    expect(screen.getByText(/neverRan/)).toBeTruthy();
+    // ...and no verdict icon: there is no run to have a verdict about.
+    expect(document.body.querySelectorAll('svg.text-emerald-500')).toHaveLength(0);
   });
 
   describe('APPROVAL_PENDING inbox actions', () => {

@@ -10,7 +10,7 @@ import { publicationService } from '@/lib/api/orchestrator/publication.service';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
 import { InterfaceThumbnail } from '@/app/workflows/builder/components/interface/InterfaceThumbnail';
 import { resolveInterfaceFormat } from '@/lib/interfaces/interfaceFormats';
-import { mergeTriggerDataIntoResolved } from '@/app/workflows/builder/utils/interfaceHtmlUtils';
+import { resolveShowcaseContent } from '@/lib/interfaces/showcaseResolve';
 import type { InterfaceRenderResult } from '@/lib/api/orchestrator/types';
 
 interface ShowcasePreviewProps {
@@ -180,20 +180,12 @@ export function ShowcasePreview({ runId, interfaceId, className = '', hidePagina
     loadShowcase(0);
   }, [isAuthLoading, isVisible, loadShowcase, publicationId, authenticated]);
 
-  // Get the resolved HTML or data for the current item
-  const { effectiveHtml, resolvedData } = useMemo(() => {
-    if (!renderResult?.items?.length) return { effectiveHtml: undefined, resolvedData: undefined };
-    const currentItem = renderResult.items[0];
-    const itemData = currentItem.data || {};
-    // If backend returned fully resolved HTML, use it directly
-    if (itemData._resolvedHtml) {
-      const html = itemData._resolvedHtml as string;
-      return { effectiveHtml: html, resolvedData: undefined };
-    }
-    // Merge triggerData into resolvedData for template variables like {{trigger:name.output.field}}
-    const merged = mergeTriggerDataIntoResolved(itemData, triggerData);
-    return { effectiveHtml: undefined, resolvedData: merged };
-  }, [renderResult, triggerData]);
+  // Get the resolved HTML or data for the current item. Shared with the public
+  // listing page, which resolves the same frozen showcase on the server.
+  const { effectiveHtml, resolvedData, mode: thumbnailMode } = useMemo(
+    () => resolveShowcaseContent(renderResult?.items, triggerData),
+    [renderResult, triggerData],
+  );
 
   // Epoch nav: page 0 = newest. handleNewer decrements, handleOlder increments.
   const handleNewer = () => {
@@ -244,18 +236,10 @@ export function ShowcasePreview({ runId, interfaceId, className = '', hidePagina
               htmlTemplate={effectiveHtml || renderResult!.htmlTemplate}
               customCss={renderResult!.cssTemplate || undefined}
               jsTemplate={renderResult!.jsTemplate || undefined}
-              resolvedData={
-                effectiveHtml || !resolvedData || Object.keys(resolvedData).length === 0
-                  ? undefined
-                  : resolvedData
-              }
+              resolvedData={resolvedData}
               // Pre-resolved HTML must render in run mode so {{var|default}} stays untouched.
               // Otherwise edit mode rewrites placeholders to [var] and breaks the snapshot.
-              mode={
-                effectiveHtml || (resolvedData && Object.keys(resolvedData).length > 0)
-                  ? 'run'
-                  : 'edit'
-              }
+              mode={thumbnailMode}
               fit="contain"
               // The interface's own shape, carried by the published render. The 16:10 box stays
               // (a uniform card grid); the thumbnail letterboxes inside it, so a vertical

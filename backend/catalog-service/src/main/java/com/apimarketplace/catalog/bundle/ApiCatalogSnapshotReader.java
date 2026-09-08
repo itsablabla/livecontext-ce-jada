@@ -102,6 +102,7 @@ public class ApiCatalogSnapshotReader {
                        a.visibility, a.is_public, a.is_active, a.is_local, a.pricing_model,
                        a.status, a.version, a.icon_slug, a.platform_credential_name,
                        a.icon_url, a.api_version, a.documentation, a.rate_limits::text AS rate_limits,
+                       a.error_policy::text AS error_policy,
                        c.name AS category_name, c.slug AS category_slug,
                        s.name AS subcategory_name, s.slug AS subcategory_slug
                   FROM catalog.apis a
@@ -239,7 +240,7 @@ public class ApiCatalogSnapshotReader {
                     bool(r, "is_local"), str(r, "pricing_model"), str(r, "status"),
                     str(r, "version"), str(r, "icon_slug"), str(r, "platform_credential_name"),
                     str(r, "icon_url"), str(r, "api_version"), str(r, "documentation"),
-                    str(r, "rate_limits"),
+                    str(r, "rate_limits"), str(r, "error_policy"),
                     toolsByApi.getOrDefault(apiId, List.of())));
         }
 

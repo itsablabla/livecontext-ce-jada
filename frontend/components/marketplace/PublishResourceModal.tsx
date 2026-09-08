@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useTranslations } from 'next-intl';
 import { publicationService } from '@/lib/api/orchestrator/publication.service';
+import { track } from '@/lib/analytics/analytics';
 import { interfaceService } from '@/lib/api/orchestrator/interface.service';
 import type { Interface, ResourceType } from '@/lib/api/orchestrator/types';
 import { InterfacePreview } from '@/components/marketplace/InterfacePreview';
@@ -103,6 +104,14 @@ export default function PublishResourceModal({
       // Force price=0 while paid templates are disabled - UX backstop for the
       // greyed input; backend rejects independently.
       const effectivePrice = PAID_TEMPLATES_ENABLED ? price : 0;
+      track('publication_submitted', {
+        resource_type: resourceType,
+        resource_id: resourceId,
+        visibility: 'PUBLIC',
+        credits_per_use: effectivePrice,
+        has_category: Boolean(categoryId),
+        has_interface: requiresLandingPicker ? Boolean(interfaceId) : true,
+      });
       await publicationService.publishResource({
         type: resourceType,
         resourceId,
@@ -115,10 +124,16 @@ export default function PublishResourceModal({
         publisherName: publisherName,
         publisherEmail: publisherEmail,
       });
+      track('publication_result', { outcome: 'success', resource_type: resourceType, visibility: 'PUBLIC' });
       if (!mountedRef.current) return;
       setState('success');
       onSuccess?.();
     } catch (err: any) {
+      track('publication_result', {
+        outcome: 'error',
+        resource_type: resourceType,
+        reason: typeof err?.status === 'number' ? `http_${err.status}` : 'unknown',
+      });
       if (!mountedRef.current) return;
       setError(err.message || t('publishError'));
       setState('error');

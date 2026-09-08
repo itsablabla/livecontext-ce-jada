@@ -70,6 +70,18 @@ export interface ActiveAutomationSchedule {
   /** ISO-8601. Precomputed server-side from the cron expression - render directly. */
   nextFireAt?: string;
   executionCount: number;
+  /**
+   * The `scheduled_executions` row id. The bell needed none while it only navigated;
+   * the row actions (run early, open in the agenda) address the SCHEDULE, not the
+   * workflow, so they need this.
+   */
+  scheduleId?: string;
+  /**
+   * Whether the schedule will fire again: enabled AND under its max-executions cap.
+   * Always true on bell rows, which the server filters upstream - the agenda is what
+   * asks for the disabled ones.
+   */
+  armed?: boolean;
 }
 
 export interface ActiveAutomationWebhook {
@@ -91,6 +103,15 @@ export interface ActiveAutomation {
   schedule?: ActiveAutomationSchedule;
   webhook?: ActiveAutomationWebhook;
   lastRunAt?: string;
+  /**
+   * How that last fire ENDED, upper-case, for the badge drawn next to
+   * `lastRunAt`: `COMPLETED`, `FAILED`, `RUNNING`, or a terminal run status
+   * (`CANCELLED` / `TIMEOUT` / ...) when it was killed mid-flight. Absent when
+   * the backend has nothing honest to say (never fired, no production run to
+   * read, or a last epoch that ran nothing but its trigger) - `EpochStatusIcon`
+   * then keeps the slot's width and draws nothing, rather than a guessed verdict.
+   */
+  lastRunStatus?: string;
   /** Workflows / applications carry this; agents do not (no pin concept). */
   isPinned?: boolean;
   /**

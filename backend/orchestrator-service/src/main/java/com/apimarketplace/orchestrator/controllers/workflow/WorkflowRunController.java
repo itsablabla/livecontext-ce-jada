@@ -29,12 +29,14 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -386,16 +388,30 @@ public class WorkflowRunController {
             // Hash is on a deterministic projection (seq + status + currentEpoch) - outputs are
             // explicitly excluded since they're volatile and would defeat the cache.
             int currentEpochForEtag = 0;
+            // Open epochs join the hash. They are their own fact, not implied by seq: an epoch
+            // opening or closing is what the client reads to decide whether a restart targeting
+            // an OLDER epoch can be offered, and a body cached across that transition would keep
+            // answering with the previous set.
+            Set<Integer> activeEpochsForEtag = new TreeSet<>();
             for (DagState dag : dbSnapshot.getDags().values()) {
                 currentEpochForEtag = Math.max(currentEpochForEtag, dag.getCurrentEpoch());
+                activeEpochsForEtag.addAll(dag.getActiveEpochs());
             }
+            // Both values are computed once, here, and reused by the body below: the response
+            // ships exactly what the hash was taken over, so the two can never describe
+            // different snapshots of the same read.
+            final int currentEpoch = currentEpochForEtag;
+            final Set<Integer> activeEpochs = activeEpochsForEtag;
             // lastCycleResult is in the hash because it is written OUTSIDE the seq bump that
             // carries the work: reconcileSbsRunStatus stamps run.metadata after the last node
             // completion has already advanced seq. A client that polls in that window caches the
             // response, and the verdict landing a moment later changes nothing the hash can see,
             // so the next poll 304s and the badge keeps showing the PREVIOUS cycle's outcome.
             String hashInput = seq + "|" + state.status() + "|" + currentEpochForEtag
-                    + "|" + (lastCycleResult != null ? lastCycleResult : "-");
+                    + "|" + (lastCycleResult != null ? lastCycleResult : "-")
+                    // TreeSet, so the projection is deterministic: DagState.getActiveEpochs()
+                    // hands back a Set.copyOf, whose iteration order is randomized per JVM.
+                    + "|" + activeEpochsForEtag;
             String etagBody;
             try {
                 java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
@@ -418,11 +434,14 @@ public class WorkflowRunController {
                         .build();
             }
 
-            // Read epoch data: currentEpoch from StateSnapshot, timestamps from workflow_epochs table
-            int currentEpoch = 0;
-            for (DagState dag : dbSnapshot.getDags().values()) {
-                currentEpoch = Math.max(currentEpoch, dag.getCurrentEpoch());
-            }
+            // currentEpoch and activeEpochs were computed above, for the ETag; timestamps come
+            // from workflow_epochs. `activeEpochs` is the same union the WS snapshot publishes,
+            // sent on this path too because a client that has not yet received a snapshot would
+            // otherwise read "nothing is executing" from an empty list - the answer a targeted
+            // epoch replay is refused on (rerunFromStep declines to reopen an older epoch while
+            // a sibling of the same DAG is still running). It is a TreeSet, so the array is as
+            // deterministic as the hash that covers it: DagState.getActiveEpochs() hands back a
+            // Set.copyOf whose iteration order is randomized per JVM.
             var epochTimestamps = workflowEpochService.listEpochTimestamps(runId);
 
             // Wrap state + seq in a combined response
@@ -459,6 +478,7 @@ public class WorkflowRunController {
             response.put("interfaces", state.interfaces());
             response.put("seq", seq);
             response.put("currentEpoch", currentEpoch);
+            response.put("activeEpochs", new ArrayList<>(activeEpochs));
 
             // The cycle outcome, as the backend computed it. Shipped ready to display so the
             // client stops deriving its own: it can only see the CUMULATIVE completed/failed
@@ -502,6 +522,36 @@ public class WorkflowRunController {
                 }
                 if (run.getWorkflow() != null) {
                     response.put("budgetCredits", run.getWorkflow().getBudgetCredits());
+                    // The cap is compared against the PERIOD spend, not this
+                    // run's lifetime cost, so seed that figure too - otherwise
+                    // the panel paints "over budget" off the wrong number until
+                    // the first settle of the session corrects it.
+                    //
+                    // Whether the figure applies to THIS run is not decided
+                    // here: it goes through the same
+                    // WorkflowBudgetState.appliesToRun() that counts the spend
+                    // and that both enforcement points refuse on. Re-deriving it
+                    // from the production FK alone (the obvious one-liner, and
+                    // what this used to do) put a fourth copy of the rule in the
+                    // codebase, and a fourth copy is a fourth thing to keep in
+                    // step - this one had already drifted.
+                    var wf = run.getWorkflow();
+                    response.put("budgetPeriodMode",
+                            com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                                    .normaliseMode(wf.getBudgetPeriodMode()));
+                    java.time.Instant budgetNow = java.time.Instant.now();
+                    // When the allowance starts again. Null for a cap that never
+                    // resets, which is the one case the panel must not promise a
+                    // date for.
+                    response.put("budgetPeriodResetsAt",
+                            com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                                    .nextPeriodStart(wf.getBudgetPeriodMode(), budgetNow));
+                    response.put("periodSpentCredits",
+                            workflowRunRepository.findBudgetStateByRunIdPublic(run.getRunIdPublic())
+                                    .filter(com.apimarketplace.orchestrator.services.credit
+                                            .WorkflowBudgetState::appliesToRun)
+                                    .map(budgetState -> budgetState.effectiveSpent(budgetNow))
+                                    .orElse(null));
                 }
             });
 
@@ -770,16 +820,23 @@ public class WorkflowRunController {
                 }
             }
 
-            // ?epoch=N replays that fire of the run instead of the most recent one; the builder
-            // does not send it, so the UI keeps its existing behaviour unchanged.
+            // ?epoch=N replays that fire of the run instead of the default one. The builder sends
+            // it whenever the canvas is reading a single epoch that is not the one the run is
+            // living in, which on a SETTLED run includes the newest EXECUTED epoch (by then
+            // DagState.currentEpoch points at the fire staged for next time). It stays absent on
+            // the all-epochs view. Naming the epoch the default resolution would have picked
+            // reaches the same replay through the explicit branch, plus one extra check: that
+            // the node actually ran in it.
             //
             // Note the pre-existing ordering above: a request that carries a plan has ALREADY had
             // it written to run.plan by the time the rerun is refused (unknown epoch, node not
             // rerunnable, run stopped...). That was true of every refusal before this parameter
-            // existed; the epoch adds more ways to reach it. Left as is deliberately - moving the
-            // plan write after the service call changes what a rerun executes, which is a
-            // separate decision - but a caller combining a plan with an epoch should read the
-            // response before assuming neither took effect.
+            // existed; the epoch adds more ways to reach it, and the builder sends a plan with a
+            // rerun whenever its canvas has one. Left as is deliberately - moving the plan write
+            // after the service call
+            // changes what a rerun executes, which is a separate decision - but a caller
+            // combining a plan with an epoch should read the response before assuming neither
+            // took effect.
             logger.info("Re-running from step: {} for run: {} (planFromPayload={}, epoch={})",
                     stepId, runId, planFromPayload, epoch);
             StepRerunService.RerunResult result =

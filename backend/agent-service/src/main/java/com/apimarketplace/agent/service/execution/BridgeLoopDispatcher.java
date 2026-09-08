@@ -222,10 +222,32 @@ public class BridgeLoopDispatcher {
             null,   // executionId - classify/guardrail are sub-loops within an outer execution, no own id
             null,   // source
             context.reasoningEffort(),  // null for classify/guardrail - effort applies to MAIN turns
-            null    // enabledModules - classify/guardrail run with autoDiscoverTools=false (no tools), so module
-                    // scoping is moot; if that ever changes, null resolves to AgentModuleResolver.NO_CONFIG_MODULES
-                    // (everything except the credit-spending opt-ins), never to the full core tool set
+            resolveEnabledModules(context)
         );
+    }
+
+
+    /**
+     * Module scoping for a CLI session, and the difference between the two "no modules"
+     * spellings matters: {@code CliAgentService.resolveModules} reads {@code null} as
+     * "nobody decided" and expands it to {@code AgentModuleResolver.NO_CONFIG_MODULES}
+     * (table, workflow, files, catalog, ...), while an EMPTY list means "no modules, zero
+     * tools".
+     *
+     * <p>A caller that runs tool-less on the direct path must stay tool-less on the bridge.
+     * Classify and guardrail are exactly that: one turn, {@code tools=null},
+     * {@code autoDiscoverTools=false}, a strict JSON verdict. Sending {@code null} handed
+     * those single-shot judges a mutating platform toolset (write a table row, edit a
+     * workflow, run a paid catalog tool) that the same node never has when it runs on a
+     * plain API - a gap that widened the day an admin could route a billed model here with
+     * a model execution link.
+     *
+     * <p>A caller that DOES bring tools keeps {@code null}, so nothing about a future
+     * tool-carrying loop changes.
+     */
+    private static List<String> resolveEnabledModules(AgentLoopContext context) {
+        boolean toolLess = !context.hasTools() && !context.isAutoDiscoverEnabled();
+        return toolLess ? List.of() : null;
     }
 
     /**

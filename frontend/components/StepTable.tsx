@@ -50,6 +50,13 @@ interface StepTableProps {
   runId: string;
   className?: string;
   onStepClick?: (step: WorkflowStep) => void;
+  /**
+   * The aggregated steps this table just loaded, handed to the parent so it does not have to
+   * fetch them a second time. The aggregation is the single most expensive read of the Logs
+   * modal on a run with many epochs, and the modal used to issue it twice on every open: once
+   * here, once in the parent to resolve the step it was asked to pre-select.
+   */
+  onStepsLoaded?: (steps: WorkflowStep[]) => void;
   onAddAnalyzeBadges?: (ids: string[], type: 'data' | 'workflow') => void; // Callback to add badges directly
   onAnalyzeClick?: () => void; // Callback to close modal after analyze
 }
@@ -59,6 +66,7 @@ export default function StepTable({
   runId,
   className = '',
   onStepClick,
+  onStepsLoaded,
   onAddAnalyzeBadges,
   onAnalyzeClick
 }: StepTableProps) {
@@ -67,6 +75,11 @@ export default function StepTable({
 
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
   const [loading, setLoading] = useState(true);
+  // Held in a ref, and deliberately NOT a dependency of fetchSteps: the load effect below keys on
+  // that callback's identity, so an inline parent lambda would re-arm it on every parent render
+  // and the table would refetch in a loop.
+  const onStepsLoadedRef = useRef(onStepsLoaded);
+  onStepsLoadedRef.current = onStepsLoaded;
   const [error, setError] = useState<string | null>(null);
   const [selectedSteps, setSelectedSteps] = useState<Set<string | number>>(new Set());
   const [showDeleteStepsModal, setShowDeleteStepsModal] = useState(false);
@@ -74,6 +87,10 @@ export default function StepTable({
   // Chargement des steps agrégés
   // Note: Uses orchestratorApi which goes through Gateway (not direct localhost calls)
   const fetchSteps = useCallback(async () => {
+    // Deliberately does NOT report to onStepsLoaded, unlike every other exit below: the load effect
+    // already returns on a falsy runId before calling this, so the branch is unreachable and a
+    // report here would be dead code that reads as covered. Wire a new caller (a retry button, say)
+    // and this stops being true - report from it then.
     if (!runId) {
       setSteps([]);
       setLoading(false);
@@ -91,6 +108,7 @@ export default function StepTable({
       if (!aggregatedData || !Array.isArray(aggregatedData)) {
         console.warn('Empty or invalid aggregated steps response:', aggregatedData);
         setSteps([]);
+        onStepsLoadedRef.current?.([]);
         return;
       }
 
@@ -107,10 +125,15 @@ export default function StepTable({
       }));
 
       setSteps(transformedSteps);
+      onStepsLoadedRef.current?.(transformedSteps);
     } catch (err) {
       console.error('Error fetching aggregated steps:', err);
       setError('Failed to load steps');
       setSteps([]);
+      // The parent is told about the failure too, exactly as its own (now deleted) request did:
+      // leaving it on the previous attempt's rows would let a stale step be auto-selected behind
+      // a table that is showing "Failed to load steps".
+      onStepsLoadedRef.current?.([]);
       // Utiliser addToast seulement en cas d'erreur réelle
       if (err instanceof Error && !err.message.includes('404')) {
         addToast({

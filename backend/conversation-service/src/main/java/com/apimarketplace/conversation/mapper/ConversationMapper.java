@@ -41,6 +41,7 @@ public class ConversationMapper {
         dto.setApprovedServices(conversation.getApprovedServices());
         dto.setShareToken(conversation.getShareToken());
         dto.setShareMode(conversation.getShareMode());
+        dto.setKind(conversation.getKind());
         dto.setMemoryEnabled(conversation.getMemoryEnabled());
         dto.setChatConfig(conversation.getChatConfig());
         dto.setCompactionMarker(buildCompactionMarker(conversation.getSummaryCold()));
@@ -110,6 +111,11 @@ public class ConversationMapper {
         if (dto.getActive() != null) {
             conversation.setActive(dto.getActive());
         }
+        // The kind is deliberately absent from this list, and adding it here would be the bug.
+        // It is decided when the row is created and never written again: the two kinds hold
+        // different message shapes and are dispatched to different back ends. A change is REFUSED
+        // upstream in ConversationCommandService#updateConversation rather than ignored here, so a
+        // caller attempting one is told instead of getting a silent no-op.
         if (dto.getMemoryEnabled() != null) {
             conversation.setMemoryEnabled(dto.getMemoryEnabled());
         }

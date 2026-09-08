@@ -1229,6 +1229,79 @@ class StepRerunServiceTest {
         }
 
         @Test
+        @DisplayName("Naming the epoch the default would have picked keeps writing the pointer")
+        void namingTheDefaultEpochStillSyncsTheDagEpochPointer() {
+            // The canvas restart on a SETTLED run lands exactly here: the cycle closed, so
+            // DagState.currentEpoch points at the dormant staged fire, the last executed epoch
+            // reads as "not the live one", and the client names it. The replay DOES reopen (the
+            // snapshot is not on that epoch), and it is still the same epoch the epoch-less path
+            // would have resolved to - so the pointer has to be written, exactly as the default
+            // does. Keyed on the reopen alone this skipped the write and left the pointer stale.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            setupRerunMocks(buildLinearPlan(), run, closedCycleSnapshot("mcp:step_b"));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(EXECUTED_EPOCH);
+            // Its own header, listing the TARGET: naming an epoch adds a check the default path
+            // skips (the node must have run in it), and the shared helper's header stops at
+            // mcp:step_a. That extra check is the one real difference between the two paths.
+            //
+            // Scope note: on a settled run the pointer already equals the epoch being named, so
+            // writing and skipping leave the same value and this test cannot tell them apart on
+            // its own. It pins the SHAPE (a reopen still writes); the case where the two differ
+            // - the pointer strictly below the replayed epoch - is
+            // namingTheCurrentEpochStillSyncsTheDagEpochPointer, and that one does fail
+            // pre-change.
+            when(mockEpochService.getFullEpochState("run-1", TRIGGER, EXECUTED_EPOCH)).thenReturn(
+                EpochState.fresh().markNodeCompleted(TRIGGER)
+                    .markNodeCompleted("mcp:step_a").markNodeCompleted("mcp:step_b"));
+
+            service.rerunFromStep("run-1", "mcp:step_b", false, EXECUTED_EPOCH);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> after = (Map<String, Object>) run.getMetadata().get("dagLastEpoch");
+            assertEquals(EXECUTED_EPOCH, after.get(TRIGGER),
+                "context loading filters by this epoch - drifting it is what empties the templates");
+        }
+
+        @Test
+        @DisplayName("An epoch-LESS rerun writes the pointer even when it syncs DOWN to the snapshot")
+        void defaultPathWritesThePointerEvenSyncingDown() {
+            // The default path resolves its own epoch and can land BELOW metadata.dagLastEpoch:
+            // step 5b syncs to DagState.currentEpoch whenever the two disagree, and a targeted
+            // older-epoch replay earlier on this run is exactly what moves DagState.currentEpoch
+            // backward while the pointer stays high. Skipping the write there leaves execution
+            // running in the synced epoch while RunContextService loads context from the stale
+            // pointer: every upstream template reads another fire's rows, on a green run.
+            //
+            // So the skip is keyed on the CALLER having chosen an epoch as well as on the move
+            // being backward. Keyed on the direction alone, this test fails.
+            WorkflowRunEntity run = createRunEntity(RunStatus.RUNNING);
+            Map<String, Object> pointer = new HashMap<>();
+            pointer.put(TRIGGER, 8);
+            run.getMetadata().put("dagLastEpoch", pointer);
+            // Epoch 5 is ACTIVE, so this is a plain sync - no reopen, no header lookup.
+            EpochState live = EpochState.fresh()
+                .markNodeCompleted(TRIGGER)
+                .markNodeCompleted("mcp:step_a")
+                .markNodeCompleted("mcp:step_b");
+            DagState dag = new DagState(5, 0, 6, Map.of(5, live), Set.of(5));
+            Map<String, StateSnapshot.NodeCounts> nodes = new HashMap<>();
+            for (String node : List.of("mcp:step_a", "mcp:step_b", "mcp:step_c")) {
+                nodes.put(node, StateSnapshot.NodeCounts.zero().increment("COMPLETED"));
+            }
+            setupRerunMocks(buildLinearPlan(), run, new StateSnapshot(3, 5L, Map.of(TRIGGER, dag),
+                null, null, null, null, null, nodes, new HashMap<>(),
+                null, null, null, null, null, null));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(8);
+
+            service.rerunFromStep("run-1", "mcp:step_b");
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> after = (Map<String, Object>) run.getMetadata().get("dagLastEpoch");
+            assertEquals(5, after.get(TRIGGER),
+                "the epoch that will EXECUTE is 5 - context loading has to be filtered on it");
+        }
+
+        @Test
         @DisplayName("Falls back to the dormant epoch when no epoch header exists (legacy run)")
         void fallsBackToDormantEpochWithoutHeader() {
             WorkflowRunEntity run = createRunEntity(RunStatus.COMPLETED);
@@ -1619,6 +1692,41 @@ class StepRerunServiceTest {
         }
 
         @Test
+        @DisplayName("Naming the epoch the DAG is ALREADY on syncs the pointer, exactly as omitting it does")
+        void namingTheCurrentEpochStillSyncsTheDagEpochPointer() {
+            // Reopening nothing means replaying exactly what the default resolution would have
+            // replayed, so the same metadata has to be left behind. Skipping the sync on the
+            // mere fact that an epoch was NAMED left dagLastEpoch stale here, and a later fire
+            // of this DAG counts from it (nextEpoch = it + 1) - so it would reuse a number that
+            // already has history. Reachable from any caller that names a DAG's current epoch,
+            // which is what a client comparing against a RUN-wide epoch does on a multi-trigger
+            // run: it takes the max across DAGs and cannot see that this DAG is behind it.
+            // The pointer sits BELOW the epoch being replayed. That disagreement is a real
+            // state, not a contrived one: the metadata pointer and the snapshot are two stores,
+            // and rerunFromStep carries an explicit branch for exactly this ("Epoch mismatch:
+            // dagLastEpoch=..., snapshot.currentEpoch=..."). It is also what makes the
+            // assertion able to FAIL: with the pointer already equal to the replayed epoch,
+            // skipping the write and performing it are indistinguishable.
+            WorkflowRunEntity run = createRunEntity(RunStatus.WAITING_TRIGGER);
+            Map<String, Object> stalePointer = new HashMap<>();
+            stalePointer.put(TRIGGER, OLD_EPOCH);
+            run.getMetadata().put("dagLastEpoch", stalePointer);
+            setupRerunMocks(buildLinearPlan(), run, settledSnapshot(Set.of()));
+            when(mockTriggerEpochManager.getGlobalEpochForDag("run-1", TRIGGER)).thenReturn(OLD_EPOCH);
+
+            // LATEST_EPOCH is the epoch the DAG is already on, so nothing is reopened.
+            service.rerunFromStep("run-1", "mcp:step_b", false, LATEST_EPOCH);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> after = (Map<String, Object>) run.getMetadata().get("dagLastEpoch");
+            assertEquals(LATEST_EPOCH, after.get(TRIGGER),
+                "no reopen happened, so the pointer must track the epoch that ran - forward from a "
+                + "pointer that had fallen behind it");
+            verify(mockStateSnapshotService, never()).reopenEpochResetDagAndSetReady(
+                anyString(), anyString(), anyInt(), any(), anySet(), anyString());
+        }
+
+        @Test
         @DisplayName("Leaves metadata.dagLastEpoch alone: the next fire must keep counting forward")
         void doesNotRegressTheDagEpochPointer() {
             // dagLastEpoch is what the next cycle counts from (nextEpoch = it + 1). Pointing it at
@@ -1653,7 +1761,12 @@ class StepRerunServiceTest {
             IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> service.rerunFromStep("run-1", "mcp:step_b", false, 99));
 
-            assertTrue(error.getMessage().contains("does not exist"), error.getMessage());
+            // "cannot be restarted on its own", not "does not exist": the same null header also
+            // covers a run whose epoch record was never written, and that caller DOES see the
+            // epoch in the listing (it is built from counter rows, which survive without a
+            // header). Telling them it does not exist sends them back to a list that shows it.
+            assertTrue(error.getMessage().contains("cannot be restarted on its own"), error.getMessage());
+            assertTrue(error.getMessage().contains("no restorable record"), error.getMessage());
             assertTrue(error.getMessage().contains("get_run"), "the message must say where to read the real epochs");
             verify(mockStateSnapshotService, never()).reopenEpochResetDagAndSetReady(
                 anyString(), anyString(), anyInt(), any(), anySet(), anyString());
@@ -1868,7 +1981,9 @@ class StepRerunServiceTest {
             IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> service.rerunFromStep("run-1", "mcp:step_b", false, stagedEpoch));
 
-            assertTrue(error.getMessage().contains("does not exist"), error.getMessage());
+            // The staged epoch has no header either (staging writes none), so it lands on the
+            // same refusal as an epoch the run never had.
+            assertTrue(error.getMessage().contains("cannot be restarted on its own"), error.getMessage());
             verify(mockStateSnapshotService, never()).resetDagAndSetReady(
                 anyString(), anySet(), anyString(), anyString(), anyInt());
         }

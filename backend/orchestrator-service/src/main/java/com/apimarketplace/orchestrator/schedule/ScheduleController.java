@@ -70,6 +70,34 @@ public class ScheduleController {
         return headerOrgId;
     }
 
+    /**
+     * Refuse an org VIEWER on a write, returning the 403 body when they must be stopped and
+     * null when they may proceed.
+     *
+     * <p>Separate from {@link #guardWorkflowScope}, which every endpoint including the reads
+     * goes through: scope answers "may this caller see this workflow", role answers "may
+     * they change it". Conflating them would lock a VIEWER out of reads they are entitled to.
+     *
+     * <p>Added because gating the agenda's own writes was not enough. This controller
+     * exposes the same operations on the same rows, so a read-only member refused at
+     * {@code /api/agenda/schedules/{id}/run-now} could still POST
+     * {@code /schedule/execute-now/{triggerId}} here and start the identical credit-spending
+     * run, or DELETE the schedule. A gate on one of two doors into the same room is not a
+     * gate - the third time that shape has appeared in this feature.
+     *
+     * <p>Only applies inside an organization workspace; a personal workspace has no roles.
+     */
+    private ResponseEntity<?> refuseViewer(String orgRole, String orgId, String tenantId, String action) {
+        if (orgId != null && orgRole != null && "VIEWER".equalsIgnoreCase(orgRole.trim())) {
+            logger.warn("OrgAccess denied: VIEWER user {} attempted to {} in org {}",
+                    tenantId, action, orgId);
+            return ResponseEntity.status(403)
+                    .body(Map.of("success", false, "reason", "VIEWER_ROLE",
+                            "error", "VIEWER role cannot modify schedules"));
+        }
+        return null;
+    }
+
     private ResponseEntity<?> guardWorkflowScope(UUID workflowId, String tenantId, String orgId) {
         if (tenantId == null || tenantId.isBlank()) {
             return ResponseEntity.status(401).body(Map.of("error", "Missing X-User-ID"));
@@ -162,11 +190,14 @@ public class ScheduleController {
             @PathVariable String triggerId,
             @RequestBody ToggleRequest request,
             @RequestHeader(value = "X-User-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Organization-ID", required = false) String orgId) {
+            @RequestHeader(value = "X-Organization-ID", required = false) String orgId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole) {
         try {
             UUID id = UUID.fromString(workflowId);
             ResponseEntity<?> scopeBlock = guardWorkflowScope(id, tenantId, orgId);
             if (scopeBlock != null) return scopeBlock;
+            ResponseEntity<?> roleBlock = refuseViewer(orgRole, orgId, tenantId, "pause or resume a schedule");
+            if (roleBlock != null) return roleBlock;
             WorkflowEntity workflow = workflowRepository.findById(id).orElse(null);
             ScheduledExecutionDto schedule = triggerClient.getScheduleByWorkflowAndTrigger(
                     id, triggerId, scheduleOrganizationId(workflow, orgId));
@@ -195,11 +226,14 @@ public class ScheduleController {
             @PathVariable String workflowId,
             @PathVariable String triggerId,
             @RequestHeader(value = "X-User-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Organization-ID", required = false) String orgId) {
+            @RequestHeader(value = "X-Organization-ID", required = false) String orgId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole) {
         try {
             UUID id = UUID.fromString(workflowId);
             ResponseEntity<?> scopeBlock = guardWorkflowScope(id, tenantId, orgId);
             if (scopeBlock != null) return scopeBlock;
+            ResponseEntity<?> roleBlock = refuseViewer(orgRole, orgId, tenantId, "run a schedule now");
+            if (roleBlock != null) return roleBlock;
             WorkflowEntity workflow = workflowRepository.findById(id).orElse(null);
             ScheduledExecutionDto schedule = triggerClient.getScheduleByWorkflowAndTrigger(
                     id, triggerId, scheduleOrganizationId(workflow, orgId));
@@ -243,9 +277,12 @@ public class ScheduleController {
             @RequestBody ScheduleCreateRequest body,
             @RequestHeader("X-User-ID") String tenantId,
             @RequestHeader(value = "X-Organization-ID", required = false) String orgId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole,
             @RequestHeader(value = "X-User-Plan", required = false) String userPlan) {
         try {
             UUID id = UUID.fromString(workflowId);
+            ResponseEntity<?> roleBlock = refuseViewer(orgRole, orgId, tenantId, "create or edit a schedule");
+            if (roleBlock != null) return roleBlock;
 
             // Pin gate - schedules follow the live toggle. See class-level contract.
             WorkflowEntity workflow = workflowRepository.findById(id).orElse(null);
@@ -305,11 +342,14 @@ public class ScheduleController {
     public ResponseEntity<?> deleteAllSchedules(
             @PathVariable String workflowId,
             @RequestHeader(value = "X-User-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Organization-ID", required = false) String orgId) {
+            @RequestHeader(value = "X-Organization-ID", required = false) String orgId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole) {
         try {
             UUID id = UUID.fromString(workflowId);
             ResponseEntity<?> scopeBlock = guardWorkflowScope(id, tenantId, orgId);
             if (scopeBlock != null) return scopeBlock;
+            ResponseEntity<?> roleBlock = refuseViewer(orgRole, orgId, tenantId, "delete schedules");
+            if (roleBlock != null) return roleBlock;
             int archived = triggerClient.archiveSchedulesByWorkflow(id, "USER_DELETED");
             return ResponseEntity.ok(Map.of("success", true, "archived", archived));
         } catch (Exception e) {
@@ -326,11 +366,14 @@ public class ScheduleController {
             @PathVariable String workflowId,
             @PathVariable String triggerId,
             @RequestHeader(value = "X-User-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Organization-ID", required = false) String orgId) {
+            @RequestHeader(value = "X-Organization-ID", required = false) String orgId,
+            @RequestHeader(value = "X-Organization-Role", required = false) String orgRole) {
         try {
             UUID id = UUID.fromString(workflowId);
             ResponseEntity<?> scopeBlock = guardWorkflowScope(id, tenantId, orgId);
             if (scopeBlock != null) return scopeBlock;
+            ResponseEntity<?> roleBlock = refuseViewer(orgRole, orgId, tenantId, "delete a schedule");
+            if (roleBlock != null) return roleBlock;
             WorkflowEntity workflow = workflowRepository.findById(id).orElse(null);
             ScheduledExecutionDto schedule = triggerClient.getScheduleByWorkflowAndTrigger(
                     id, triggerId, scheduleOrganizationId(workflow, orgId));

@@ -1045,4 +1045,30 @@ class SummarizeNodeTest {
             }
         };
     }
+
+    @Test
+    @DisplayName("A blank input fails with the configuration still reported, `input` under the plan's key name")
+    @SuppressWarnings("unchecked")
+    void blankInputReportsAggregationCountUnderPlanKeyName() {
+        Core.SummarizeConfig config = new Core.SummarizeConfig(
+            List.of(new Core.SummarizeAggregation("score", "sum", "total")),
+            List.of(),
+            "  ");
+        SummarizeNode node = new SummarizeNode("core:summarize", config);
+
+        NodeExecutionResult result = node.execute(context);
+
+        assertFalse(result.isSuccess());
+        Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+        // `input` IS a plan key (Core.SummarizeConfig.input), and the node used to
+        // report it as `input_expression` - a second name for one setting, which the
+        // inspector had no label for and the alignment check read as "not reported".
+        assertEquals("  ", params.get("input"));
+        assertFalse(params.containsKey("input_expression"));
+        // `aggregation_count` is NOT a plan key (the plan has `aggregations`), so the
+        // plan-name rule does not reach it and it keeps the spelling of its sibling
+        // counter `input_count`. Pinned so a future pass does not rename it for
+        // symmetry and break {{core:x.input.aggregation_count}} for nothing.
+        assertEquals(1, params.get("aggregation_count"));
+    }
 }

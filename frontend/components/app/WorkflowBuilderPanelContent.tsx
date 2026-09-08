@@ -47,14 +47,26 @@ interface WorkflowBuilderPanelContentProps {
    */
   planOverride?: any;
   /**
-   * The workflow is the caller's to change. False on a surface that resolved to
-   * SOMEONE ELSE's workflow - the application panel does, for a publication the
-   * caller has not acquired. It drops the canvas' edit/run toggle AND the
-   * Share / Save / Run bar: the workflow stays readable and the application
-   * stays interactive, but nothing offers an action that would be refused.
-   * Defaults to true, the answer for every surface inside the caller's tenant.
+   * The workflow is the caller's to change. The application panel says otherwise
+   * in two cases: a publication the caller does not own (which resolves to
+   * SOMEONE ELSE's workflow) and an INSTALLED application, whose clone lives in
+   * the caller's own tenant but is frozen - the backend refuses every plan write
+   * on it. It drops the canvas' edit/run toggle, the Share / Save / Run bar and
+   * the node palette: the workflow stays readable and the application stays
+   * interactive, but nothing offers an action that would be refused. Defaults to
+   * true, the answer for a workflow the caller reached as a workflow.
    */
   canEditWorkflow?: boolean;
+  /**
+   * Workflows REACHED from this one (a sub-workflow node) are the caller's to change.
+   * Separate from {@link canEditWorkflow}, because the two differ exactly where this
+   * panel is showing an installed application: its own plan is frozen, while the
+   * sub-workflows it calls were cloned as ordinary WORKFLOW rows and are writable.
+   * The other direction is what this exists for: on SOMEONE ELSE's publication every
+   * reachable workflow belongs to the publisher, and a child tab that defaulted to
+   * "editable" offered a Save on it. Inherited by each tab it opens.
+   */
+  canEditRelatedWorkflows?: boolean;
 }
 
 /**
@@ -95,7 +107,7 @@ function BindCanvasToRun({
   return null;
 }
 
-export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = false, applicationFirst, initialApplicationConfigs, applicationTemplateSource, planOverride, canEditWorkflow = true }: WorkflowBuilderPanelContentProps) {
+export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = false, applicationFirst, initialApplicationConfigs, applicationTemplateSource, planOverride, canEditWorkflow = true, canEditRelatedWorkflows = true }: WorkflowBuilderPanelContentProps) {
   const sidePanel = useSidePanelSafe();
   const canvasNodesRef = useRef<Node<BuilderNodeData>[]>([]);
   /**
@@ -265,9 +277,16 @@ export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = fals
 
   // ── Listen for sub-workflow open requests ──
   useEffect(() => {
-    const handler = async (event: CustomEvent<{ workflowId: string; workflowName: string; nodeId: string }>) => {
-      const { workflowId: subWfId, workflowName: wfName } = event.detail;
+    const handler = async (event: CustomEvent<{ workflowId: string; workflowName: string; nodeId: string; sourceWorkflowId?: string }>) => {
+      const { workflowId: subWfId, workflowName: wfName, sourceWorkflowId } = event.detail;
       if (!sidePanel || !subWfId) return;
+      // Answer only for the canvas that asked. Every listener sits on `window` and
+      // they all build the same tab id, so an unaddressed request is answered by
+      // all of them and the last to resolve its pinned run overwrites the others -
+      // which would let a workflow tab mounted elsewhere re-open this sub-workflow
+      // editable, over the locked one this panel just opened. Refuses only a
+      // request that names a DIFFERENT source, so an unaddressed one still works.
+      if (sourceWorkflowId && sourceWorkflowId !== workflowId) return;
 
       let pinnedRunId: string | undefined;
       try {
@@ -280,17 +299,25 @@ export function WorkflowBuilderPanelContent({ workflowId, runId, readOnly = fals
           id: workflowPanelTabId(subWfId, pinnedRunId),
           label: wfName,
           icon: React.createElement(Workflow, { className: 'w-4 h-4' }),
-          content: React.createElement(WorkflowBuilderPanelContent, { workflowId: subWfId, runId: pinnedRunId, readOnly }),
+          content: React.createElement(WorkflowBuilderPanelContent, {
+            workflowId: subWfId,
+            runId: pinnedRunId,
+            readOnly,
+            canEditWorkflow: canEditRelatedWorkflows,
+            canEditRelatedWorkflows,
+          }),
           preferredWidth: 0.5,
           keepMounted: true,
         });
       } else {
-        openWorkflowBuilderTab(sidePanel, { workflowId: subWfId, workflowName: wfName, readOnly });
+        openWorkflowBuilderTab(sidePanel, {
+          workflowId: subWfId, workflowName: wfName, readOnly, canEditWorkflow: canEditRelatedWorkflows,
+        });
       }
     };
     window.addEventListener('workflowOpenSubWorkflow', handler as EventListener);
     return () => window.removeEventListener('workflowOpenSubWorkflow', handler as EventListener);
-  }, [sidePanel, readOnly]);
+  }, [sidePanel, readOnly, canEditRelatedWorkflows, workflowId]);
 
   return (
     <WorkflowModeProvider

@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { apiClient } from '@/lib/api';
 import { CE_STATUS_API_PATH } from '@/components/security/onboardingStatus';
 import { isCeFirstRun, type CeFirstRunStatus } from '@/lib/auth/ceFirstRun';
+import { track } from '@/lib/analytics/analytics';
 
 export default function RegisterPage() {
   const t = useTranslations('auth.register');
@@ -89,12 +90,14 @@ export default function RegisterPage() {
     const result = await embeddedRegister(email, password, firstName, lastName);
 
     if (result.success) {
+      // Tracked before the reload, which would drop a later call.
+      track('auth_registered', { method: 'password', first_run: firstRun });
       window.location.href = returnTo;
     } else {
       setError(result.error || t('error'));
       setLoading(false);
     }
-  }, [email, password, confirmPassword, firstName, lastName, t, returnTo]);
+  }, [email, password, confirmPassword, firstName, lastName, t, returnTo, firstRun]);
 
   if (IS_CLOUD) {
     return (

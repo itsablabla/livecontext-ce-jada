@@ -170,4 +170,57 @@ class HtmlExtractNodeTest {
         NodeExecutionResult result = node.execute(context);
         assertFalse(result.isSuccess());
     }
+
+    @Test
+    @DisplayName("The success path reports its configuration under the plan's key names")
+    @SuppressWarnings("unchecked")
+    void successPathReportsConfigurationUnderPlanKeyNames() {
+        String html = "<html><body><h1 class='title'>Hello</h1></body></html>";
+        Core.HtmlExtractConfig config = new Core.HtmlExtractConfig(
+            "{{html}}", "single", "body",
+            List.of(new Core.HtmlExtractField("title", "h1.title", "text", "none", true, null)),
+            true
+        );
+        HtmlExtractNode node = buildNode(config, html);
+
+        NodeExecutionResult result = node.execute(context);
+
+        assertTrue(result.isSuccess());
+        Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+        assertEquals("single", params.get("extractionMode"));
+        assertEquals("body", params.get("rootSelector"));
+        assertEquals(true, params.get("cleanWhitespace"));
+        assertEquals(html.length(), params.get("sourceHtmlLength"));
+        // sourceHtml carries the RESOLVED html (clamped), not the expression: on the
+        // success path what the reader needs is what was actually parsed.
+        assertEquals(html, params.get("sourceHtml"));
+        assertEquals(1, ((List<Object>) params.get("fields")).size());
+    }
+
+    @Test
+    @DisplayName("A missing sourceHtml still reports the rest of the configuration, absent keys omitted")
+    @SuppressWarnings("unchecked")
+    void failurePathStillReportsConfiguration() {
+        // Built without the shared helper on purpose: this path never resolves a
+        // template, so stubbing the adapter would be an unused stub.
+        Core.HtmlExtractConfig config = new Core.HtmlExtractConfig(
+            "  ", "single", null,
+            List.of(new Core.HtmlExtractField("title", "h1", "text", "none", true, null)),
+            true
+        );
+        HtmlExtractNode node = new HtmlExtractNode("core:html_extract", config);
+
+        NodeExecutionResult result = node.execute(context);
+
+        assertFalse(result.isSuccess());
+        Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+        // An empty Params column on a red node is the moment the reader most
+        // needs to see what it was configured with.
+        assertEquals("single", params.get("extractionMode"));
+        assertEquals(true, params.get("cleanWhitespace"));
+        assertEquals(1, params.get("field_count"));
+        // rootSelector was never configured, so it is absent rather than null:
+        // a key present with an empty value reads as a setting the author made.
+        assertFalse(params.containsKey("rootSelector"));
+    }
 }

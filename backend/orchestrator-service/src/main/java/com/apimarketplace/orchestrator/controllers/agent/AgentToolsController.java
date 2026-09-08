@@ -91,7 +91,8 @@ public class AgentToolsController {
                 "agentAccessMode",
                 "applicationAccessMode",
                 "skillAccessMode",
-                "fileAccessMode")) {
+                "fileAccessMode",
+                "memoryAccessMode")) {
             if (request.get(accessModeKey) != null) {
                 credentials.put(accessModeKey, request.get(accessModeKey));
             }
@@ -334,7 +335,8 @@ public class AgentToolsController {
         }
         // Access mode keys for ToolAccessControl (read/write per resource)
         for (String am : List.of("tableAccessMode", "workflowAccessMode", "interfaceAccessMode",
-                "agentAccessMode", "applicationAccessMode", "skillAccessMode", "fileAccessMode")) {
+                "agentAccessMode", "applicationAccessMode", "skillAccessMode", "fileAccessMode",
+                "memoryAccessMode")) {
             if (request.get(am) != null) {
                 credentials.put(am, request.get(am));
             }

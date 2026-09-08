@@ -25,10 +25,11 @@ import { Coins, Check, Zap, ArrowRight } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { usePaygTiers, usePaygCheckout } from '@/lib/hooks/smart-hooks-complete';
 import type { PaygTier } from '@/lib/api/services/billing-api.service';
 import { formatCreditsCompact } from '@/lib/format-cost';
+import { track } from '@/lib/analytics/analytics';
 
 interface TopUpModalProps {
   isOpen: boolean;
@@ -85,6 +86,13 @@ export default function TopUpModal({ isOpen, onClose, initialTier }: TopUpModalP
       setError(null);
       const result = await checkout(selectedTier);
       if (result?.url) {
+        // Before the redirect, which unloads the page. Amounts only, never the URL.
+        const tier = tiers.find((candidate) => candidate.tier === selectedTier);
+        track('credit_topup_started', {
+          tier_credits: tier?.credits ?? null,
+          amount_cents: tier?.amountCents ?? null,
+          currency: tier?.currency ?? null,
+        });
         window.location.href = result.url;
       } else {
         setError(t('errors.noUrl'));
@@ -178,7 +186,7 @@ export default function TopUpModal({ isOpen, onClose, initialTier }: TopUpModalP
           <Button
             onClick={handleConfirm}
             disabled={!selectedTier || isCheckingOut || !configured}
-            variant="contrast"
+            variant="default"
             className="flex-1"
           >
             {isCheckingOut ? (
@@ -208,6 +216,7 @@ interface TierCardProps {
 
 function TierCard({ tier, selected, onSelect, disabled }: TierCardProps) {
   const t = useTranslations('billing.payg.modal.tiers');
+  const locale = useLocale();
   const isDisabled = disabled || !tier.configured;
 
   return (
@@ -239,7 +248,7 @@ function TierCard({ tier, selected, onSelect, disabled }: TierCardProps) {
 
       <div className="flex items-center gap-1 text-sm text-theme-secondary">
         <Coins className="h-3.5 w-3.5" />
-        {formatCreditsCompact(tier.credits)} {t('creditsSuffix')}
+        {formatCreditsCompact(tier.credits, locale)} {t('creditsSuffix')}
       </div>
 
       {!tier.configured && (

@@ -750,6 +750,7 @@ public class AgentHelpModule implements ToolModule {
         params.put("application_access_mode", "'write' (default) or 'read' (search/get only, no create/acquire/execute)");
         params.put("skill_access_mode", "'write' (default) or 'read' (get/list only, no create/update/delete)");
         params.put("file_access_mode", "'write' (default) or 'read' (files list/get/view/visualize only - blocks create_folder/move_to_folder). Independent of the 'files' allow-list scope");
+        params.put("memory_access_mode", "'write' (default) or 'read' (memory get/list/search/help only - blocks save and delete). Use 'read' for an agent that should act on the workspace's remembered facts without adding to them, since a saved memory is injected into every agent in the workspace");
         // Per-resource GRANT scope (none/all/custom) - the only way to express grant='all'
         params.put("workflows_grant", "'none' | 'all' | 'custom'. 'all'=EVERY workflow (list ignored), 'custom'=only the IDs in 'workflows'. Omit to derive from the list (empty=none, non-empty=custom)");
         params.put("applications_grant", "'none' | 'all' | 'custom'. 'all'=EVERY application (list ignored), 'custom'=only the IDs in 'applications'. Omit to derive from the list");
@@ -806,7 +807,7 @@ public class AgentHelpModule implements ToolModule {
         // Execute-specific
         params.put("prompt", "string, required for execute - Task to send to sub-agent");
         params.put("context", "string - Background data to prepend to prompt (for execute)");
-        params.put("memory", "boolean, default=true - Sub-agent sees its conversation history from previous executions (last 20 messages, user/assistant only). Set false for stateless one-shot execution (for execute)");
+        params.put("memory", "boolean, default=true - CONVERSATION HISTORY, not the `memory` tool. The sub-agent sees its own history from previous executions (last 20 messages, user/assistant only). Set false for stateless one-shot execution. Unrelated to long-term memory: the workspace's stored facts reach the sub-agent either way (for execute)");
         params.put("timeout", "integer 10-300s, default=120 - Sub-agent execution timeout");
 
         // Share-specific

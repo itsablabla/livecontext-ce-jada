@@ -21,7 +21,8 @@ export type SubjectType =
   | 'AGENT_TASK'
   | 'APPLICATION'
   | 'TRIGGER'
-  | 'ORG_INVITATION';
+  | 'ORG_INVITATION'
+  | 'BADGE';
 
 /**
  * Single notification item - aggregated per (subjectId, category).
@@ -46,7 +47,7 @@ export interface NotificationItem {
   subjectType: SubjectType;
   /** WORKFLOW-only; null for non-WORKFLOW rows by emitter contract. */
   runIdPublic: string | null;
-  /** e.g. "RUN_FAILED" | "APPROVAL_PENDING" | "CRED_EXPIRED". */
+  /** e.g. "RUN_FAILED" | "APPROVAL_PENDING" | "CRED_EXPIRED" | "BADGE_UNLOCKED". */
   category: string;
   severity: 'error' | 'warning' | 'info';
   count: number;

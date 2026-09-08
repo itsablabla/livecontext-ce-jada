@@ -519,4 +519,65 @@ class CeExclusiveFeatureDetectorTest {
             assertThat(publication.getCeExclusiveFeatures()).isEmpty();
         }
     }
+    /**
+     * The 2026-09-03 split, at the one line that decides it. `applyTo` writes two fields that used
+     * to answer the same question and no longer do: the LIST records every capability found, the
+     * BOOLEAN records only whether one of them makes the app impossible here. Collapsing them was
+     * what made a table with an embedding column un-installable on cloud at any price.
+     */
+    @Nested
+    @DisplayName("blocking versus merely labelled")
+    class BlockingSubset {
+
+        private WorkflowPublicationEntity stamped(java.util.Map<String, Object> plan) {
+            WorkflowPublicationEntity publication = new WorkflowPublicationEntity();
+            publication.setPlanSnapshot(plan);
+            CeExclusiveFeatureDetector.applyTo(publication);
+            return publication;
+        }
+
+        @Test
+        @DisplayName("a vector-only app is LABELLED but stays installable")
+        void vectorOnlyIsLabelledNotBlocked() {
+            WorkflowPublicationEntity publication = stamped(java.util.Map.of("tables", java.util.List.of(
+                    java.util.Map.of("_snapshot_ds_mappingSpec",
+                            java.util.Map.of("embedding", java.util.Map.of("type", "vector"))))));
+
+            assertThat(publication.getCeExclusiveFeatures()).containsExactly("VECTOR_SEARCH");
+            assertThat(publication.isCeExclusive())
+                    .as("embeddings run on cloud from a plan; the acquire path reads the LIST to gate on it")
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("a CLI-agent app is labelled AND blocked, at any plan")
+        void cliAgentStillBlocks() {
+            WorkflowPublicationEntity publication = stamped(java.util.Map.of("agents", java.util.List.of(
+                    java.util.Map.of("modelProvider", "claude-code"))));
+
+            assertThat(publication.getCeExclusiveFeatures()).containsExactly("CLI_AGENT");
+            assertThat(publication.isCeExclusive()).isTrue();
+        }
+
+        @Test
+        @DisplayName("an app using both is blocked by the CLI agent, and still names both")
+        void bothFeaturesBlockOnTheCliAgent() {
+            WorkflowPublicationEntity publication = stamped(java.util.Map.of(
+                    "agents", java.util.List.of(java.util.Map.of("modelProvider", "codex")),
+                    "tables", java.util.List.of(java.util.Map.of("_snapshot_ds_mappingSpec",
+                            java.util.Map.of("embedding", java.util.Map.of("type", "vector"))))));
+
+            assertThat(publication.getCeExclusiveFeatures()).containsExactly("CLI_AGENT", "VECTOR_SEARCH");
+            assertThat(publication.isCeExclusive()).isTrue();
+        }
+
+        @Test
+        @DisplayName("blocksInstall names the subset directly, so a reader does not have to infer it")
+        void blocksInstallIsExplicit() {
+            assertThat(CeExclusiveFeatureDetector.blocksInstall(java.util.List.of("CLI_AGENT"))).isTrue();
+            assertThat(CeExclusiveFeatureDetector.blocksInstall(java.util.List.of("VECTOR_SEARCH"))).isFalse();
+            assertThat(CeExclusiveFeatureDetector.blocksInstall(java.util.List.of())).isFalse();
+            assertThat(CeExclusiveFeatureDetector.blocksInstall(null)).isFalse();
+        }
+    }
 }

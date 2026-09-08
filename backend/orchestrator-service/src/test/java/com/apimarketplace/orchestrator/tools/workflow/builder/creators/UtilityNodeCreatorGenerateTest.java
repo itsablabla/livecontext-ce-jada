@@ -72,9 +72,24 @@ class UtilityNodeCreatorGenerateTest {
         return p;
     }
 
+    /**
+     * The AI nodes of a builder session live in {@code getMcps()}, discriminated
+     * by {@code isAgent}: that is where agent, classify and guardrail are held,
+     * and generate is one of them. A generate node left among the cores is
+     * exported into {@code cores[]}, which the executor never builds a generate
+     * node from.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> firstGenerateNode() {
+        return session.getMcps().stream()
+            .filter(n -> "generate".equals(n.get("type")))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("no generate node was added to the AI nodes"));
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> firstCoreParams() {
-        return (Map<String, Object>) session.getCores().get(0).get("params");
+        return (Map<String, Object>) firstGenerateNode().get("params");
     }
 
     @Test
@@ -87,8 +102,11 @@ class UtilityNodeCreatorGenerateTest {
         ToolExecutionResult result = creator.executeAddGenerate(session, p);
 
         assertThat(result.success()).isTrue();
-        Map<String, Object> core = session.getCores().get(0);
+        assertThat(session.getCores()).isEmpty();
+        Map<String, Object> core = firstGenerateNode();
         assertThat(core.get("type")).isEqualTo("generate");
+        assertThat(core.get("isAgent")).isEqualTo(true);
+        assertThat(core.get("isGenerate")).isEqualTo(true);
         assertThat(core.get("label")).isEqualTo("Make Clip");
         assertThat(firstCoreParams())
             .containsEntry("model", "seedance-2.0-fast")
@@ -123,6 +141,55 @@ class UtilityNodeCreatorGenerateTest {
 
         assertThat(creator.executeAddGenerate(session, p).success()).isTrue();
         assertThat(firstCoreParams().get("model")).isEqualTo("seedance-2.0-fast");
+    }
+
+    /**
+     * WHICH of the owner's keys the node runs on, offered to the agent too.
+     *
+     * <p>The inspector has always been able to pin one, and the plan carries it.
+     * An agent building the same node could not say it at all, so a workflow
+     * written through the tools ran on the account default while the one built
+     * by hand ran on the chosen key, for no reason the author could see.
+     */
+    @Test
+    @DisplayName("a pinned credential_id is stored, so an agent can build the node the inspector builds")
+    void credentialIdIsStored() {
+        Map<String, Object> p = baseParams();
+        p.put("credential_source", "user");
+        p.put("credential_id", 42);
+
+        ToolExecutionResult result = creator.executeAddGenerate(session, p);
+
+        assertThat(result.success()).isTrue();
+        assertThat(firstCoreParams()).containsEntry("credential_id", 42L);
+    }
+
+    @Test
+    @DisplayName("a pin beside the PLATFORM key is refused rather than dropped, since no run could honour it")
+    void credentialIdBesidePlatformIsRefused() {
+        // The executor discards it on that branch, so accepting it would leave
+        // the plan naming a key nothing uses.
+        Map<String, Object> p = baseParams();
+        p.put("credential_source", "platform");
+        p.put("credential_id", 42);
+
+        ToolExecutionResult result = creator.executeAddGenerate(session, p);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("credential_id");
+    }
+
+    @Test
+    @DisplayName("a credential_id that is not an id is refused, not silently ignored")
+    void credentialIdMustBeAnId() {
+        Map<String, Object> p = baseParams();
+        p.put("credential_source", "user");
+        p.put("credential_id", "not-an-id");
+
+        ToolExecutionResult result = creator.executeAddGenerate(session, p);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("credential_id");
     }
 
     @Test

@@ -65,7 +65,7 @@ export interface PauseResumeActions {
   isCore: (nodeId: string) => boolean;
   reset: () => void;
   updateReadySteps: (readyStepsArray: string[]) => void;
-  rerunStep: (stepId: string) => Promise<StepRerunResponse | null>;
+  rerunStep: (stepId: string, epoch?: number) => Promise<StepRerunResponse | null>;
   canRerunStep: (stepId: string) => boolean;
   resolveApproval: (nodeId: string, resolution: 'APPROVED' | 'REJECTED', epoch?: number, itemId?: string) => Promise<void>;
   // Multi-DAG trigger support
@@ -386,9 +386,9 @@ export function useWorkflowPauseResume(
     context.updateReadySteps(runId, readyStepsArray);
   }, [runId, context]);
 
-  const rerunStep = React.useCallback(async (stepId: string): Promise<StepRerunResponse | null> => {
+  const rerunStep = React.useCallback(async (stepId: string, epoch?: number): Promise<StepRerunResponse | null> => {
     if (!runId || !context) return null;
-    const result = await context.rerunStep(runId, stepId);
+    const result = await context.rerunStep(runId, stepId, epoch);
     if (result) {
       setLastRerunResult(result);
     }

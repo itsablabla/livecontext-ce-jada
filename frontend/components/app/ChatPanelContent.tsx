@@ -9,6 +9,8 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { ChatCore } from '@/components/chat/ChatCore';
+import { GenerateEntryButton } from '@/components/chat/GenerateEntryButton';
+import { CreateGenerationModal } from '@/components/chat/CreateGenerationModal';
 import { WelcomeTitle } from '@/app/shared/components';
 import { ModelSelectorDropdown, PROVIDER_ICON_MAP } from '@/components/chat/ModelSelectorDropdown';
 import { NoProviderCta } from '@/components/ai/NoProviderCta';
@@ -312,9 +314,34 @@ export function ChatPanelContent() {
     });
   }, []);
 
+  /**
+   * Generating from the panel opens a DIALOG, it does not travel.
+   *
+   * <p>The studio is a route, and the panel is docked beside whatever the reader is working on -
+   * a workflow, a table, an application. Sending them to another page to make one image would
+   * throw away the thing the panel exists to sit next to. So the panel keeps the wand it always
+   * had, and the wand opens the generation dialog in place.
+   *
+   * <p>That is also why the panel carries no chat/studio switch: the switch NAVIGATES, which is
+   * the one thing this surface must not do.
+   */
+  const [generationOpen, setGenerationOpen] = useState(false);
+  const tChat = useTranslations('chat');
+
   return (
     <div className="h-full flex flex-col min-w-0 overflow-hidden">
       <ChatCore
+        // At the END of the leading group, to the right of the tools button - not at its head,
+        // which is where a surface-level switch belongs and generating is not one.
+        // GenerateEntryButton renders NOTHING for a reader who cannot generate, or on an install
+        // that serves no generation, so the gate lives in the control rather than here.
+        trailingLeadingAction={(
+          <GenerateEntryButton
+            variant="icon"
+            label={tChat('generateAsset')}
+            onOpen={() => setGenerationOpen(true)}
+          />
+        )}
         conversationId={conversationId}
         messages={messages}
         isLoading={isLoading}
@@ -327,6 +354,12 @@ export function ChatPanelContent() {
         welcomeLayout
         welcomeTitle={<WelcomeTitle>{t('sidePanel.welcomeTitle')}</WelcomeTitle>}
       />
+
+      {/* Mounted only while open: the dialog asks the catalogue for its models, and a panel that
+          is never used for generation should cost that request nothing. */}
+      {generationOpen && (
+        <CreateGenerationModal isOpen onClose={() => setGenerationOpen(false)} />
+      )}
     </div>
   );
 }

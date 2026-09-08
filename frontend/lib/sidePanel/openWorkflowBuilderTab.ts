@@ -14,6 +14,21 @@ export interface OpenWorkflowBuilderTabOptions {
   workflowName?: string | null;
   /** Mount the canvas read-only (marketplace/publisher views). Omitted = editable, as before. */
   readOnly?: boolean;
+  /**
+   * The opened workflow is the caller's to change. Passed false by the sub-workflow
+   * handoff of a panel showing SOMEONE ELSE's application, so the workflows reachable
+   * from it do not open with a Save that would be refused.
+   *
+   * Omitted = true. That is right for a workflow reached AS a workflow, and it is what
+   * the canvas-level openers (a sub-workflow node, its hover buttons, the relations
+   * menu) still pass: they sit inside the canvas and cannot read the host panel's
+   * permission. The reachable gap is one hop further down than it looks: a locked child
+   * tab opens with no run, so its own canvas is in EDIT mode, and those openers take
+   * the direct branch there - so a GRANDCHILD of a foreign publication opens editable.
+   * The backend refuses the write either way; closing it means carrying the permission
+   * in context rather than in props, which is its own change.
+   */
+  canEditWorkflow?: boolean;
 }
 
 /**
@@ -30,7 +45,7 @@ export interface OpenWorkflowBuilderTabOptions {
  */
 export function openWorkflowBuilderTab(
   sidePanel: WorkflowTabOpener | null | undefined,
-  { workflowId, workflowName, readOnly }: OpenWorkflowBuilderTabOptions,
+  { workflowId, workflowName, readOnly, canEditWorkflow }: OpenWorkflowBuilderTabOptions,
 ): void {
   if (!sidePanel || !workflowId) return;
   import('@/components/app/WorkflowBuilderPanelContent').then(({ WorkflowBuilderPanelContent }) => {
@@ -38,7 +53,7 @@ export function openWorkflowBuilderTab(
       id: workflowPanelTabId(workflowId),
       label: workflowName || 'Workflow',
       icon: React.createElement(Workflow, { className: 'w-4 h-4' }),
-      content: React.createElement(WorkflowBuilderPanelContent, { workflowId, readOnly }),
+      content: React.createElement(WorkflowBuilderPanelContent, { workflowId, readOnly, canEditWorkflow, canEditRelatedWorkflows: canEditWorkflow }),
       preferredWidth: 0.5,
       keepMounted: true,
     });
@@ -62,9 +77,24 @@ export function requestOpenRelatedWorkflow(
    * (the toolbar's relations menu) simply sends none.
    */
   nodeId = '',
+  /**
+   * The workflow the request comes FROM, so the view hosting that workflow is the one that
+   * answers it.
+   *
+   * Every listener sits on `window` and they all build the same tab id, so before this they all
+   * answered every request and the last one to finish its pinned-run lookup won. That was
+   * invisible while every answer was identical - it stopped being identical once the tab content
+   * started carrying the host's permission to edit what it opens: a workflow tab mounted
+   * elsewhere would re-open the same sub-workflow editable, over the locked one an application
+   * panel had just opened.
+   *
+   * A listener refuses only a request that names a DIFFERENT source, so a caller that sends none
+   * still reaches every listener exactly as before.
+   */
+  sourceWorkflowId?: string,
 ): void {
   if (typeof window === 'undefined' || !workflowId) return;
   window.dispatchEvent(new CustomEvent('workflowOpenSubWorkflow', {
-    detail: { workflowId, workflowName: workflowName || 'Workflow', nodeId },
+    detail: { workflowId, workflowName: workflowName || 'Workflow', nodeId, sourceWorkflowId },
   }));
 }

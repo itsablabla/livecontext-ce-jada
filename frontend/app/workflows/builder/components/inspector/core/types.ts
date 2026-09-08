@@ -289,6 +289,7 @@ export function detectNodeType(node: Node<BuilderNodeData> | null): InspectorNod
   if (nodeRegistry.isGuardrailNode(node)) return 'guardrail';
   if (nodeRegistry.isClassifyNode(node)) return 'classify';
   if (id === 'ai-summarize' || id?.startsWith('ai-summarize-')) return 'summarize';
+  if (nodeRegistry.isGenerateNode(node)) return 'generate';
   if (nodeRegistry.isAgentNode(node)) return 'agent';
 
   // WhileGroup - check before other cores
@@ -307,7 +308,6 @@ export function detectNodeType(node: Node<BuilderNodeData> | null): InspectorNod
   if (nodeRegistry.isDownloadFileNode(node)) return 'download_file';
   if (nodeRegistry.isPublicLinkNode(node)) return 'public_link';
   if (nodeRegistry.isMediaNode(node)) return 'media';
-  if (nodeRegistry.isGenerateNode(node)) return 'generate';
   if (nodeRegistry.isHttpRequestNode(node)) return 'http_request';
   if (nodeRegistry.isDataInputNode(node)) return 'data_input';
   if (nodeRegistry.isResponseNode(node)) return 'response';

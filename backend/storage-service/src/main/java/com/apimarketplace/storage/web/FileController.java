@@ -6,6 +6,7 @@ import com.apimarketplace.common.web.TenantResolver;
 import com.apimarketplace.common.storage.domain.StorageEntity;
 import com.apimarketplace.common.storage.exception.QuotaExceededException;
 import com.apimarketplace.storage.domain.FileRef;
+import com.apimarketplace.storage.service.file.ClientStreamCopier;
 import com.apimarketplace.storage.service.file.DownloadStream;
 import com.apimarketplace.storage.service.file.FileStorageService;
 import com.apimarketplace.storage.service.file.StorageStreamingMetrics;
@@ -371,22 +372,7 @@ public class FileController {
     private StreamingResponseBody streamingBody(DownloadStream ds) {
         final long advertisedLength = ds.contentLength();
         return out -> {
-            try (StorageStreamingMetrics.StreamSpan span = streamingMetrics.startStream();
-                 DownloadStream s = ds) {
-                try {
-                    s.stream().transferTo(out);
-                    if (advertisedLength > 0) {
-                        streamingMetrics.recordBytes(advertisedLength);
-                    }
-                } catch (IOException e) {
-                    streamingMetrics.recordClientDisconnect();
-                    logger.debug("Client disconnected mid-stream (by-id): {}", e.getMessage());
-                    throw e;
-                } catch (RuntimeException e) {
-                    streamingMetrics.recordStreamError();
-                    throw e;
-                }
-            }
+            ClientStreamCopier.copy(ds, out, advertisedLength, streamingMetrics, "by-id");
         };
     }
 
@@ -461,21 +447,8 @@ public class FileController {
 
                 final long advertisedLength = ds.contentLength();
                 StreamingResponseBody body = out -> {
-                    try (StorageStreamingMetrics.StreamSpan span = streamingMetrics.startStream();
-                         DownloadStream s = ds) {
-                        try {
-                            s.stream().transferTo(out);
-                            if (advertisedLength > 0) streamingMetrics.recordBytes(advertisedLength);
-                        } catch (IOException e) {
-                            streamingMetrics.recordClientDisconnect();
-                            logger.debug("Signed proxy: client disconnected mid-stream key={} ({})",
-                                    key, e.getMessage());
-                            throw e;
-                        } catch (RuntimeException e) {
-                            streamingMetrics.recordStreamError();
-                            throw e;
-                        }
-                    }
+                    ClientStreamCopier.copy(ds, out, advertisedLength, streamingMetrics,
+                            "signed proxy key=" + key);
                 };
 
                 signedOkCounter.increment();

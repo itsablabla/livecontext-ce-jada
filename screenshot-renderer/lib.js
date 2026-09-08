@@ -867,7 +867,7 @@ class RenderPool {
 // "Renderer HTTP API" - field names are cross-layer FINAL.
 
 const MEDIA_OPERATIONS = new Set([
-  'probe', 'mux_audio', 'mix', 'extract_audio', 'concat', 'frame', 'overlay',
+  'probe', 'mux_audio', 'mix', 'extract_audio', 'concat', 'frame', 'overlay', 'subtitles',
 ]);
 const MEDIA_INPUT_ROLES = new Set(['video', 'audio', 'input', 'image']);
 const AUDIO_OUTPUT_FORMATS = new Set(['mp3', 'wav', 'aac']);
@@ -912,6 +912,37 @@ const IMAGE_FORMAT_NAMES = new Set([
   'png_pipe', 'jpeg_pipe', 'image2', 'mjpeg', 'webp_pipe', 'gif', 'bmp_pipe', 'tiff_pipe',
 ]);
 
+// ---- media v3 (subtitles) constants ------------------------------------------
+// Presets, not free-form ASS: the node hands over timed TEXT and picks a look, so a
+// caller can never author a style block that libass silently ignores. Every size is a
+// percentage of the PROBED VIDEO HEIGHT, so one preset reads the same on a 720x1280
+// phone cut and a 1080x1920 master instead of shrinking with the resolution.
+// positionPercent is the caption's distance from the TOP, which is how the look is
+// described ("captions sit at 72%"); it becomes an ASS bottom margin below.
+const SUBTITLE_STYLES = {
+  tiktok: { bold: 1, uppercase: true, fontSizePercent: 4.4, positionPercent: 72, outlinePercent: 0.47, shadowPercent: 0.23 },
+  classic: { bold: 1, uppercase: false, fontSizePercent: 3.4, positionPercent: 89, outlinePercent: 0.23, shadowPercent: 0.16 },
+};
+// The DEFAULT family is installed by name in the Dockerfile. A family that is not
+// installed is REFUSED (422) rather than substituted: libass falls back silently, and a
+// caption burnt in the wrong face is a defect that only shows up by eye, run after run.
+const SUBTITLE_DEFAULT_FONT = 'DejaVu Sans';
+const SUBTITLE_FONT_PATTERN = /^[A-Za-z0-9 ._-]{1,64}$/;
+// ASS colours are &HAABBGGRR. Only the two the node exposes are accepted, both as
+// #RRGGBB from the caller; alpha stays opaque because a translucent caption is a
+// legibility bug, not a feature.
+const SUBTITLE_HEX_PATTERN = /^#?[0-9A-Fa-f]{6}$/;
+// Bounds the generated ASS: 600 cues is ~40 minutes of one-line-per-second captioning,
+// far past the short-form videos this node exists for, and keeps the document small
+// enough to stay an argv-adjacent temp file rather than a memory concern.
+const SUBTITLE_MAX_CUES = 600;
+const SUBTITLE_MAX_TEXT_CHARS = 240;
+// The whole track, not just one line. Sized so that even in a script where every
+// character costs 3 UTF-8 bytes the serialised spec stays well inside the multipart
+// field cap - past which the request is silently truncated rather than refused.
+const SUBTITLE_MAX_TOTAL_CHARS = 40000;
+const SUBTITLE_BACKSLASH = String.fromCharCode(92);
+
 /**
  * Build an Error carrying the HTTP status + machine code the /internal/media handler
  * answers with ({error, code} JSON, plus stderr_tail for FFMPEG_FAILED).
@@ -952,6 +983,12 @@ function badSpec(code, error) {
 // Optional numeric param: absent -> def; present -> finite number within [min, max].
 function optNum(v, name, min, max, def) {
   if (v === undefined || v === null) return { value: def };
+  // Number([]) is 0 and Number(true) is 1, so without this an array or a boolean would
+  // be accepted as a timing - the same coercion trap the blank-string guard closes, and
+  // the orchestrator refuses both.
+  if (typeof v !== 'number' && typeof v !== 'string') {
+    return { error: `${name} must be a number` };
+  }
   const n = Number(v);
   if (!Number.isFinite(n) || n < min || n > max) {
     const range = max === Infinity ? `>= ${min}` : `${min}-${max}`;
@@ -1227,6 +1264,109 @@ function validateMediaSpec(spec) {
           opacity: opacity.value,
           startSeconds: start.value,
           endSeconds: end.value,
+        },
+      },
+    };
+  }
+
+  if (operation === 'subtitles') {
+    const video = inputs.find((i) => i.role === 'video');
+    if (!video || inputs.length !== 1) {
+      return badSpec('INVALID_SPEC', "subtitles takes exactly one input with role 'video'");
+    }
+    if (!Array.isArray(o.cues) || o.cues.length === 0) {
+      return badSpec('INVALID_SPEC', 'cues must be a non-empty array of {start_seconds, end_seconds, text}');
+    }
+    if (o.cues.length > SUBTITLE_MAX_CUES) {
+      return badSpec('VALUE_OUT_OF_RANGE', `cues holds at most ${SUBTITLE_MAX_CUES} entries (got ${o.cues.length})`);
+    }
+    const cues = [];
+    let totalTextChars = 0;
+    let previousEnd = null;
+    for (let i = 0; i < o.cues.length; i++) {
+      const raw = o.cues[i];
+      const label = `cues[${i}].`;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return badSpec('INVALID_SPEC', `cues[${i}] must be an object with start_seconds, end_seconds and text`);
+      }
+      // A blank string is ABSENT, not zero: Number('') is 0, which would have let the
+      // sidecar accept a half-written cue that the orchestrator refuses.
+      const rawStart = raw.start_seconds === '' ? null : raw.start_seconds;
+      const rawEnd = raw.end_seconds === '' ? null : raw.end_seconds;
+      const start = optNum(rawStart, `${label}start_seconds`, 0, Infinity, null);
+      if (start.error) return badSpec('VALUE_OUT_OF_RANGE', start.error);
+      const end = optNum(rawEnd, `${label}end_seconds`, 0, Infinity, null);
+      if (end.error) return badSpec('VALUE_OUT_OF_RANGE', end.error);
+      if (start.value === null || end.value === null) {
+        return badSpec('INVALID_SPEC', `${label}start_seconds and ${label}end_seconds are both required`);
+      }
+      if (end.value <= start.value) {
+        return badSpec('VALUE_OUT_OF_RANGE', `${label}end_seconds must be greater than ${label}start_seconds`);
+      }
+      if (typeof raw.text !== 'string' || raw.text.trim().length === 0) {
+        return badSpec('INVALID_SPEC', `${label}text must be a non-empty string`);
+      }
+      // Measured on the TRIMMED text because that is what gets burned: refusing a
+      // line that only trailing spaces pushed over the cap gives the caller an
+      // error with no visible cause. Every layer measures it the same way.
+      const trimmedText = raw.text.trim();
+      if (trimmedText.length > SUBTITLE_MAX_TEXT_CHARS) {
+        return badSpec('VALUE_OUT_OF_RANGE',
+          `${label}text is longer than ${SUBTITLE_MAX_TEXT_CHARS} characters (got ${trimmedText.length})`);
+      }
+      // Ascending and non-overlapping is REQUIRED, not repaired. Two cues over the same
+      // instant stack on top of each other in libass, so an overlap is always a timing
+      // bug in the caller - silently sorting or trimming it would hide the bug and ship
+      // a video with captions written over captions.
+      if (previousEnd !== null && start.value < previousEnd) {
+        return badSpec('VALUE_OUT_OF_RANGE',
+          `${label}start_seconds (${start.value}) overlaps the previous cue, which ends at ${previousEnd}; `
+          + 'cues must be given in ascending, non-overlapping order');
+      }
+      previousEnd = end.value;
+      // Per-cue length is not enough: 600 cues of 240 CJK characters is far past the
+      // multipart spec cap, where the request is TRUNCATED rather than refused. Bound
+      // the track as a whole, in characters, so the refusal is about the caption track
+      // and not about a JSON document the caller wrote correctly.
+      totalTextChars += trimmedText.length;
+      if (totalTextChars > SUBTITLE_MAX_TOTAL_CHARS) {
+        return badSpec('VALUE_OUT_OF_RANGE',
+          `the caption track is longer than ${SUBTITLE_MAX_TOTAL_CHARS} characters in total; `
+          + 'caption a shorter section, or split the video and caption each part');
+      }
+      cues.push({ startSeconds: start.value, endSeconds: end.value, text: trimmedText });
+    }
+    const styleRaw = (o.style === undefined || o.style === null) ? 'tiktok' : o.style;
+    if (typeof styleRaw !== 'string' || !Object.prototype.hasOwnProperty.call(SUBTITLE_STYLES, styleRaw.toLowerCase())) {
+      return badSpec('VALUE_OUT_OF_RANGE', `style must be one of: ${Object.keys(SUBTITLE_STYLES).join(', ')}`);
+    }
+    const fontRaw = (o.font_family === undefined || o.font_family === null)
+      ? SUBTITLE_DEFAULT_FONT : o.font_family;
+    if (typeof fontRaw !== 'string' || !SUBTITLE_FONT_PATTERN.test(fontRaw)) {
+      return badSpec('INVALID_SPEC',
+        'font_family must be a font family name (letters, digits, spaces, dot, underscore or dash)');
+    }
+    const fontSizePercent = optNum(o.font_size_percent, 'font_size_percent', 1, 20, null);
+    if (fontSizePercent.error) return badSpec('VALUE_OUT_OF_RANGE', fontSizePercent.error);
+    const positionPercent = optNum(o.position_percent, 'position_percent', 0, 100, null);
+    if (positionPercent.error) return badSpec('VALUE_OUT_OF_RANGE', positionPercent.error);
+    const textColour = parseSubtitleColour(o.text_color, 'text_color', '#FFFFFF');
+    if (textColour.error) return badSpec('VALUE_OUT_OF_RANGE', textColour.error);
+    const outlineColour = parseSubtitleColour(o.outline_color, 'outline_color', '#000000');
+    if (outlineColour.error) return badSpec('VALUE_OUT_OF_RANGE', outlineColour.error);
+    return {
+      ok: true,
+      value: {
+        operation,
+        inputs,
+        options: {
+          cues,
+          style: styleRaw.toLowerCase(),
+          fontFamily: fontRaw,
+          fontSizePercent: fontSizePercent.value,
+          positionPercent: positionPercent.value,
+          primaryColour: textColour.value,
+          outlineColour: outlineColour.value,
         },
       },
     };
@@ -2061,11 +2201,136 @@ function buildOverlayArgs(specValue, videoInfo, paths) {
   return args;
 }
 
+// ---- media v3: subtitles ---------------------------------------------------------
+
+/**
+ * '#RRGGBB' (or 'RRGGBB') -> the ASS '&HAABBGGRR' literal, alpha forced opaque.
+ * ASS stores blue first, which is why this cannot be a plain string copy.
+ */
+function parseSubtitleColour(value, name, fallbackHex) {
+  const raw = (value === undefined || value === null) ? fallbackHex : value;
+  if (typeof raw !== 'string' || !SUBTITLE_HEX_PATTERN.test(raw)) {
+    return { error: `${name} must be a #RRGGBB hex colour` };
+  }
+  const hex = raw.replace('#', '').toUpperCase();
+  const rr = hex.slice(0, 2);
+  const gg = hex.slice(2, 4);
+  const bb = hex.slice(4, 6);
+  return { value: `&H00${bb}${gg}${rr}` };
+}
+
+/** ASS timestamps are H:MM:SS.cc - centiseconds, and the hour field is not padded. */
+function assTime(seconds) {
+  const cs = Math.max(0, Math.round(seconds * 100));
+  const h = Math.floor(cs / 360000);
+  const m = Math.floor((cs % 360000) / 6000);
+  const s = Math.floor((cs % 6000) / 100);
+  const c = cs % 100;
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(c).padStart(2, '0')}`;
+}
+
+/**
+ * Escape caption text for an ASS Dialogue line. Braces open an override block and the
+ * backslash starts a tag, so text carrying either is swallowed silently by libass
+ * unless it is escaped here; real newlines become the ASS line break.
+ */
+function assEscape(text) {
+  return String(text)
+    .split(SUBTITLE_BACKSLASH).join(SUBTITLE_BACKSLASH + SUBTITLE_BACKSLASH)
+    .split('{').join(`${SUBTITLE_BACKSLASH}{`)
+    .split('}').join(`${SUBTITLE_BACKSLASH}}`)
+    .replace(/\r\n?/g, '\n')
+    .split('\n').join(`${SUBTITLE_BACKSLASH}N`);
+}
+
+/**
+ * Render the validated cues + style into a complete ASS document.
+ *
+ * <p>PlayResX/Y are set to the PROBED video size so every percentage in the preset maps
+ * 1:1 onto output pixels - without them libass assumes 384x288 and the captions come out
+ * a quarter of the intended size on a phone cut. Alignment 2 is bottom-centre, so the
+ * caller's "distance from the top" becomes a bottom margin.
+ */
+function buildAssDocument(options, videoWidth, videoHeight) {
+  const preset = SUBTITLE_STYLES[options.style];
+  const fontSizePercent = options.fontSizePercent === null ? preset.fontSizePercent : options.fontSizePercent;
+  const positionPercent = options.positionPercent === null ? preset.positionPercent : options.positionPercent;
+  const fontSize = Math.max(1, Math.round(videoHeight * fontSizePercent / 100));
+  // Alignment 2 measures MarginV up from the BOTTOM, so position_percent 0 ("at the
+  // top") asks for a margin of the entire frame height and pushed the line clean off
+  // the canvas: no captions, no error. Cap the margin so the line always has room to
+  // sit inside the frame - 0 then means "as high as it can be and still be visible",
+  // which is what asking for the top means.
+  const lineBox = Math.round(fontSize * 1.4);
+  const marginV = Math.min(Math.max(0, videoHeight - lineBox),
+    Math.max(0, Math.round(videoHeight * (100 - positionPercent) / 100)));
+  const outline = Math.max(0, Number((videoHeight * preset.outlinePercent / 100).toFixed(2)));
+  const shadow = Math.max(0, Number((videoHeight * preset.shadowPercent / 100).toFixed(2)));
+  const marginH = Math.max(0, Math.round(videoWidth * 0.06));
+  const styleLine = `Style: LC,${options.fontFamily},${fontSize},${options.primaryColour},&H000000FF,`
+    + `${options.outlineColour},&H80000000,${preset.bold},0,0,0,100,100,1,0,1,`
+    + `${outline},${shadow},2,${marginH},${marginH},${marginV},1`;
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${videoWidth}`,
+    `PlayResY: ${videoHeight}`,
+    // 0 = wrap inside the margins (top line wider). WrapStyle 2 disables wrapping
+    // ENTIRELY, which made MarginL/MarginR inert and let any line wider than the
+    // frame bleed off BOTH edges - a perfectly successful mp4 with the caption cut
+    // off, the exact silent-visual-defect this operation exists to avoid. Wrapping
+    // is what makes the 240-character contract survivable at tiktok size.
+    'WrapStyle: 0',
+    'ScaledBorderAndShadow: yes',
+    'YCbCr Matrix: TV.709',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, '
+      + 'BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, '
+      + 'BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    styleLine,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ];
+  const fade = `{${SUBTITLE_BACKSLASH}fad(45,45)}`;
+  const events = options.cues.map((cue) => {
+    const text = preset.uppercase ? cue.text.toUpperCase() : cue.text;
+    return `Dialogue: 0,${assTime(cue.startSeconds)},${assTime(cue.endSeconds)},LC,,0,0,0,,`
+      + fade + assEscape(text);
+  });
+  return `${header.join('\n')}\n${events.join('\n')}\n`;
+}
+
+/**
+ * ffmpeg argv for subtitles: burn the generated ASS onto the video and re-encode
+ * (captions are pixels, so a stream copy is impossible), stream-copying audio when the
+ * input has any. `assPath` is passed as a RELATIVE name and ffmpeg is run with the work
+ * directory as its cwd: the ass filter treats ':' as its own option separator, so an
+ * absolute Windows-style or colon-bearing path silently truncates the filename.
+ */
+function buildSubtitlesArgs(specValue, videoInfo, paths) {
+  const videoIn = specValue.inputs.find((i) => i.role === 'video');
+  const args = [
+    '-nostdin', '-y', '-loglevel', 'error',
+    '-i', paths.parts[videoIn.name].path,
+    '-vf', `ass=${paths.assName}`,
+  ];
+  // Pin the FIRST audio stream, exactly like buildOverlayArgs. Without -map, ffmpeg
+  // picks the "best" stream by channel count, so captioning and watermarking the same
+  // multi-audio file would keep DIFFERENT tracks.
+  if (videoInfo && videoInfo.has_audio) args.push('-map', '0:v:0', '-map', '0:a:0', '-c:a', 'copy');
+  args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20');
+  args.push('-movflags', '+faststart', paths.outputPath);
+  return args;
+}
+
 /** Output file extension (drives the ffmpeg muxer AND the response Content-Type). */
 function mediaOutputExtension(specValue) {
   if (specValue.operation === 'mux_audio') return 'mp4';
   if (specValue.operation === 'mix') return specValue.options.hasVideo ? 'mp4' : specValue.options.outputFormat;
   if (specValue.operation === 'concat' || specValue.operation === 'overlay') return 'mp4';
+  if (specValue.operation === 'subtitles') return 'mp4';
   if (specValue.operation === 'frame') return specValue.options.imageFormat === 'png' ? 'png' : 'jpg';
   return specValue.options.outputFormat; // extract_audio
 }
@@ -2324,4 +2589,15 @@ module.exports = {
   buildFrameArgs,
   isImageProbeFormat,
   buildOverlayArgs,
+  // media v3 (subtitles)
+  SUBTITLE_STYLES,
+  SUBTITLE_DEFAULT_FONT,
+  SUBTITLE_MAX_CUES,
+  SUBTITLE_MAX_TEXT_CHARS,
+  SUBTITLE_MAX_TOTAL_CHARS,
+  parseSubtitleColour,
+  assTime,
+  assEscape,
+  buildAssDocument,
+  buildSubtitlesArgs,
 };

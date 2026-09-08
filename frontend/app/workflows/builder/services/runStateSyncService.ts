@@ -17,6 +17,7 @@ import {
   type BatchEdgeData,
 } from './statusUpdater';
 import {
+  applyAwaitingSourceToEdges,
   updateEdgesFromBatch,
 } from './edgeStatusService';
 import { convertStepStateToBatchStep, convertEdgeStateToBatchEdge } from '../hooks/useWorkflowLoader';
@@ -80,6 +81,11 @@ export function syncRunStateToReactFlow(
     const batchEdges = state.edges.map(convertEdgeStateToBatchEdge);
     updatedEdges = updateEdgesFromBatch(updatedEdges, batchEdges, updatedNodes);
   }
+
+  // Carry a node's waiting state onto its un-traversed outgoing edges. Runs
+  // unconditionally (not inside the `state.edges` guard): a run parked on its very
+  // first signal has no edge rows at all, which is exactly when the cue matters.
+  updatedEdges = applyAwaitingSourceToEdges(updatedEdges, updatedNodes, state.awaitingSignalStepIds);
 
   // Update decision nodes from predecessors
   updatedNodes = updateDecisionNodesFromPredecessors(updatedNodes, updatedEdges);

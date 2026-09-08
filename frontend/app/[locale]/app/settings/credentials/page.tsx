@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/settings";
 import { CredentialsListSkeleton } from "@/components/skeletons";
 import { showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
+import { slugOrNull, track } from '@/lib/analytics/analytics';
 
 export default function CredentialsPage() {
   const { isAuthenticated, isAuthChecking } = useAuthGuard();
@@ -161,6 +162,7 @@ export default function CredentialsPage() {
     setWizardInitialMode(pendingAdvancedNext ? 'advanced' : 'standard');
     setPendingAdvancedNext(false);
     setIsWizardOpen(true);
+    track('credential_wizard_opened', { entry: 'configure', requirement_count: 1, icon_slug: extractIconSlug(template) });
   };
 
   // Handle multiple templates configuration
@@ -173,6 +175,7 @@ export default function CredentialsPage() {
     setRequirements(reqs);
     setWizardInitialMode('standard');
     setIsWizardOpen(true);
+    track('credential_wizard_opened', { entry: 'configure_multiple', requirement_count: reqs.length });
   };
 
   // Phase 2: edit-existing-BYOK shortcut. Opens the wizard pre-targeted at
@@ -189,6 +192,7 @@ export default function CredentialsPage() {
     ]);
     setWizardInitialMode('advanced');
     setIsWizardOpen(true);
+    track('credential_wizard_opened', { entry: 'edit_oauth_app', requirement_count: 1, icon_slug: slugOrNull(app.iconSlug || app.integrationName) });
   };
 
   // Resolve a credential row's iconSlug for the wizard requirement payload.
@@ -213,6 +217,9 @@ export default function CredentialsPage() {
     ]);
     setWizardInitialMode('standard');
     setIsWizardOpen(true);
+    // Only the catalog-derived slug: the name-based fallback of resolveCredentialIconSlug is
+    // user text and must not leave the browser.
+    track('credential_wizard_opened', { entry: 'reconnect', requirement_count: 1, icon_slug: slugOrNull(cred.iconSlug || cred.integration) });
   };
 
   // Handle wizard completion - no restriction in settings page

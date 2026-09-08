@@ -22,10 +22,8 @@ public final class ToolParameterUtils {
      * these names would collide with the physical column of the same name on the
      * query projection and silently shadow the user's value.
      */
-    public static final Set<String> RESERVED_COLUMN_NAMES = Set.of(
-        "id", "data_source_id", "tenant_id", "data",
-        "priority", "row_index", "created_at", "updated_at"
-    );
+    public static final Set<String> RESERVED_COLUMN_NAMES =
+        com.apimarketplace.datasource.crud.service.SqlSanitizer.RESERVED_DATA_COLUMN_NAMES;
 
     // Shared error hints - every "missing parameter" error points the agent at a working example.
     public static final String MISSING_TABLE_ID_HINT =
@@ -109,26 +107,30 @@ public final class ToolParameterUtils {
     /**
      * Validate a single column definition: reserved name, known type, the
      * type-specific display contract (select/multi_select require display.options,
-     * vector requires display.dimension), and the edition gate (vector columns
-     * are self-hosted-only; pass {@code VectorFeatureGate.isVectorAllowed()}).
+     * vector requires display.dimension), and the plan gate (pass
+     * {@code VectorFeatureGate.isVectorAllowed(ownerTenantId)} and, so the refusal can name the
+     * plan that lifts it, {@code gate::deniedMessage} bound to the same tenant).
      *
      * <p>Single chokepoint reused by every path that creates a typed column -
      * agent tool {@code create}/{@code add_columns}, REST UI {@code POST /columns},
      * CRUD {@code create-column}. Keep new type-level checks here, not at call sites.
      * {@code vectorAllowed} is deliberately a required parameter (no permissive
      * overload): a forgotten call site must fail to compile, not silently allow
-     * vector columns on managed cloud.
+     * vector columns a workspace has not paid for. {@code deniedMessage} is a supplier rather
+     * than a string because building it costs a plan lookup, and the overwhelming majority of
+     * calls are for a column that is not a vector at all.
      *
      * <p>Returns an error message, or null if valid.
      */
     public static String validateColumnDefinition(String name, String type, Object display,
-                                                  boolean vectorAllowed) {
+                                                  boolean vectorAllowed,
+                                                  java.util.function.Supplier<String> deniedMessage) {
         String colName = sanitizeColumnName(name);
         String reservedErr = validateReservedColumnName(colName);
         if (reservedErr != null) return reservedErr;
         String typeErr = validateColumnType(type);
         if (typeErr != null) return typeErr;
-        String editionErr = validateVectorEdition(type, vectorAllowed);
+        String editionErr = validateVectorEdition(type, vectorAllowed, deniedMessage);
         if (editionErr != null) return editionErr;
         String optionsErr = validateSelectOptions(type, colName, display);
         if (optionsErr != null) return optionsErr;
@@ -145,7 +147,8 @@ public final class ToolParameterUtils {
      * Returns an error message, or null if every column is valid.
      */
     public static String validateColumnDefinitions(List<Map<String, Object>> columnsList,
-                                                   boolean vectorAllowed) {
+                                                   boolean vectorAllowed,
+                                                   java.util.function.Supplier<String> deniedMessage) {
         Set<String> seen = new java.util.HashSet<>();
         for (Map<String, Object> col : columnsList) {
             if (col == null) continue;
@@ -161,21 +164,25 @@ public final class ToolParameterUtils {
             }
 
             String err = validateColumnDefinition(rawName, (String) col.get("type"), col.get("display"),
-                    vectorAllowed);
+                    vectorAllowed, deniedMessage);
             if (err != null) return err;
         }
         return null;
     }
 
     /**
-     * Edition gate for {@code vector} columns - self-hosted deployments only.
-     * Returns the agent-actionable rejection message, or null when the type is
-     * not vector or the edition allows it.
+     * Plan gate for {@code vector} columns. Returns the agent-actionable rejection message, or
+     * null when the type is not vector or the workspace may use it. The message comes from the
+     * supplier so it can name the plan that lifts the refusal; a null supplier falls back to the
+     * plain sentence, which is what a caller with no gate in hand can honestly say.
      */
-    static String validateVectorEdition(String typeStr, boolean vectorAllowed) {
+    static String validateVectorEdition(String typeStr, boolean vectorAllowed,
+                                        java.util.function.Supplier<String> deniedMessage) {
         if (vectorAllowed || typeStr == null) return null;
         if (!"vector".equals(typeStr.toLowerCase().trim())) return null;
-        return com.apimarketplace.datasource.services.VectorFeatureGate.DISABLED_MESSAGE;
+        String message = deniedMessage == null ? null : deniedMessage.get();
+        return message != null ? message
+                : com.apimarketplace.datasource.services.VectorFeatureGate.DISABLED_MESSAGE;
     }
 
     /** Pgvector index size limit; mirrors {@code VectorRepository.MAX_DIMENSION}. */

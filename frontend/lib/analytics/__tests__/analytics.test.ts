@@ -12,7 +12,14 @@ vi.mock('../posthogLoader', () => {
     opt_in_capturing: vi.fn(),
     opt_out_capturing: vi.fn(),
   };
-  return { loadPosthog: () => fake, __fake: fake };
+  // Mirror the real loader contract: the LIVE client is whatever sits on
+  // window.posthog (null when nothing does), so tests can simulate array.js
+  // swapping the stub for the real instance.
+  const currentPosthog = () => {
+    const ph = (window as unknown as { posthog?: unknown }).posthog as { capture?: unknown } | undefined;
+    return ph && typeof ph.capture === 'function' ? ph : null;
+  };
+  return { loadPosthog: () => fake, currentPosthog, __fake: fake };
 });
 
 // The analytics module captures NEXT_PUBLIC_POSTHOG_KEY at eval time, so the
@@ -37,7 +44,100 @@ describe('analytics facade (key configured)', () => {
     analytics = await import('../analytics');
   });
 
-  afterEach(() => localStorage.clear());
+  afterEach(() => {
+    localStorage.clear();
+    delete (window as unknown as { posthog?: unknown }).posthog;
+  });
+
+  describe('regression: array.js replaces window.posthog after init (orphaned stub)', () => {
+    // Before the fix the facade cached the queue stub handed to init(); once
+    // array.js replayed the queue and swapped window.posthog for the real
+    // SDK instance, every later track()/identify()/register() was pushed onto
+    // the dead stub and never reached PostHog (0 product events in prod for
+    // two months while SDK-captured $pageview kept flowing).
+    function installLoadedSdk() {
+      const loaded = {
+        init: vi.fn(),
+        capture: vi.fn(),
+        identify: vi.fn(),
+        register: vi.fn(),
+        reset: vi.fn(),
+        opt_in_capturing: vi.fn(),
+        opt_out_capturing: vi.fn(),
+        __loaded: true,
+      };
+      (window as unknown as { posthog?: unknown }).posthog = loaded;
+      return loaded;
+    }
+
+    it('track() after the swap reaches the LIVE instance, not the stale stub', () => {
+      grantConsent();
+      analytics.initAnalytics();
+      expect(fake.init).toHaveBeenCalledTimes(1);
+
+      const loaded = installLoadedSdk();
+      analytics.track('app_install_started', { publication_id: 'pub-1' });
+
+      expect(loaded.capture).toHaveBeenCalledWith(
+        'app_install_started',
+        expect.objectContaining({ publication_id: 'pub-1' }),
+      );
+      expect(fake.capture).not.toHaveBeenCalled();
+    });
+
+    it('track() reports failure instead of throwing when the SDK does', () => {
+      // Measuring an action must not be able to break it. Several call sites
+      // run after the work has already succeeded (the onboarding completion
+      // captures its event once the server has accepted the profile), so a
+      // throw here would surface as a failure of something that worked.
+      grantConsent();
+      analytics.initAnalytics();
+      const loaded = installLoadedSdk();
+      loaded.capture.mockImplementation(() => {
+        throw new Error('capture blew up');
+      });
+
+      let handedOver: boolean | undefined;
+      expect(() => {
+        handedOver = analytics.track('app_install_started', { publication_id: 'pub-1' });
+      }).not.toThrow();
+      // False, not true: a retrying caller must not believe the signal landed.
+      expect(handedOver).toBe(false);
+    });
+
+    it('identify / org register / reset / opt-out after the swap all target the LIVE instance', () => {
+      grantConsent();
+      analytics.initAnalytics();
+      // init() legitimately registers super-props on the stub (queued, replayed
+      // by array.js); only what happens AFTER the swap is under test here.
+      Object.values(fake).forEach((fn) => fn.mockClear());
+      const loaded = installLoadedSdk();
+
+      analytics.identifyUser('user-1', 'org-1');
+      analytics.setAnalyticsOrganization('org-2');
+      analytics.disableAnalytics();
+      analytics.initAnalytics(); // re-opt-in path
+      analytics.resetAnalytics();
+
+      expect(loaded.identify).toHaveBeenCalledWith('user-1', { organization_id: 'org-1' }, {});
+      expect(loaded.register).toHaveBeenCalledWith({ organization_id: 'org-2' });
+      expect(loaded.opt_out_capturing).toHaveBeenCalledTimes(1);
+      expect(loaded.opt_in_capturing).toHaveBeenCalledTimes(1);
+      expect(loaded.reset).toHaveBeenCalledTimes(1);
+      for (const fn of [fake.identify, fake.register, fake.opt_out_capturing, fake.opt_in_capturing, fake.reset]) {
+        expect(fn).not.toHaveBeenCalled();
+      }
+    });
+
+    it('does not re-run init() on the swapped instance (init stays idempotent)', () => {
+      grantConsent();
+      analytics.initAnalytics();
+      const loaded = installLoadedSdk();
+      analytics.initAnalytics();
+      expect(loaded.init).not.toHaveBeenCalled();
+      expect(fake.init).toHaveBeenCalledTimes(1);
+    });
+  });
 
   it('reports configured when a key is present', () => {
     expect(analytics.isAnalyticsConfigured()).toBe(true);
@@ -78,7 +178,9 @@ describe('analytics facade (key configured)', () => {
     grantConsent();
     analytics.identifyUser('user-uuid', 'org-uuid');
     expect(fake.init).toHaveBeenCalledTimes(1);
-    expect(fake.identify).toHaveBeenCalledWith('user-uuid', { organization_id: 'org-uuid' });
+    // Third argument = $set_once landing intent (empty when the visitor never
+    // touched a landing intent surface).
+    expect(fake.identify).toHaveBeenCalledWith('user-uuid', { organization_id: 'org-uuid' }, {});
   });
 
   it('resetAnalytics() clears identity only when initialized', () => {
@@ -110,6 +212,70 @@ describe('analytics facade (key configured)', () => {
     expect(fake.init).toHaveBeenCalledTimes(1);
     expect(fake.opt_out_capturing).toHaveBeenCalledTimes(1);
     expect(fake.opt_in_capturing).toHaveBeenCalledTimes(1);
+  });
+
+  it('setLandingIntent() registers first/latest super-properties and identify folds the FIRST into $set_once', () => {
+    grantConsent();
+    analytics.initAnalytics();
+    const store: Record<string, unknown> = {};
+    const loaded = {
+      init: vi.fn(),
+      capture: vi.fn(),
+      identify: vi.fn(),
+      register: vi.fn((p: Record<string, unknown>) => Object.assign(store, p)),
+      register_once: vi.fn((p: Record<string, unknown>) => {
+        for (const [k, v] of Object.entries(p)) if (!(k in store)) store[k] = v;
+      }),
+      get_property: vi.fn((k: string) => store[k]),
+      reset: vi.fn(),
+      opt_in_capturing: vi.fn(),
+      opt_out_capturing: vi.fn(),
+      __loaded: true,
+    };
+    (window as unknown as { posthog?: unknown }).posthog = loaded;
+
+    analytics.setLandingIntent('landing_persona', 'ops');
+    analytics.setLandingIntent('landing_persona', 'sales');
+    analytics.identifyUser('user-9', null);
+
+    expect(store.landing_persona_first).toBe('ops');
+    expect(store.landing_persona).toBe('sales');
+    expect(loaded.identify).toHaveBeenCalledWith('user-9', { organization_id: null }, { landing_persona: 'ops' });
+  });
+
+  it('resetAnalytics() forgets the landing intent so the next account on this browser is not stamped with it (regression)', () => {
+    grantConsent();
+    analytics.initAnalytics();
+    const loaded = {
+      init: vi.fn(), capture: vi.fn(), identify: vi.fn(), register: vi.fn(), register_once: vi.fn(),
+      reset: vi.fn(), opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn(), __loaded: true,
+    };
+    (window as unknown as { posthog?: unknown }).posthog = loaded;
+
+    analytics.setLandingIntent('landing_cta', 'hero_start_free');
+    analytics.identifyUser('user-A', null);
+    analytics.resetAnalytics();
+    analytics.identifyUser('user-B', null);
+
+    expect(loaded.identify).toHaveBeenNthCalledWith(1, 'user-A', { organization_id: null }, { landing_cta: 'hero_start_free' });
+    expect(loaded.identify).toHaveBeenNthCalledWith(2, 'user-B', { organization_id: null }, {});
+    expect(localStorage.getItem('lc.landingIntent')).toBeNull();
+  });
+
+  it('setAppView() registers a bounded view and unregisters it on null (never the pathname)', () => {
+    grantConsent();
+    analytics.initAnalytics();
+    const loaded = {
+      init: vi.fn(), capture: vi.fn(), identify: vi.fn(), register: vi.fn(), unregister: vi.fn(),
+      reset: vi.fn(), opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn(), __loaded: true,
+    };
+    (window as unknown as { posthog?: unknown }).posthog = loaded;
+
+    analytics.setAppView('marketplace', true);
+    analytics.setAppView(null, false);
+
+    expect(loaded.register).toHaveBeenCalledWith({ app_view: 'marketplace', is_detail_page: true });
+    expect(loaded.unregister).toHaveBeenCalledWith('app_view');
   });
 
   it('never emits tenant_id in event properties (PII guard)', () => {

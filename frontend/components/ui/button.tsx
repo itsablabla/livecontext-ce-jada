@@ -25,8 +25,12 @@ const buttonVariants = cva(
           "bg-transparent text-[var(--text-primary)] shadow-none hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)]",
         ghostGray:
           "bg-transparent text-[var(--text-primary)] shadow-none hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] [&_*]:text-current [&_svg]:!text-current",
-        contrast:
-          "bg-black text-white shadow-[0_1px_2px_rgba(0,0,0,0.15)] hover:bg-gray-900 hover:text-white dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 dark:hover:text-gray-900",
+        // NOTE: there is deliberately no `contrast` variant. It hardcoded
+        // black/white and was used as the primary CTA on ~28 surfaces (sign in,
+        // top up, checkout, upgrade, compare plans), sitting next to `default`
+        // buttons doing the same job. `--accent-primary` IS near-black in light
+        // and near-white in dark, so the two read as the same button drawn twice
+        // - one following the theme tokens, one not. Use `default`.
         destructive:
           "bg-[#dc5c5c] text-white shadow-[0_1px_2px_rgba(220,92,92,0.25)] hover:bg-[#c84d4d]",
         link:

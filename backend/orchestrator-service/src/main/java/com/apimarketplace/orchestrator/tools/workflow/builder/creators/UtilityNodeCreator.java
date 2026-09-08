@@ -3,6 +3,7 @@ package com.apimarketplace.orchestrator.tools.workflow.builder.creators;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
 import com.apimarketplace.orchestrator.domain.NodeTypeDocumentationEntity;
 import com.apimarketplace.orchestrator.domain.WorkflowEntity;
+import com.apimarketplace.orchestrator.execution.v2.nodes.MediaNode;
 import com.apimarketplace.orchestrator.repository.WorkflowRepository;
 import com.apimarketplace.orchestrator.service.NodeLibraryService;
 import com.apimarketplace.orchestrator.tools.workflow.builder.ResponseOptimizer;
@@ -310,6 +311,7 @@ public class UtilityNodeCreator extends CreatorBase {
         ops.put("concat", "Glue 1-8 videos back to back into one mp4 (a SINGLE input = trim/speed edit). Requires: inputs=[{source (whole FileRef expression), trim_start_seconds?, trim_end_seconds?, speed (0.5-2.0)?}]. Options: transition (cut|crossfade, default cut; crossfade needs >= 2 inputs), transition_seconds (0.1-5.0, default 0.5), target_width+target_height (16-4096, BOTH or NEITHER; clips are scaled to fit and padded, never stretched), target_fps (1-60), fade_in_seconds (0)/fade_out_seconds (0), normalize (default FALSE: true evens out loudness between clips but forces re-encode), audio_bitrate ('192k'). Output: file (mp4) + duration_seconds.");
         ops.put("frame", "Extract ONE still image from a video (cover/thumbnail). Requires: input (whole FileRef expression). Options: at_seconds (>= 0; default = the MIDDLE of the video; clamped to the end, never an error), image_format (jpeg|png, default jpeg), width (16-4096, aspect ratio kept). Output: file (image) + timestamp_seconds (the ACTUAL timestamp used); duration_seconds is null.");
         ops.put("overlay", "Burn an image (logo, watermark, badge) onto a video. Requires: video + image (whole FileRef expressions; png alpha respected). Options: position (top_left|top_right|bottom_left|bottom_right|center, default bottom_right), margin_px (>= 0, default 24), width_percent (1-100, % of the video width, default 15), opacity (0-1, default 1), start_seconds/end_seconds (visibility window; absent = whole video). Output: file (mp4) + duration_seconds.");
+        ops.put("subtitles", "Burn timed captions into the picture of a video (they become part of the image, so they show on every player). Requires: video (whole FileRef expression) + cues=[{start_seconds, end_seconds, text}] in ascending, NON-OVERLAPPING order, at most 600 entries, text at most 240 characters. Options: style (tiktok|classic, default tiktok), font_family, font_size_percent (1-20, % of the video HEIGHT), position_percent (0-100, from the TOP), text_color/outline_color (hex like '#FFFFFF'). Output: file (mp4) + duration_seconds.");
         return ops;
     }
 
@@ -320,7 +322,10 @@ public class UtilityNodeCreator extends CreatorBase {
         "join_videos", "concat",
         "thumbnail", "frame",
         "cover", "frame",
-        "watermark", "overlay");
+        "watermark", "overlay",
+        "subtitle", "subtitles",
+        "captions", "subtitles",
+        "caption", "subtitles");
 
     /**
      * A usable media file param: a non-blank expression string ({@code {{...output.file}}})
@@ -341,7 +346,9 @@ public class UtilityNodeCreator extends CreatorBase {
         "audio_fit", "normalize", "audio_bitrate", "output_format",
         "transition", "transition_seconds", "target_width", "target_height", "target_fps",
         "at_seconds", "image_format", "width",
-        "position", "margin_px", "width_percent", "opacity", "start_seconds", "end_seconds");
+        "position", "margin_px", "width_percent", "opacity", "start_seconds", "end_seconds",
+        "cues", "style", "font_family", "font_size_percent", "position_percent",
+        "text_color", "outline_color");
 
     public ToolExecutionResult executeAddMedia(WorkflowBuilderSession session, Map<String, Object> parameters) {
         // 1. Validate
@@ -417,6 +424,34 @@ public class UtilityNodeCreator extends CreatorBase {
                         "Example: params={operation: 'overlay', video: '{{core:clip.output.file}}', image: '{{core:logo.output.file}}', position: 'bottom_right', width_percent: 15}");
                 }
             }
+            case "subtitles" -> {
+                if (!isFileParam(parameters.get("video"))) {
+                    return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER, "MEDIA subtitles: 'video' is " +
+                        "required (whole FileRef expression or literal FileRef object) - the video the captions are burned into.\n" +
+                        "Example: params={operation: 'subtitles', video: '{{core:compile_reel.output.file}}', cues: [{start_seconds: 0, end_seconds: 2.4, text: 'It starts here'}]}");
+                }
+                // A caption track is DATA, so it is commonly computed upstream (a
+                // transcription, a code node). An expression is therefore a first-class
+                // value here: only a literal array can have its contents checked now.
+                Object rawCues = parameters.get("cues");
+                if (rawCues instanceof List<?> cueList) {
+                    if (cueList.isEmpty()) {
+                        return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER, "MEDIA subtitles: 'cues' is " +
+                            "required - a non-empty array of {start_seconds, end_seconds, text} in ascending, non-overlapping order.\n" +
+                            "Example: cues: [{start_seconds: 0, end_seconds: 2.4, text: 'It starts here'}, {start_seconds: 2.5, end_seconds: 5, text: 'And it ends there'}]");
+                    }
+                    if (cueList.size() > MediaNode.MAX_SUBTITLE_CUES) {
+                        return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE, "MEDIA subtitles: " +
+                            "'cues' accepts at most " + MediaNode.MAX_SUBTITLE_CUES + " entries (got " + cueList.size() + ").");
+                    }
+                } else if (!(rawCues instanceof String expr && !expr.isBlank())) {
+                    return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER, "MEDIA subtitles: 'cues' is " +
+                        "required - a non-empty array of {start_seconds, end_seconds, text} in ascending, non-overlapping order, " +
+                        "or an expression resolving to one.\n" +
+                        "Example: cues: [{start_seconds: 0, end_seconds: 2.4, text: 'It starts here'}, {start_seconds: 2.5, end_seconds: 5, text: 'And it ends there'}]\n" +
+                        "Computed upstream: cues: '{{core:build_cues.output.result.cues}}'");
+                }
+            }
             default -> { /* unreachable - operation validated above */ }
         }
 
@@ -488,7 +523,11 @@ public class UtilityNodeCreator extends CreatorBase {
      */
     private static final Set<String> GENERATE_RESERVED_PARAMS = Set.of(
         "label", "name", "connect_after", "connect_after_loop", "interface_id",
-        "type", "action", "session_id", "params", "parameters");
+        "type", "action", "session_id", "params", "parameters",
+        // Node-level, not generation parameters: they say WHICH key pays, not
+        // what to produce. Copied through they would reach the model as
+        // parameters it does not accept and the call would be refused.
+        "credential_source", "credential_id");
 
     public ToolExecutionResult executeAddGenerate(WorkflowBuilderSession session, Map<String, Object> parameters) {
         // 1. Validate
@@ -542,14 +581,44 @@ public class UtilityNodeCreator extends CreatorBase {
         // exporter and the builder inspector) from disagreeing, and stops an
         // editor that re-saves a plan from silently repricing a node it did not
         // change.
-        generateParams.put("credential_source",
-                credentialSource != null && !credentialSource.isBlank()
-                        ? credentialSource
-                        : DEFAULT_GENERATE_CREDENTIAL_SOURCE);
+        String resolvedSource = credentialSource != null && !credentialSource.isBlank()
+                ? credentialSource
+                : DEFAULT_GENERATE_CREDENTIAL_SOURCE;
+        generateParams.put("credential_source", resolvedSource);
+
+        // WHICH of your own keys runs it, when you hold several for the
+        // provider. Omit it to run on the account's default for that provider.
+        // Only read beside credential_source='user': beside 'platform' the
+        // platform's own key answers the call, so an id of yours would state a
+        // choice no run can honour. Refused rather than dropped, because a node
+        // saved with a key that is silently ignored bills the wrong account and
+        // says nothing.
+        Long credentialId = toLongOrNull(parameters.get("credential_id"));
+        if (parameters.get("credential_id") != null && credentialId == null) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                "GENERATE: 'credential_id' must be the numeric id of one of your credentials for this "
+                    + "provider, got '" + parameters.get("credential_id") + "'. Omit it to run on your "
+                    + "default key for the provider.");
+        }
+        if (credentialId != null) {
+            if (!"user".equals(resolvedSource)) {
+                return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                    "GENERATE: 'credential_id' names one of YOUR keys, so it only applies with "
+                        + "credential_source='user'. With credential_source='platform' the platform's own "
+                        + "key runs the call and the id would be ignored. Either set credential_source='user' "
+                        + "or drop credential_id.");
+            }
+            if (credentialId <= 0) {
+                return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                    "GENERATE: 'credential_id' must be a positive credential id, got " + credentialId + ".");
+            }
+            generateParams.put("credential_id", credentialId);
+        }
+
         for (Map.Entry<String, Object> entry : parameters.entrySet()) {
             String key = entry.getKey();
             if (GENERATE_RESERVED_PARAMS.contains(key) || "model".equals(key) || "model_id".equals(key)
-                    || "credential_source".equals(key) || entry.getValue() == null) {
+                    || entry.getValue() == null) {
                 continue;
             }
             generateParams.put(key, entry.getValue());
@@ -561,20 +630,26 @@ public class UtilityNodeCreator extends CreatorBase {
         node.put("type", "generate");
         node.put("position", calculatePosition(session, NodeType.GENERATE));
         node.put("params", generateParams);
+        // An AI node, addressed as `agent:<label>`. The session keeps every AI
+        // node among the mcps and tells them apart by these flags, which is
+        // also what makes `agent:` resolve for it; the plan exporter reads them
+        // back to file it under agents[].
+        node.put("isAgent", true);
+        node.put("isGenerate", true);
 
         // 3. Add and finalize
-        session.getCores().add(LabelNormalizer.normalizeVariableReferencesDeep(node));
+        session.getMcps().add(LabelNormalizer.normalizeVariableReferencesDeep(node));
         if (connectAfter != null) createSimpleEdge(session, connectAfter, nodeId);
         finalizeNode(session, sessionStore, NodeType.GENERATE, nodeId, node, connectAfter);
 
         return buildSuccessResponse("generate", nodeId, label, normalizedLabel, connectAfter,
             Map.of("model", model,
-                   "access_pattern", "{{core:" + normalizedLabel + ".output.file}} (the generated asset, "
+                   "access_pattern", "{{agent:" + normalizedLabel + ".output.file}} (the generated asset, "
                        + "a whole FileRef - map it into a downstream file param, never .path or a URL)",
                    "cost", "Every run of this node is charged. A model priced per second or per character "
                        + "costs more for a longer request: the node reports the size it billed on as "
-                       + "{{core:" + normalizedLabel + ".output.billed_quantity}} in "
-                       + "{{core:" + normalizedLabel + ".output.billed_unit}}. Call "
+                       + "{{agent:" + normalizedLabel + ".output.billed_quantity}} in "
+                       + "{{agent:" + normalizedLabel + ".output.billed_unit}}. Call "
                        + "workflow(action='help', topics=['generate']) for the models this installation offers.",
                    "usage", "Parameters are checked against the model BEFORE the provider is called, so a "
                        + "rejected call costs nothing. Only the parameters listed in that model's 'accepts' "

@@ -58,8 +58,14 @@ class DataSourceServiceVectorGatingTest {
         env.setProperty("app.edition", edition);
         return new DataSourceService(dataSourceRepository, dataSourceItemRepository,
                 breakdownService, new ObjectMapper(), orgAccessGuard, entitlementGuard,
-                new VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env)), eventPublisher,
+                new VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env), null), eventPublisher,
                 org.mockito.Mockito.mock(com.apimarketplace.publication.client.PublicationClient.class));
+    }
+
+    private static Map<String, ColumnMappingSpec> scalarMappingSpec() {
+        Map<String, ColumnMappingSpec> mapping = new LinkedHashMap<>();
+        mapping.put("title", new ColumnMappingSpec("data.title", ColumnType.TEXT, ColumnStructure.SCALAR, Map.of(), Map.of()));
+        return mapping;
     }
 
     private static Map<String, ColumnMappingSpec> vectorMappingSpec() {
@@ -118,5 +124,55 @@ class DataSourceServiceVectorGatingTest {
         assertThat(event.dataSourceId()).isEqualTo(42L);
         assertThat(event.dimension()).isEqualTo(1536);
         assertThat(event.metric()).isEqualTo("cosine");
+    }
+
+    @org.junit.jupiter.api.Nested
+    @DisplayName("Index lifecycle on deletion")
+    class IndexLifecycleOnDeletion {
+
+        private DataSource dataSourceWith(Map<String, ColumnMappingSpec> mappingSpec) {
+            return new DataSource(42L, "tenant-1", "Table", null,
+                    com.apimarketplace.datasource.domain.DataSourceModels.DataSourceType.INLINE, Map.of(),
+                    com.apimarketplace.datasource.domain.DataSourceModels.DataSourceStatus.ACTIVE, null, null, "tenant-1",
+                    java.util.List.of(), mappingSpec, null, null, null, "org-1");
+        }
+
+        /**
+         * The rows cascade away with the datasource; the per-datasource HNSW index
+         * is a separate catalog object and did not. dropHnswIndex had no callers,
+         * so every deleted vector table left an empty index behind, and the NUMBER
+         * of those indexes is the design's operational ceiling.
+         */
+        @Test
+        @DisplayName("deleting a datasource that had a vector column publishes the index-drop event")
+        void deletionOfVectorTablePublishesDropEvent() {
+            org.mockito.Mockito.when(dataSourceRepository.findById(42L))
+                    .thenReturn(java.util.Optional.of(dataSourceWith(vectorMappingSpec())));
+            org.mockito.Mockito.when(orgAccessGuard.canWrite(any(), any(), any(), any(), any())).thenReturn(true);
+            org.mockito.Mockito.when(dataSourceItemRepository.findByDataSourceId(42L)).thenReturn(java.util.List.of());
+
+            service("ce").deleteDataSource(42L, "tenant-1", null);
+
+            var captor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            verify(eventPublisher).publishEvent(captor.capture());
+            org.assertj.core.api.Assertions.assertThat(captor.getValue())
+                    .isInstanceOf(com.apimarketplace.datasource.events.VectorDataSourceDeletedEvent.class);
+            org.assertj.core.api.Assertions.assertThat(
+                    ((com.apimarketplace.datasource.events.VectorDataSourceDeletedEvent) captor.getValue()).dataSourceId())
+                    .isEqualTo(42L);
+        }
+
+        @Test
+        @DisplayName("deleting a datasource with no vector column publishes nothing: there is no index to drop")
+        void deletionOfPlainTablePublishesNothing() {
+            org.mockito.Mockito.when(dataSourceRepository.findById(42L))
+                    .thenReturn(java.util.Optional.of(dataSourceWith(scalarMappingSpec())));
+            org.mockito.Mockito.when(orgAccessGuard.canWrite(any(), any(), any(), any(), any())).thenReturn(true);
+            org.mockito.Mockito.when(dataSourceItemRepository.findByDataSourceId(42L)).thenReturn(java.util.List.of());
+
+            service("ce").deleteDataSource(42L, "tenant-1", null);
+
+            verify(eventPublisher, never()).publishEvent(any());
+        }
     }
 }

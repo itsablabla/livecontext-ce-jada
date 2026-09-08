@@ -24,6 +24,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OrgScopePredicateInvariantTest {
 
     private static final List<String> RULE_1_ALLOWLIST = List.of(
+            // Execution-log retention sweep (2026-09-02, retention keyed by workspace):
+            // sweep() and sweepScope() read the (organization_id, tenant_id) PAIR of
+            // each candidate scope only to ROUTE two different lookups: the retention
+            // window is asked of auth-service by organization id (the workspace
+            // owner's plan), and the payload purge is issued by tenant id (whose
+            // storage quota the payloads were booked to). There is no owner-vs-org
+            // comparison and no branch on either value: both are arguments. The rows
+            // themselves are selected by the repository's own scope predicate
+            // (organization_id = :organizationId AND tenant_id = :tenantId), and the
+            // job deletes journal, it never grants access. Same category as the
+            // "stamping / routing" entries above.
+            "AgentExecutionLogRetentionSweeper#sweep",
+            "AgentExecutionLogRetentionSweeper#sweepScope",
             // AgentService.isInScope + 4 mutation copies route through ScopeGuard.
             // Stamping / DTO mappers - copy entity scope fields into a DTO
             // or audit record, not a scope predicate.

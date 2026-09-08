@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * The {@code core:generate} node must not give up on a call catalog is still
+ * The {@code agent:generate} node must not give up on a call catalog is still
  * running and will still charge for.
  *
  * <p>Catalog's own budget for one generation lives in

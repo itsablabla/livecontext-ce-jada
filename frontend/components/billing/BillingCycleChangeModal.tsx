@@ -223,7 +223,7 @@ export default function BillingCycleChangeModal({
                     {success ? (
                         <Button
                             onClick={handleClose}
-                            variant="contrast"
+                            variant="default"
                             className="flex-1"
                         >
                             {t('done')}
@@ -241,7 +241,7 @@ export default function BillingCycleChangeModal({
                             <Button
                                 onClick={handleConfirm}
                                 disabled={isLoading}
-                                variant="contrast"
+                                variant="default"
                                 className="flex-1"
                             >
                                 {isLoading ? (

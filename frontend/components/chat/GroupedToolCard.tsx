@@ -3,6 +3,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useExpandedState } from '@/hooks/useExpandedState';
 import { createPortal } from 'react-dom';
+import { clampMenuLeft } from '@/lib/utils/menuPlacement';
 import { useTranslations } from 'next-intl';
 import Image from 'next/image';
 import { ChevronDown, ChevronRight, Table, Monitor, Workflow, Bot, Loader2, Search, Globe, HelpCircle, KeyRound, ListChecks, Eye, Code, Plug, Play, Pencil, FolderOpen, Terminal, FileText, ExternalLink, Trash2, MoreVertical, ArrowUpRight } from 'lucide-react';
@@ -336,6 +337,9 @@ interface FullToolResult {
   createdAt: string;
 }
 
+/** Width of a tool call's overflow menu, shared by its clamp and its box. */
+const CALL_MENU_WIDTH = 192;
+
 function CallTimelineItem({ call, index, isStreaming = false }: CallTimelineItemProps) {
   const t = useTranslations('workflow.draft');
   const tChat = useTranslations('chat');
@@ -364,7 +368,9 @@ function CallTimelineItem({ call, index, isStreaming = false }: CallTimelineItem
       const rect = menuButtonRef.current.getBoundingClientRect();
       setMenuPosition({
         top: rect.bottom + 4,
-        left: rect.left,
+        // The trigger sits at the right of the card, so on a phone `rect.left`
+        // alone puts most of the menu past the right edge.
+        left: clampMenuLeft(rect.left, CALL_MENU_WIDTH),
       });
     }
   }, [showMenu]);
@@ -524,8 +530,11 @@ function CallTimelineItem({ call, index, isStreaming = false }: CallTimelineItem
             {showMenu && mounted && createPortal(
               <div
                 ref={menuRef}
-                className="fixed w-48 bg-theme-primary border border-gray-300/70 dark:border-gray-600/70 rounded-2xl shadow-lg p-2"
+                className="fixed max-w-[calc(100vw-1rem)] bg-theme-primary border border-gray-300/70 dark:border-gray-600/70 rounded-2xl shadow-lg p-2"
                 style={{
+                  // The width lives here, not in a `w-48` class: the clamp above
+                  // needs the same number, and two spellings of one width drift.
+                  width: CALL_MENU_WIDTH,
                   top: `${menuPosition.top}px`,
                   left: `${menuPosition.left}px`,
                   zIndex: 9999,

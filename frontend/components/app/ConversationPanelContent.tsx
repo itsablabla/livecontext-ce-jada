@@ -6,6 +6,7 @@ import { type Message } from '@/lib/api/conversationApi';
 import { useMessages } from '@/hooks/conversation/useMessages';
 import { sortMessagesByTime } from '@/lib/utils/messageUtils';
 import { useConversationChannel } from '@/lib/websocket/use-conversation-channel';
+import { onConversationMessagesCleared } from '@/lib/chat/conversationMessagesBus';
 import { detectStreamEventType, mapV2EventToV1 } from '@/lib/streaming/streamHelpers';
 import type { ToolActivity } from '@/components/chat/ActivityFeed';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -207,11 +208,49 @@ export function ConversationPanelContent({ conversationId, executionId }: Conver
     loadMessages,
     loadOlderMessages,
     setMessages,
+    clearMessages,
   } = useMessages({ executionId });
   const scrollRef = useRef<HTMLDivElement>(null);
   const [streaming, dispatchStreaming] = useReducer(streamingReducer, initialStreamingState);
   const [streamingCounter, setStreamingCounter] = useState(0);
   const hasAutoScrolledRef = useRef(false);
+
+  // This panel is the SECOND surface that renders a transcript, off its own
+  // `useMessages` store. When the sidebar wipes a conversation's history, the
+  // server is emptied but no store hears about it, so the messages sit here
+  // until the panel is closed and reopened - the same "green button, nothing
+  // cleared" the chat page had. Every surface that draws a transcript has to
+  // listen; that is the invariant, not a per-surface nicety.
+  useEffect(
+    () =>
+      onConversationMessagesCleared((clearedId) => {
+        if (clearedId !== conversationId) return;
+        // clearMessages(), not setMessages([]): it also aborts the fetch that
+        // may be in flight. Emptying the array alone leaves that request to
+        // land afterwards and re-fill the panel with messages the server no
+        // longer has - the wipe undone by its own initial load. It additionally
+        // nulls `currentLoadingConversationRef`, so anything that survives the
+        // abort is dropped by the hook's own stale-result guard.
+        //
+        // NOT unit-covered, and the attempt is worth recording: a test that
+        // held a load open, cleared, then resolved it passed with
+        // `setMessages([])` too, so it did not distinguish the two and was
+        // removed rather than kept as false assurance. Proving this needs a
+        // harness that can observe the abort itself.
+        clearMessages();
+        // And the live bubble, which is drawn OUTSIDE the message list: without
+        // this, wiping a conversation while it is answering leaves a streaming
+        // reply hanging over an empty transcript.
+        //
+        // Not unit-covered, deliberately: driving this reducer from a test means
+        // driving the whole websocket -> detectStreamEventType -> mapV2EventToV1
+        // stack, and a test that mocks all three would be asserting its own
+        // mocks. The reducer's RESET case is the same one `message_added`
+        // already uses a few lines below.
+        dispatchStreaming({ type: 'RESET' });
+      }),
+    [conversationId, clearMessages],
+  );
 
   const handleLoadOlderMessages = useCallback(() => {
     loadOlderMessages(conversationId);

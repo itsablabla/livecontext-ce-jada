@@ -13,6 +13,7 @@ import com.apimarketplace.publication.config.OrchestratorInternalClient;
 import com.apimarketplace.publication.service.AgentPublicationService;
 import com.apimarketplace.publication.service.ApplicationTemplateResetService;
 import com.apimarketplace.publication.service.CeExclusivePublicationException;
+import com.apimarketplace.publication.service.PublicationPlanUpgradeRequiredException;
 import com.apimarketplace.publication.service.EditableWorkflowTwinService;
 import com.apimarketplace.publication.service.LandingInterfaceSnapshotter;
 import com.apimarketplace.publication.service.OnboardingCategoryMapper;
@@ -176,7 +177,8 @@ public class WorkflowPublicationController {
                     displayMode,
                     request.showcaseEpoch,
                     Boolean.TRUE.equals(request.viaScreeningWizard),
-                    toReplacementMap(request.imageReplacements)
+                    toReplacementMap(request.imageReplacements),
+                    request.studio
             );
 
             return ResponseEntity.ok(toDetailResponse(publication));
@@ -259,7 +261,8 @@ public class WorkflowPublicationController {
                     request.showcaseEpoch,
                     Boolean.TRUE.equals(request.clearShowcaseEpoch),
                     Boolean.TRUE.equals(request.viaScreeningWizard),
-                    toReplacementMap(request.imageReplacements)
+                    toReplacementMap(request.imageReplacements),
+                    request.studio
             );
 
             return ResponseEntity.ok(toDetailResponse(publication));
@@ -569,6 +572,81 @@ public class WorkflowPublicationController {
                 .<ResponseEntity<?>>map(id ->
                         getPublicationById(id.toString(), requestingUserId, organizationId, null, null, null))
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * Public-browsing alias for a publication's reviews, so the crawlable
+     * marketplace page can show them to anonymous visitors.
+     *
+     * <p>It lives under {@code /by-id/} for the same reason its siblings do:
+     * that prefix is allowlisted at the gateway while the bare
+     * {@code /publications/...} root is reserved for authenticated endpoints.
+     * GET only, deliberately: posting and deleting a review stay behind the
+     * JWT filter on the root path, and no public write is introduced here.
+     *
+     * <p>Two things this alias does that {@link #getReviews} does not, and must
+     * keep doing:
+     *
+     * <ol>
+     *   <li><b>It gates on visibility.</b> The authenticated handler reads
+     *       reviews by publication id with no visibility check at all, which is
+     *       fine behind the JWT filter but on a public route would let anyone
+     *       who guesses a UUID read the reviews of a PRIVATE publication. Same
+     *       predicate and same 404 as the detail endpoint, so "no such page"
+     *       and "exists but not public" stay indistinguishable.</li>
+     *   <li><b>It scrubs {@code reviewerId}.</b> The authenticated shape carries
+     *       the reviewer's internal user id, which the app needs to recognise
+     *       "my review" but an anonymous reader has no business receiving. The
+     *       display name and avatar stay: those are already shown publicly.</li>
+     * </ol>
+     */
+    @GetMapping("/by-id/{publicationId}/reviews")
+    public ResponseEntity<?> getReviewsPublic(
+            @PathVariable String publicationId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "false") boolean onlyWithComment) {
+        UUID pubId;
+        try {
+            pubId = UUID.fromString(publicationId);
+        } catch (IllegalArgumentException notAUuid) {
+            return ResponseEntity.notFound().build();
+        }
+
+        boolean readable = publicationService.getPublicationById(pubId)
+                .map(WorkflowPublicationController::isAnonymouslyReadable)
+                .orElse(false);
+        if (!readable) {
+            return ResponseEntity.notFound().build();
+        }
+
+        ResponseEntity<?> delegated = getReviews(publicationId, page, size, onlyWithComment);
+        if (!delegated.getStatusCode().is2xxSuccessful()
+                || !(delegated.getBody() instanceof Map<?, ?> body)) {
+            return delegated;
+        }
+        return ResponseEntity.ok(withoutReviewerIds(body));
+    }
+
+    /**
+     * Copy of a reviews payload with the internal reviewer id dropped from every
+     * item. Copies rather than mutating: the delegate's maps are its own, and a
+     * shared-instance edit would be invisible here and surprising there.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> withoutReviewerIds(Map<?, ?> body) {
+        Map<String, Object> copy = new HashMap<>((Map<String, Object>) body);
+        if (copy.get("reviews") instanceof List<?> items) {
+            copy.put("reviews", items.stream()
+                    .map(item -> {
+                        if (!(item instanceof Map<?, ?> review)) return item;
+                        Map<String, Object> scrubbed = new HashMap<>((Map<String, Object>) review);
+                        scrubbed.remove("reviewerId");
+                        return (Object) scrubbed;
+                    })
+                    .toList());
+        }
+        return copy;
     }
 
     /**
@@ -1199,6 +1277,10 @@ public class WorkflowPublicationController {
             @RequestParam(required = false) String rating,
             @RequestParam(required = false) Integer days,
             @RequestParam(required = false) String price,
+            // A SECOND AXIS, not a category: true keeps only the applications that PRODUCE a media
+            // asset, whatever they are about. Omitted means no constraint, so every existing caller
+            // is unaffected.
+            @RequestParam(required = false) Boolean studio,
             // Optional - present only for authenticated callers (the marketplace is public-browsable).
             // Used to flag publications the caller's ACTIVE workspace already owns (so the card shows
             // "Installed" instead of "Acquire"); absent → anonymous → ownedByMe stays false.
@@ -1206,7 +1288,7 @@ public class WorkflowPublicationController {
             @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
         try {
             MarketplaceQueryFilter filter =
-                    MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price);
+                    MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price, studio);
             Page<PublicationListItem> publications =
                     listQueryService.findMarketplacePublications(filter, page, size);
 
@@ -1315,10 +1397,11 @@ public class WorkflowPublicationController {
             @RequestParam(required = false) List<String> interests,
             @RequestParam(required = false) List<String> useCases,
             @RequestParam(required = false) String profession,
+            @RequestParam(required = false) String primaryGoal,
             @RequestParam(defaultValue = "8") int limit) {
         try {
             List<String> categorySlugs =
-                    onboardingCategoryMapper.toCategorySlugs(interests, useCases, profession);
+                    onboardingCategoryMapper.toCategorySlugs(interests, useCases, profession, primaryGoal);
             List<PublicationListItem> publications =
                     listQueryService.suggestApplications(categorySlugs, limit);
 
@@ -1351,14 +1434,18 @@ public class WorkflowPublicationController {
             @RequestParam(required = false) String rating,
             @RequestParam(required = false) Integer days,
             @RequestParam(required = false) String price,
+            @RequestParam(required = false) Boolean studio,
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
         try {
             // Same refinements as /marketplace, on purpose: the search box sits
             // inside the filtered grid, so a query must narrow what the visitor is
             // already looking at rather than reset it to every publication.
+            //
+            // `studio` is one of those refinements and not a detail: typing into the search box on
+            // the Studio shelf must not answer with the whole marketplace.
             MarketplaceQueryFilter filter =
-                    MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price);
+                    MarketplaceQueryFilter.fromRequest(category, displayMode, sort, rating, days, price, studio);
             List<PublicationListItem> publications = listQueryService.searchMarketplace(q, filter);
 
             List<Map<String, Object>> response = publications.stream()
@@ -1441,6 +1528,8 @@ public class WorkflowPublicationController {
             return ResponseEntity.ok(body);
         } catch (CeExclusivePublicationException e) {
             return ceExclusiveResponse(e);
+        } catch (PublicationPlanUpgradeRequiredException e) {
+            return planUpgradeResponse(e);
         } catch (IllegalArgumentException e) {
             logger.warn("Bad request acquiring publication: {}", e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -1812,6 +1901,10 @@ public class WorkflowPublicationController {
         response.put("hasShowcase", pub.hasShowcase());
         response.put("isApplication", pub.isApplication());
         response.put("displayMode", pub.getDisplayMode().name());
+        // The studio axis. Present here because this is what the edit form READS BACK: without it
+        // the control renders unchecked on an application that is on the shelf, and the next save
+        // takes it off.
+        response.put("studio", pub.isStudio());
 
         // Category
         if (pub.getCategoryId() != null) {
@@ -1928,6 +2021,8 @@ public class WorkflowPublicationController {
             return ResponseEntity.ok(result);
         } catch (CeExclusivePublicationException e) {
             return ceExclusiveResponse(e);
+        } catch (PublicationPlanUpgradeRequiredException e) {
+            return planUpgradeResponse(e);
         } catch (IllegalArgumentException e) {
             logger.warn("Bad request acquiring agent: {}", e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -2167,6 +2262,8 @@ public class WorkflowPublicationController {
             return ResponseEntity.ok(result);
         } catch (CeExclusivePublicationException e) {
             return ceExclusiveResponse(e);
+        } catch (PublicationPlanUpgradeRequiredException e) {
+            return planUpgradeResponse(e);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -2676,6 +2773,27 @@ public class WorkflowPublicationController {
     }
 
     /**
+     * Refusal body for an app whose capability this workspace's PLAN does not include, today
+     * vector search. Also 403, and deliberately a DIFFERENT code from CE_EXCLUSIVE: that one means
+     * "this deployment cannot run it", which the marketplace renders as a dead end with no retry,
+     * while this one is lifted by an upgrade. {@code requiredPlan} is what the upsell needs to name.
+     */
+    private static ResponseEntity<?> planUpgradeResponse(PublicationPlanUpgradeRequiredException e) {
+        logger.info("Acquire refused - plan upgrade required ({}) for features={}",
+                e.getRequiredPlan(), e.getFeatures());
+        // requiredPlan is absent when the requirement could not be read at all. Map.of rejects a
+        // null value, so build the body rather than turning a 403 into a 500.
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("error", e.getMessage());
+        body.put("code", PublicationPlanUpgradeRequiredException.ERROR_CODE);
+        if (e.getRequiredPlan() != null) {
+            body.put("requiredPlan", e.getRequiredPlan());
+        }
+        body.put("features", e.getFeatures());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+    }
+
+    /**
      * Member write-restriction guard for an org-owned application (a published workflow).
      * Mirrors the canonical resource types (workflow, agent, datasource, interface, project,
      * file): ANY restriction - READ-only OR DENY - blocks writes, while OWNER/ADMIN bypass
@@ -2785,6 +2903,8 @@ public class WorkflowPublicationController {
         public Integer showcaseEpoch;       // V273 - publisher's chosen epoch for the marketplace preview (null = legacy multi-epoch view)
         public Boolean viaScreeningWizard;  // V274 - true when sent from the publish wizard (wizard handles audit log via /screening-decisions); false on MCP / scripted / S2S paths so the service auto-scans + logs SKIPPED rows
         public java.util.List<ImageReplacementEntry> imageReplacements;  // AI-generated replacement images: originalUrl → storageKey
+        /** The studio axis; absent means "no opinion" and preserves what is stored (see UpdatePublicationRequest.studio). */
+        public Boolean studio;
     }
 
     public static class UpdatePublicationRequest {
@@ -2800,6 +2920,17 @@ public class WorkflowPublicationController {
         public Integer showcaseEpoch;       // V273 - chosen epoch (null = no change; on update, omit to preserve existing)
         public Boolean viaScreeningWizard;  // V274 - same semantics as on PublishWorkflowRequest
         public java.util.List<ImageReplacementEntry> imageReplacements;
+        /**
+         * The studio axis: does this application belong on the Studio shelf?
+         *
+         * <p>An axis and not a category, because a publication carries exactly one category - a
+         * video studio would have had to stop being a Content app to become a studio one.
+         *
+         * <p>Nullable ON PURPOSE, like {@code categoryId}: absent means "no opinion" and preserves
+         * what is stored. A client that predates the axis, or an edit form that does not render the
+         * control, therefore cannot take an application off the shelf by saving a title change.
+         */
+        public Boolean studio;
     }
 
     public static class ImageReplacementEntry {

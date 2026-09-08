@@ -80,7 +80,7 @@ export default function TablesPage() {
             [<code key="em">email</code>, 'Email address.'],
             [<code key="ph">phone</code>, 'Phone number.'],
             [<code key="u">url</code>, 'URL.'],
-            [<code key="v">vector</code>, 'Embedding vector for similarity search. Requires a dimension (1 to 2000) and is only available on self-hosted editions - see below.'],
+            [<code key="v">vector</code>, 'Embedding vector for similarity search. Requires a dimension (1 to 2000). Free on self-hosted; on managed cloud it needs a paid plan - see below.'],
           ]}
         />
 
@@ -186,13 +186,13 @@ Update "Mark done":
 
         <h2>Vector similarity search</h2>
         <Callout variant="info">
-          Vector columns and similarity search are a <strong>self-hosted feature</strong> (Community
-          Edition and self-hosted enterprise). On managed cloud, creating a vector column or running a
-          similarity search is rejected with a message pointing you to text columns with keyword filters
-          instead.
+          Vector columns and similarity search are <strong>unrestricted on a self-hosted deployment</strong>{' '}
+          (Community Edition and self-hosted enterprise), and available on managed cloud from a paid plan.
+          Embeddings share the managed database, so on cloud they are sold rather than handed out: a
+          workspace whose plan does not include them gets a message naming the plan that does.
         </Callout>
         <p>
-          On a self-hosted deployment, a similarity search is a read with a <code>similarity</code> block
+          A similarity search is a read with a <code>similarity</code> block
           instead of (or alongside) <code>where</code>: <code>column</code>, <code>queryVector</code>, an
           optional <code>topK</code> (default 5), and an optional <code>threshold</code>. The query vector
           must match the column's declared dimension. <code>metric</code> defaults to{' '}

@@ -9,6 +9,7 @@ import { ToolDataService, type ToolDataResult } from './ToolDataService';
 import type { WorkflowPlan } from './PlanParserService';
 import { normalizeLabel, coreKey } from '../../utils/labelNormalizer';
 import { createInterfaceNodes } from './InterfaceNodeCreator';
+import { InterfaceFormatService, type InterfaceFormatContext } from './InterfaceFormatService';
 import { createStepNodes } from './StepNodeCreator';
 import { createAgentNodes } from './AgentNodeCreator';
 import { createNoteNodes } from './NoteNodeCreator';
@@ -25,7 +26,6 @@ import { createDefaultDecisionConditions, createDefaultSwitchCases, createDefaul
 import { nodeRegistry } from '../../registry/nodeRegistry';
 import { sanitizeNodePolicy } from '../../utils/nodePolicy';
 import { extractMediaDataFromPlanParams } from '../../utils/mediaParams';
-import { extractGenerateDataFromPlanParams } from '../../utils/generateParams';
 import { sanitizeNodeMock } from '../../utils/nodeMock';
 
 export interface NodeCreationResult {
@@ -825,36 +825,6 @@ export class NodeCreationService {
             kind: 'media',
             ...(mediaOperation !== undefined ? { mediaOperation } : {}),
             mediaParams,
-            paramExpressions: inputToParamExpressions((cn as any).params),
-          } as any,
-        });
-
-        labelToNodeIdMap.set(cn.label || nodeId, nodeId);
-        const normalized = normalizeLabel(cn.label || nodeId);
-        if (normalized) labelToNodeIdMap.set(normalized, nodeId);
-      } else if (cn.type === 'generate') {
-        const nodeId = cn.graphNodeId || cn.id || `generate-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        // generate config lives in the generic params map (like media):
-        // { model, credential_source, credential_id, ...unified generation params }.
-        const { generateModel, generateCredentialSource, selectedCredentialId, generateParams } =
-          extractGenerateDataFromPlanParams((cn as any).params);
-
-        nodes.push({
-          id: nodeId,
-          type: 'flowNode',
-          position,
-          positionAbsolute: position,
-          data: {
-            id: nodeId,  // Use nodeId (starts with 'generate-') for consistent detection
-            label: cn.label || 'Generate',
-            kind: 'generate',
-            ...(generateModel !== undefined ? { generateModel } : {}),
-            ...(generateCredentialSource !== undefined ? { generateCredentialSource } : {}),
-            // The key this node runs on, under the name the inspector's picker
-            // reads. Absent means the account's default, which is also what the
-            // run does, so the two never disagree.
-            ...(selectedCredentialId !== undefined ? { selectedCredentialId } : {}),
-            generateParams,
             paramExpressions: inputToParamExpressions((cn as any).params),
           } as any,
         });
@@ -1777,7 +1747,8 @@ export class NodeCreationService {
    */
   static async createNodes(
     plan: WorkflowPlan,
-    existingNodes: Node<BuilderNodeData>[] = []
+    existingNodes: Node<BuilderNodeData>[] = [],
+    context: InterfaceFormatContext = {}
   ): Promise<NodeCreationResult> {
     const nodes: Node<BuilderNodeData>[] = [];
     const labelToNodeIdMap = new Map<string, string>();
@@ -1793,6 +1764,16 @@ export class NodeCreationService {
     let currentX = maxX;
     let currentY = INITIAL_POSITION.y;
 
+    // An interface node's box comes from the FORMAT of the page it renders, which is not
+    // in the plan. Resolve it so the automatic layout below reserves the shape the node
+    // actually paints instead of the 400x250 default (see InterfaceFormatService). Kicked
+    // off BEFORE the tool batch and awaited at the interface step: the two lookups are
+    // independent, and this one is on the critical path of every workflow open.
+    const interfaceFormats = InterfaceFormatService.fetchFormats(
+      InterfaceFormatService.candidateIds(plan.interfaces as any),
+      context,
+    ).catch(() => undefined);
+
     // Batch fetch tool data
     const allToolIds = this.collectAllToolIds(plan);
     if (allToolIds.length > 0) {
@@ -1806,7 +1787,9 @@ export class NodeCreationService {
 
     // 1. Create interface nodes
     if (Array.isArray(plan.interfaces)) {
-      const result = createInterfaceNodes(plan.interfaces as any, currentX, currentY);
+      const result = createInterfaceNodes(
+        plan.interfaces as any, currentX, currentY, await interfaceFormats,
+      );
       nodes.push(...result.nodes);
       result.interfaceIdToNodeIdMap.forEach((v, k) => interfaceIdToNodeIdMap.set(k, v));
       result.interfaceLabelToNodeIdMap.forEach((v, k) => interfaceLabelToNodeIdMap.set(k, v));
@@ -1837,9 +1820,43 @@ export class NodeCreationService {
       currentY = tableResult.nextY;
     }
 
+    // 5bis. Adopt a generate node still filed under `cores`.
+    //
+    // Generate moved to the AI family: it is written to `agents` and keyed
+    // agent:<label>. A plan saved before that move still holds it in `cores`,
+    // where nothing here builds it any more. Silence was the wrong answer to
+    // that: the node vanished from the canvas with no warning, and the next
+    // save rewrote the plan without it, destroying the model, the prompt and
+    // the pinned key for good.
+    //
+    // Adopted rather than made to work in place: the object needs no
+    // conversion, because the generate branch of the agent creator reads
+    // label, params and position, which a core entry carries under the same
+    // names. So opening the workflow shows the node and the next save files
+    // it where it belongs. That is a one-way repair of old data, not a second
+    // home for the node: nothing writes a generate core any more, and the
+    // engine refuses to run one.
+    const legacyGenerateCores = Array.isArray(plan.cores)
+      ? (plan.cores as any[]).filter((cn) => cn?.type === 'generate')
+      : [];
+    const agentsToCreate = [
+      ...(Array.isArray(plan.agents) ? (plan.agents as any[]) : []),
+      ...legacyGenerateCores,
+    ];
+    const coresToCreate = Array.isArray(plan.cores)
+      ? (plan.cores as any[]).filter((cn) => cn?.type !== 'generate')
+      : plan.cores;
+    if (legacyGenerateCores.length > 0) {
+      console.warn(
+        `[PlanImport] ${legacyGenerateCores.length} generate node(s) were stored as cores. `
+        + 'Generate is an AI node now: they are shown as such, and saving this workflow '
+        + 'files them under the plan\'s agents, addressed agent:<label>.',
+      );
+    }
+
     // 6. Create agent nodes
-    if (plan.agents && Array.isArray(plan.agents)) {
-      const agentResult = createAgentNodes(plan.agents as any, currentX, currentY, nodes.length);
+    if (agentsToCreate.length > 0) {
+      const agentResult = createAgentNodes(agentsToCreate as any, currentX, currentY, nodes.length);
       nodes.push(...agentResult.nodes);
       agentResult.labelToNodeIdMap.forEach((v, k) => labelToNodeIdMap.set(k, v));
       currentY = agentResult.nextY;
@@ -1847,7 +1864,7 @@ export class NodeCreationService {
     }
 
     // 7. Create control nodes (cores: decision, switch, loop, split, merge, fork, transform, wait)
-    const controlResult = this.createCoreNodesInline(plan.cores, plan.mcps, currentX, currentY);
+    const controlResult = this.createCoreNodesInline(coresToCreate, plan.mcps, currentX, currentY);
     nodes.push(...controlResult.nodes);
     controlResult.labelToNodeIdMap.forEach((v, k) => labelToNodeIdMap.set(k, v));
     currentY = controlResult.nextY;

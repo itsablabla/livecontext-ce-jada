@@ -2,22 +2,21 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { clampMenuLeft } from '@/lib/utils/menuPlacement';
 import Link from 'next/link';
-import { X, User, Workflow, Table, MessageCircle, PanelLeft, Store, LogOut, Moon, Sun, Monitor, Bot, CreditCard, Globe, AppWindow, Coins, Info, ChevronRight, Check, Home, Building2, UserPlus, Folder, Plus, Columns3, Gift } from 'lucide-react';
+import { X, User, PanelLeft, LogOut, Moon, Sun, Monitor, Globe, Coins, ChevronRight, Check, Building2, UserPlus, Plus, Gift } from 'lucide-react';
 import { getDisplayName } from '@/lib/utils/userUtils';
 import { ConversationSidebar } from '@/components/chat/ConversationSidebar';
 import { SearchConversationModal } from '@/components/chat/SearchConversationModal';
 import LogoAnimate from '@/components/LogoAnimate';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { useAppVersion } from '@/hooks/useAppVersion';
-import AboutMenuVersion from '@/components/app/AboutMenuVersion';
 import { Button } from '@/components/ui/button';
 import { BalanceBreakdownTooltip } from '@/components/billing/BalanceBreakdown';
+import { SidebarCreditRing, SidebarCreditMenuSection } from '@/components/billing/SidebarCreditBalance';
 import { useTheme, type ThemePreference } from '@/components/ThemeProvider';
 import { useSidebarSafe } from '@/contexts/SidebarContext';
 import { useCurrentView } from '@/hooks/useCurrentView';
 import { useUnifiedApp } from '@/contexts/UnifiedAppContext';
-import { useStreamingSafe } from '@/contexts/StreamingContext';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
 import { useUserProfile } from '@/hooks/useUserProfile';
 import { useSubscription, useCreditBalance } from '@/lib/hooks/smart-hooks-complete';
@@ -30,7 +29,7 @@ import { OwnerOnlyGateModal } from '@/components/organization/OwnerOnlyGateModal
 import { WorkspaceAvatar } from '@/components/organization/WorkspaceAvatar';
 import { PublisherAvatar } from '@/components/marketplace/PublisherAvatar';
 import CreateWorkspaceModal from '@/components/organization/CreateWorkspaceModal';
-import { Conversation } from '@/lib/api/conversationApi';
+import { Conversation, conversationRoute } from '@/lib/api/conversationApi';
 import { useRouter, usePathname } from '@/i18n/navigation';
 import { useTranslations, useLocale } from 'next-intl';
 import { useSafeNavigate } from '@/contexts/NavigationGuardContext';
@@ -39,87 +38,45 @@ import { memo } from 'react';
 import { LucideIcon } from 'lucide-react';
 import { IS_CE } from '@/lib/edition';
 import { cloudLinkService, CLOUD_NO_SUBSCRIPTION } from '@/lib/api/cloud-link.service';
+import { NavIconButton } from '@/components/app/NavIconButton';
+import { SidebarNavigation } from '@/components/app/SidebarNavigation';
+
+// Re-exported so the surfaces (and tests) that have always imported it from
+// here keep working now that it lives in its own module - SidebarNavigation
+// needs it too, and importing it back out of this file would make the two
+// modules cyclic.
+export { NavIconButton };
+
+/**
+ * The fallback used when the sidebar context is absent (a surface that renders
+ * this shell outside the provider). Module-level, because an inline `() => {}`
+ * is a NEW function on every render, and these setters are dependencies of the
+ * callbacks below - which are what the memoized navigation and conversation
+ * components compare against.
+ */
+const NOOP = () => {};
 
 interface AppSidebarProps {
   onConversationCreated?: (conversationId: string, title: string | null, isTemporary: boolean) => void;
   onTitleUpdated?: (conversationId: string, title: string, isTemporary: boolean) => void;
-  onMarketPlaceClick?: () => void;
 }
-
-interface NavIconButtonProps {
-  icon: LucideIcon;
-  title: string;
-  onClick: (e: React.MouseEvent) => void;
-  isActive?: boolean;
-}
-
-/**
- * One entry of the collapsed rail. It is the SAME navigation entry as the row
- * the expanded panel shows (ConversationSidebar: Home, Marketplace, Board,
- * Agents, ...), so it gets that row's icon treatment: `text-theme-secondary` at
- * rest, `text-theme-primary` on hover and while it is the active view, over a
- * discreet `bg-surface-hover`.
- *
- * It used to be a `ghostGray` Button, whose `[&_svg]:!text-current` forced the
- * icon to the button's own `--text-primary` (full black in light theme) and
- * whose hover INVERTED the tile (dark background, light icon). So the same
- * entry read as two different things depending on whether the panel was open,
- * which is the mismatch this fixes. Size is unchanged: a 32px box, a 16px icon.
- */
-export const NavIconButton = memo(function NavIconButton({ icon: Icon, title, onClick, isActive = false }: NavIconButtonProps) {
-  return (
-    <Button
-      onClick={onClick}
-      // `ghost`, not `ghostGray`: the gray variant pins every nested svg to the
-      // button's colour, which would win over the icon's own classes below.
-      variant="ghost"
-      size="icon"
-      className={`group w-8 h-8 hover:bg-surface-hover hover:text-theme-primary ${isActive ? 'bg-surface-hover' : ''}`}
-      title={title}
-    >
-      <Icon className="w-4 h-4 text-theme-secondary transition-colors group-hover:text-theme-primary group-[.bg-surface-hover]:text-theme-primary" />
-    </Button>
-  );
-});
-
-
-// Chat navigation items with view mapping for active state
-// Titles are translation keys resolved at render time via sidebar.nav.*
-const chatNavItems = [
-  { icon: Store, titleKey: 'marketplace' as const, path: '/app/marketplace', view: 'marketplace' as const },
-  { icon: Columns3, titleKey: 'board' as const, path: '/app/board', view: 'board' as const },
-  { icon: Bot, titleKey: 'agents' as const, path: '/app/agent', view: 'agent' as const },
-  { icon: AppWindow, titleKey: 'applications' as const, path: '/app/applications', view: 'applications' as const },
-  { icon: Workflow, titleKey: 'workflows' as const, path: '/app/workflow', view: 'workflow' as const },
-  { icon: Monitor, titleKey: 'interfaces' as const, path: '/app/interface', view: 'interface' as const },
-  { icon: Table, titleKey: 'tables' as const, path: '/app/tables', view: 'data' as const },
-  { icon: Folder, titleKey: 'files' as const, path: '/app/files', view: 'files' as const },
-];
 
 export const AppSidebar = memo(function AppSidebar({
   onConversationCreated,
   onTitleUpdated,
-  onMarketPlaceClick,
 }: AppSidebarProps = {}) {
   const t = useTranslations('sidebar');
   // Use native Next.js routing with navigation guard
   const router = useRouter();
   const safeNavigate = useSafeNavigate();
   const pathname = usePathname();
-  const { view: currentView, conversationId: urlConversationId, isDetailPage } = useCurrentView();
+  // Only the conversation id is read here now: which entry is active is resolved
+  // inside SidebarNavigation, for both shapes at once.
+  const { conversationId: urlConversationId } = useCurrentView();
 
   // Use unified context for all app state
-  const appContext = useUnifiedApp();
-  const { state: appState, setCurrentConversationId } = appContext;
-  const streaming = useStreamingSafe();
+  const { state: appState, setCurrentConversationId, setIsNavigatingToNewChat } = useUnifiedApp();
   const currentConversationId = appState.currentConversationId || urlConversationId;
-
-  // Home is "active" only on the new-chat landing page - the SAME condition the
-  // expanded sidebar's Home row uses (ConversationSidebar), so collapsed and
-  // expanded highlight identically. New Chat is a pure action, never "active",
-  // so it no longer lights up alongside Home in collapsed mode.
-  const isHomeActive =
-    currentView === 'chat' && !isDetailPage && !currentConversationId && !pathname?.includes('/app/messages');
 
   // Sync context with URL when navigating (URL is source of truth for navigation)
   // NOTE: We only sync FROM URL TO context, never reset context here.
@@ -144,8 +101,8 @@ export const AppSidebar = memo(function AppSidebar({
   const sidebarContext = useSidebarSafe();
   const sidebarOpen = sidebarContext?.isOpen ?? false;
   const sidebarCollapsed = sidebarContext?.isCollapsed ?? true;
-  const setSidebarOpen = sidebarContext?.setOpen ?? (() => {});
-  const setSidebarCollapsed = sidebarContext?.setCollapsed ?? (() => {});
+  const setSidebarOpen = sidebarContext?.setOpen ?? NOOP;
+  const setSidebarCollapsed = sidebarContext?.setCollapsed ?? NOOP;
 
   const { user, isAuthenticated, isAuthChecking, avatarUrl, numericUserId } = useAuthGuard();
   const { profile: userProfile, isLoading: isProfileLoading } = useUserProfile();
@@ -183,8 +140,6 @@ export const AppSidebar = memo(function AppSidebar({
   const activeOrgPlanCode = (subscription as any)?.activeOrgPlanCode || null;
   const personalPlanCode = (subscription as any)?.subscription?.planCode || null;
   const planCode = activeOrgPlanCode || personalPlanCode;
-  const subscriptionNotReady = isSubscriptionLoading || subscription === undefined;
-  const hasActiveSubscription = subscriptionNotReady || !!(planCode && planCode !== 'FREE');
 
   const handleNavigate = useCallback((path: string) => {
     // Only show the navigation progress bar for a REAL page change. Resolve the
@@ -211,7 +166,10 @@ export const AppSidebar = memo(function AppSidebar({
 
   const handleConversationSelect = useCallback((conversation: Conversation | null) => {
     if (conversation) {
-      safeNavigate(`/app/c/${conversation.id}`);
+      // Routed by what the conversation IS, through the shared rule: a studio thread holds
+      // generation envelopes and its composer submits to a generation model, so the chat surface
+      // cannot serve it.
+      safeNavigate(conversationRoute(conversation));
     } else {
       // Navigate to /app/chat for new chat
       console.log('[AppSidebar] New chat selected - navigating to new chat');
@@ -227,18 +185,24 @@ export const AppSidebar = memo(function AppSidebar({
         // Already on /app/chat - reset directly without navigation
         console.log('[AppSidebar] Already on new chat page - resetting state directly');
         setCurrentConversationId(null);
-        appContext.setIsNavigatingToNewChat(false); // Ensure flag is cleared
+        setIsNavigatingToNewChat(false); // Ensure flag is cleared
       } else {
         // Coming from a conversation page - set flag and navigate
         console.log('[AppSidebar] Navigating from conversation to new chat');
-        appContext.setIsNavigatingToNewChat(true);
+        setIsNavigatingToNewChat(true);
         safeNavigate('/app/chat');
       }
     }
     if (sidebarOpen) {
       setSidebarOpen(false);
     }
-  }, [safeNavigate, sidebarOpen, setSidebarOpen, setCurrentConversationId, appContext, streaming, pathname]);
+    // Deps are the values this actually calls. It used to name `appContext` -
+    // the WHOLE unified context value, a new object on every model choice, tool
+    // selection or conversation update - and `streaming`, which it never reads.
+    // Either one re-created this callback mid-stream, which re-created the
+    // navigation and conversation components' props, which is how a memo()
+    // that looks right never once short-circuits.
+  }, [safeNavigate, sidebarOpen, setSidebarOpen, setCurrentConversationId, setIsNavigatingToNewChat, pathname]);
 
   const handleSignOut = useCallback(() => {
     logout({ logoutParams: { returnTo: `${window.location.origin}/app/` } });
@@ -249,24 +213,25 @@ export const AppSidebar = memo(function AppSidebar({
     setSidebarOpen(!sidebarOpen);
   }, [sidebarOpen, setSidebarOpen]);
 
+  // Memoized like every other callback handed to the conversation sidebar: that
+  // component is memo()'d, and one inline arrow here would give it a new prop on
+  // every render of this shell and redraw the whole list for nothing.
+  const handleOpenSearch = useCallback(() => {
+    setIsSearchModalOpen(true);
+    if (sidebarOpen) setSidebarOpen(false);
+  }, [sidebarOpen, setSidebarOpen]);
+
   const handleLogin = useCallback(() => {
     loginWithRedirect();
   }, [loginWithRedirect]);
 
-  // currentView already comes from useCurrentView() hook
 
-  // Memoized collapsed icons with active state - always show chat nav items
-  const collapsedIcons = useMemo(() => {
-    return chatNavItems.map(item => ({
-      ...item,
-      title: t(`nav.${item.titleKey}`),
-      isActive: currentView === item.view,
-      onClick: (e: React.MouseEvent) => {
-        e.stopPropagation();
-        handleNavigate(item.path);
-      }
-    }));
-  }, [handleNavigate, currentView, t]);
+  // Memoized because ConversationSidebar is memo()'d and this is one of its
+  // props. This shell re-renders on auth, profile, subscription, credit-balance
+  // and theme updates, none of which the conversation list draws; an inline
+  // arrow here would hand it a new prop on each of those and redraw the whole
+  // list anyway. Same for handleNavigate and handleOpenSearch.
+  const handleNewChat = useCallback(() => handleConversationSelect(null), [handleConversationSelect]);
 
   // Sidebar container classes
   const sidebarClasses = useMemo(() => {
@@ -349,40 +314,30 @@ export const AppSidebar = memo(function AppSidebar({
               </div>
 
               {/* Collapsed Icons */}
-              <div className={`hidden md:flex flex-col justify-center items-center gap-2 transition-all duration-300 ease-in-out ${sidebarCollapsed
+              <div
+                // Hidden from assistive tech too, not just from the eye. This
+                // block is clipped to zero rather than `display:none`d, so it
+                // stays in the accessibility tree - which is why the sr-only
+                // technique works. It duplicates every navigation entry the
+                // expanded panel below already renders, and now that both
+                // announce `aria-current`, a screen reader on the live page
+                // heard "current page" twice.
+                aria-hidden={!sidebarCollapsed}
+                className={`hidden md:flex flex-col justify-center items-center gap-2 transition-all duration-300 ease-in-out ${sidebarCollapsed
                 ? 'opacity-100 scale-100 mt-4'
                 : 'opacity-0 scale-95 h-0 overflow-hidden pointer-events-none'
                 }`}>
-                {/* Home icon - opens the new-chat landing page (above Marketplace) */}
-                <NavIconButton
-                  key="home"
-                  icon={Home}
-                  title={t('nav.home')}
-                  isActive={isHomeActive}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleConversationSelect(null);
-                  }}
-                />
-                {collapsedIcons.map((item) => (
-                  <NavIconButton
-                    key={item.path}
-                    icon={item.icon}
-                    title={item.title}
-                    onClick={item.onClick}
-                    isActive={item.isActive}
-                  />
-                ))}
-                {/* New Chat icon */}
-                <NavIconButton
-                  key="new-chat"
-                  icon={MessageCircle}
-                  title={t('nav.newChat')}
-                  isActive={false}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleConversationSelect(null);
-                  }}
+                <SidebarNavigation
+                  variant="rail"
+                  // `sidebarCollapsed` alone is not the rail being LIVE: on mobile
+                  // the drawer opens over a still-"collapsed" desktop rail, and the
+                  // panel inside it draws the same navigation (see the
+                  // sidebarCollapsed prop passed to ConversationSidebar below). Same
+                  // guard the user and sign-in sections already use.
+                  active={sidebarCollapsed && !sidebarOpen}
+                  currentConversationId={currentConversationId}
+                  onNewChat={handleNewChat}
+                  onNavigate={handleNavigate}
                 />
               </div>
             </div>
@@ -397,16 +352,8 @@ export const AppSidebar = memo(function AppSidebar({
               sidebarCollapsed={sidebarOpen ? false : sidebarCollapsed}
               onConversationCreated={onConversationCreated}
               onTitleUpdated={onTitleUpdated}
-              onNewChat={() => handleConversationSelect(null)}
-              onSearchClick={() => {
-                setIsSearchModalOpen(true);
-                if (sidebarOpen) handleSidebarToggle();
-              }}
-              onSearchWorkflows={() => console.log('Search workflows')}
-              onSearchDataSources={() => console.log('Search data sources')}
-              onMarketPlaceClick={() => handleNavigate('/app/marketplace')}
-              onSignOut={handleSignOut}
-              user={user}
+              onNewChat={handleNewChat}
+              onSearchClick={handleOpenSearch}
               onNavigate={handleNavigate}
             />
           </div>
@@ -433,7 +380,6 @@ export const AppSidebar = memo(function AppSidebar({
                 user={user}
                 avatarUrl={avatarUrl}
                 numericUserId={numericUserId}
-                hasActiveSubscription={IS_CE ? false : hasActiveSubscription}
                 planCode={planCode}
                 isSubscriptionLoading={IS_CE ? false : isSubscriptionLoading}
                 themePreference={themePreference}
@@ -484,7 +430,6 @@ interface UserSectionProps {
   /** Internal numeric user id - drives the canonical user avatar (photo or
    *  server-generated initials SVG) when no photo blob / OAuth picture is set. */
   numericUserId: number | null;
-  hasActiveSubscription: boolean;
   planCode: string | null;
   isSubscriptionLoading: boolean;
   themePreference: ThemePreference;
@@ -501,12 +446,15 @@ interface UserSectionProps {
   isCreditBalanceLoading?: boolean;
 }
 
+/** The usage page, for the readout's two halves: its href and its click handler
+ *  must lead to the same place and are written two lines apart. */
+const QUOTA_PATH = '/app/settings/quota';
+
 export const UserSection = memo(function UserSection({
   sidebarCollapsed,
   user,
   avatarUrl,
   numericUserId,
-  hasActiveSubscription,
   planCode,
   isSubscriptionLoading,
   themePreference,
@@ -525,7 +473,6 @@ export const UserSection = memo(function UserSection({
   const router = useRouter();
   const pathname = usePathname();
   // Build version + update status for the About menu entry (shared ['app-version'] query).
-  const { version: appVersion } = useAppVersion();
   // Use displayName from profile, fallback to OIDC user data
   const finalDisplayName = displayName || getDisplayName(user);
 
@@ -635,7 +582,12 @@ export const UserSection = memo(function UserSection({
       : 'Community';
   // Upsell: Cloud → when no active subscription; CE → only when the install is NOT linked (a linked
   // install's billing is on the admin's cloud account, so neither owner nor member sees the upsell).
-  const showUpgrade = IS_CE ? !isInstallCloudLinked : !hasActiveSubscription;
+  // CE ONLY. The cloud upsell lives in the credits section at the top of the user
+  // menu, next to the number that motivates it, and exists once instead of twice.
+  // CE has no such section - it bills in dollars against no monthly grant - and
+  // its upsell is "link this install to the cloud", so this badge stays the only
+  // home for it there.
+  const showUpgrade = IS_CE && !isInstallCloudLinked;
   // Never surface a "paused" (dormant) or soft-deleted org as the active workspace - the
   // owner downgraded below TEAM (paused) or it's pending purge (gateway rejects entering
   // both). Prefer current → default → any active, then anything.
@@ -849,13 +801,20 @@ export const UserSection = memo(function UserSection({
   }, [isWorkspaceManager, canCreateWorkspace, openWorkspaceUpgrade]);
 
   const menuGroups = [
-    // Group 1: Settings, Pricing & Credits/Usage. The quota entry exists in BOTH editions:
-    // cloud shows the credit ledger, CE shows the $-denominated CeQuotaPage (local ledger
-    // + mirrored cloud spend when linked).
+    // Group 1: Settings & Usage. No Pricing row: in cloud the credits section at the
+    // top of this menu carries the Upgrade CTA, and in an UNLINKED CE install the
+    // user block's own Upgrade badge does - so the row was a second copy of one
+    // action wherever a CTA is on screen. Where neither is (a cloud-linked CE
+    // install, or a wallet read that failed) pricing is still one hop away, in the
+    // settings nav, which lists it in both editions.
     [
       { icon: User, label: t('settings'), onClick: () => { onNavigate('/app/settings/overview'); setShowMenu(false); } },
-      { icon: CreditCard, label: t('pricing'), onClick: () => { onNavigate('/app/settings/pricing'); setShowMenu(false); } },
-      { icon: Coins, label: IS_CE ? t('cost') : t('credits'), onClick: () => { onNavigate('/app/settings/quota'); setShowMenu(false); } },
+      // CE only. In cloud the credits section at the top of this menu shows the
+      // figures and IS the link to that page, so a row that only navigates there
+      // would say the same thing twice.
+      ...(IS_CE
+        ? [{ icon: Coins, label: t('cost'), onClick: () => { onNavigate('/app/settings/quota'); setShowMenu(false); } }]
+        : []),
       // Refer & earn: a second entry point (alongside the settings nav) to the rewards page,
       // where the user shares their referral code/link and both parties earn credits.
       { icon: Gift, label: t('referAndEarn'), onClick: () => { onNavigate('/app/settings/rewards'); setShowMenu(false); } },
@@ -885,9 +844,12 @@ export const UserSection = memo(function UserSection({
           onClick: () => { handleCreateWorkspace(); },
         },
       ],
-    // Group 3: Information, Language & Theme
+    // Group 3: Language & Theme
     [
-      { icon: Info, label: t('about'), isAbout: true, onClick: () => { onNavigate('/app/settings/information'); setShowMenu(false); } },
+      // Platform status is NOT here. It was, above Language, and it put a
+      // live-polling traffic light in the menu people open to sign out or switch
+      // workspace. It now sits in Settings > Information, beside the other
+      // answers to "what is this install" (PlatformStatusCard).
       { icon: Globe, label: currentLanguageLabel, isLanguage: true, onClick: () => { setShowLanguageSubmenu(!showLanguageSubmenu); } },
       { icon: selectedThemeOption.icon, label: selectedThemeOption.label, isTheme: true, onClick: () => { setShowThemeSubmenu(!showThemeSubmenu); } },
     ],
@@ -897,20 +859,49 @@ export const UserSection = memo(function UserSection({
     ],
   ];
 
+  // Min 240px so the menu keeps the expanded width even when the sidebar is
+  // collapsed (the collapsed avatar button is ~32px wide; without this the menu
+  // would shrink to a narrow popup).
+  const userMenuWidth = Math.max(menuPosition.width, 240);
   const menuContent = showMenu && mounted ? createPortal(
     <div
       ref={menuRef}
+      data-testid="sidebar-user-menu"
       className="fixed z-[9999] bg-theme-primary rounded-2xl p-2 border border-gray-300/70 dark:border-gray-600/70"
       style={{
         top: `${menuPosition.top}px`,
-        left: `${menuPosition.left}px`,
-        // Min 240px so the menu keeps the expanded width even when the sidebar is
-        // collapsed (the collapsed avatar button is ~32px wide; without this the
-        // menu would shrink to a narrow popup).
-        width: `${Math.max(menuPosition.width, 240)}px`,
+        // Anchored to the trigger, then held inside the screen: the 240px floor
+        // above can make the menu wider than the button it hangs from.
+        left: `${clampMenuLeft(menuPosition.left, userMenuWidth)}px`,
+        width: `${userMenuWidth}px`,
+        maxWidth: 'calc(100vw - 1rem)',
+        // The menu grows UPWARD from the trigger, which sits at the bottom of the
+        // sidebar: on a phone its rows plus the credit readout plus an expanded
+        // submenu are taller than the space above it, and the top of the menu
+        // simply left the screen. Bounded by that space, with its own scroll.
+        maxHeight: `${Math.max(200, menuPosition.top - 8)}px`,
+        overflowY: 'auto',
+        // Spelled out because CSS will not leave it alone: with one axis set to
+        // `auto` the other's `visible` computes to `auto` too, which put a
+        // horizontal scrollbar inside the menu on a screen narrower than it.
+        overflowX: 'hidden',
         transform: 'translateY(-100%)'
       }}
     >
+      {/* The wallet, first thing the menu says. Separated from the rows below
+          because it is a readout, not a row of actions. */}
+      <SidebarCreditMenuSection
+        viewUsage={{
+          // The href is what makes it a real link (new tab, copy link address);
+          // the handler is the ordinary click, which routes client-side and
+          // closes the menu behind it. Neither carries a locale prefix here:
+          // the panel renders the app's locale-aware Link, and onNavigate goes
+          // through the locale-aware router.
+          href: QUOTA_PATH,
+          onNavigate: () => { onNavigate(QUOTA_PATH); setShowMenu(false); },
+        }}
+        onUpgrade={() => { onNavigate('/app/settings/pricing'); setShowMenu(false); }}
+      />
       <div className="space-y-1">
         {menuGroups.map((group, groupIndex) => (
           <div key={`menu-group-${groupIndex}`}>
@@ -932,7 +923,6 @@ export const UserSection = memo(function UserSection({
                       ? <WorkspaceAvatar name={activeWorkspaceName || item.label} avatarUrl={activeWorkspace?.avatarUrl} size="xs" className="border border-theme" />
                       : <Icon className="h-4 w-4" />}
                     <span className="text-sm flex-1 text-left truncate">{item.label}</span>
-                    {item.isAbout && <AboutMenuVersion version={appVersion} />}
                     {item.isLanguage && <ChevronRight className={`h-3.5 w-3.5 text-theme-muted transition-transform ${showLanguageSubmenu ? 'rotate-90' : ''}`} />}
                     {item.isWorkspace && <ChevronRight className={`h-3.5 w-3.5 text-theme-muted transition-transform ${showWorkspaceSubmenu ? 'rotate-90' : ''}`} />}
                     {item.isTheme && <ChevronRight className={`h-3.5 w-3.5 text-theme-muted transition-transform ${showThemeSubmenu ? 'rotate-90' : ''}`} />}
@@ -1077,35 +1067,52 @@ export const UserSection = memo(function UserSection({
               /credits/balance endpoint resolves the payer server-side so the
               number returned IS the owner's wallet for guests, executor's
               wallet for solo users. Display as-is. */}
-          {!isCreditBalanceLoading && creditBalance !== null && creditBalance !== undefined && (
+          {/* CE only. Cloud draws its wallet as a ring AROUND the avatar below,
+              not as a separate item in this column.
+              CAVEAT, verified 2026-09-01: this CE arm is DEAD. This component's
+              only caller passes `creditBalance={IS_CE ? null : ...}` (see the
+              props above), so in CE the badge's own null-guard is never
+              satisfied and a self-hosted sidebar shows no cost indicator at all.
+              Pre-existing, from the CE-monolith commit; left as-is here because
+              resurrecting a CE billing display is a product call, not a side
+              effect of restyling the cloud one. Pinned by
+              AppSidebar.creditBlockMount.test.tsx so it cannot change unnoticed. */}
+          {IS_CE && (!isCreditBalanceLoading && creditBalance !== null && creditBalance !== undefined && (
             <BalanceBreakdownTooltip subBalance={creditSubBalance ?? null} paygBalance={creditPaygBalance ?? null}>
               <button
                 onClick={(e) => { e.stopPropagation(); onNavigate('/app/settings/quota'); }}
                 className="flex items-center gap-0.5 text-xs text-theme-muted hover:text-theme-primary transition-colors cursor-pointer"
-                title={`${IS_CE ? t('cost') : t('credits')}: ${formatCredits(creditBalance)}`}
+                title={`${t('cost')}: ${formatCredits(creditBalance)}`}
               >
                 <Coins className="h-3 w-3" />
                 <span className="text-[10px]">{formatCredits(creditBalance)}</span>
               </button>
             </BalanceBreakdownTooltip>
-          )}
+          ))}
           <button
             ref={buttonRef}
             onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-            className="w-8 h-8 p-0 rounded-full flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-[var(--accent-primary)] transition-all"
+            /* w-11 = 44px = the 32px avatar plus the ring's 6px gap on each
+               side. The button reserves that box, so the ring sits INSIDE it
+               rather than escaping a 32px one. The hover affordance is a
+               background rather than `ring-2`, which would have drawn a second
+               ring on top of the credit ring. */
+            className="w-11 h-11 p-0 rounded-full flex items-center justify-center cursor-pointer hover:bg-surface-hover transition-all"
             title={finalDisplayName}
           >
-            {(avatarUrl || user?.picture) ? (
-              <img
-                src={avatarUrl || user.picture}
-                alt={finalDisplayName}
-                className="w-8 h-8 rounded-full border border-theme object-cover flex-shrink-0"
-              />
-            ) : (
-              // No photo: canonical user avatar (server-generated initials SVG),
-              // not a generic person icon - same letters as the public profile.
-              <PublisherAvatar userId={numericUserId} name={finalDisplayName} size={32} variant="overlay" />
-            )}
+            <SidebarCreditRing>
+              {(avatarUrl || user?.picture) ? (
+                <img
+                  src={avatarUrl || user.picture}
+                  alt={finalDisplayName}
+                  className="w-8 h-8 rounded-full border border-theme object-cover flex-shrink-0"
+                />
+              ) : (
+                // No photo: canonical user avatar (server-generated initials SVG),
+                // not a generic person icon - same letters as the public profile.
+                <PublisherAvatar userId={numericUserId} name={finalDisplayName} size={32} variant="overlay" />
+              )}
+            </SidebarCreditRing>
           </button>
         </div>
       ) : (
@@ -1118,19 +1125,25 @@ export const UserSection = memo(function UserSection({
               className="group relative rounded-lg cursor-pointer transition-all duration-200 flex-1 min-w-0 bg-transparent hover:bg-surface-hover p-1"
             >
               <div className="flex items-center min-w-0">
-                {(avatarUrl || user?.picture) ? (
-                  <img
-                    src={avatarUrl || user.picture}
-                    alt={finalDisplayName}
-                    className="w-8 h-8 rounded-full border border-theme object-cover flex-shrink-0 mr-2"
-                  />
-                ) : (
-                  // No photo: canonical user avatar (server-generated initials SVG),
-                  // not a generic person icon - same letters as the public profile.
-                  <div className="mr-2 flex-shrink-0">
-                    <PublisherAvatar userId={numericUserId} name={finalDisplayName} size={32} variant="overlay" />
-                  </div>
-                )}
+                {/* The wallet is a ring AROUND this avatar, not an item beside
+                    it: one indicator, in the place the eye already goes. The
+                    wrapper reserves the ring's box, so the row lays out around
+                    the ring instead of the ring overflowing the row. */}
+                <div className="mr-2 flex-shrink-0">
+                  <SidebarCreditRing>
+                    {(avatarUrl || user?.picture) ? (
+                      <img
+                        src={avatarUrl || user.picture}
+                        alt={finalDisplayName}
+                        className="w-8 h-8 rounded-full border border-theme object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      // No photo: canonical user avatar (server-generated initials SVG),
+                      // not a generic person icon - same letters as the public profile.
+                      <PublisherAvatar userId={numericUserId} name={finalDisplayName} size={32} variant="overlay" />
+                    )}
+                  </SidebarCreditRing>
+                </div>
                 <div className="flex-1 min-w-0">
                   {isLoadingProfile ? (
                     <div className="w-24 h-4 rounded bg-theme-tertiary animate-pulse" />
@@ -1143,28 +1156,41 @@ export const UserSection = memo(function UserSection({
                   <div className="flex items-center gap-2 mt-0.5">
                     {isSubscriptionLoading || ceLinkPending ? (
                       <div className="w-12 h-3 rounded bg-theme-tertiary animate-pulse" />
-                    ) : showUpgrade ? (
+                    ) : (
                       <>
-                        <span className="text-xs text-theme-muted">
+                        {/* The plan name is a LABEL, not a control. It used to open
+                            the plan comparison, which put that overlay on a surface
+                            the reader passes through constantly; it now lives on the
+                            pricing page, where choosing a plan is the task. */}
+                        <span data-testid="sidebar-plan-name" className="text-xs text-theme-muted">
                           {displayPlanName}
                         </span>
-                        <span
-                          role="link"
-                          onClick={(e) => { e.stopPropagation(); onNavigate('/app/settings/pricing'); }}
-                          className="text-xs px-2 py-0.5 rounded-md bg-black dark:bg-white text-white dark:text-black hover:bg-black/90 dark:hover:bg-white/90 font-medium transition-all cursor-pointer"
-                        >
-                          {t('upgrade')}
-                        </span>
+                        {showUpgrade && (
+                          <span
+                            role="link"
+                            // Focusable and operable from the keyboard. A role says
+                            // "this is a control", so the keyboard has to agree with it.
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); onNavigate('/app/settings/pricing'); }}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter' && e.key !== ' ') return;
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onNavigate('/app/settings/pricing');
+                            }}
+                            className="text-xs px-2 py-0.5 rounded-md bg-[var(--accent-primary)] text-[var(--accent-foreground)] hover:bg-[var(--accent-hover)] font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-primary)]"
+                          >
+                            {t('upgrade')}
+                          </span>
+                        )}
                       </>
-                    ) : (
-                      <span className="text-xs text-theme-muted">
-                        {displayPlanName}
-                      </span>
                     )}
-                    {/* Credit balance indicator - owner-pays (ADR-009):
-                        backend resolves payer, returned balance IS the owner's
-                        wallet for guests, executor's wallet for solo users. */}
-                    {!isCreditBalanceLoading && creditBalance !== null && creditBalance !== undefined && (
+                    {/* CE only. Cloud's wallet is the ring around the avatar to
+                        the left, so nothing goes on this row.
+                        Owner-pays (ADR-009): the backend resolves the payer, so
+                        the number returned IS the owner's wallet for guests and
+                        the executor's for solo users. Display as-is. */}
+                    {IS_CE && (!isCreditBalanceLoading && creditBalance !== null && creditBalance !== undefined && (
                       <BalanceBreakdownTooltip subBalance={creditSubBalance ?? null} paygBalance={creditPaygBalance ?? null}>
                         <span
                           role="link"
@@ -1176,7 +1202,7 @@ export const UserSection = memo(function UserSection({
                           {formatCredits(creditBalance)}
                         </span>
                       </BalanceBreakdownTooltip>
-                    )}
+                    ))}
                   </div>
                 </div>
               </div>
@@ -1201,7 +1227,7 @@ const SignInSection = memo(function SignInSection({ sidebarCollapsed, onLogin }:
       <div className="flex justify-center p-2">
         <Button
           onClick={onLogin}
-          variant="contrast"
+          variant="default"
           className="w-8 h-8 p-0 rounded-xl flex items-center justify-center shadow-none hover:shadow-none"
           title={t('signIn')}
         >
@@ -1215,7 +1241,7 @@ const SignInSection = memo(function SignInSection({ sidebarCollapsed, onLogin }:
     <div className="p-2">
       <Button
         onClick={onLogin}
-        variant="contrast"
+        variant="default"
         className="w-full justify-start shadow-none hover:shadow-none"
       >
         <User className="w-4 h-4" />

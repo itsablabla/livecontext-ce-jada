@@ -1,5 +1,5 @@
 /**
- * Plan <-> builder-data mapping for the `core:generate` node.
+ * Plan <-> builder-data mapping for the `agent:generate` node.
  *
  * <p>The node's config is a flat map: a `model` id, an optional
  * `credential_source`, and whichever unified generation parameters the chosen
@@ -46,6 +46,24 @@ export const GENERATE_NUMERIC_PARAMS: readonly string[] = [
 ];
 
 /** Parameters whose value is a whole FileRef coming from an upstream node. */
+/**
+ * What a model can say one of its files is FOR.
+ *
+ * <p>Mirrors GenerationSpec.AssetRole on the wire. Listed rather than read
+ * straight off the catalogue because the label comes from a translation key
+ * built out of this value: an unknown role would render the raw key path
+ * ("assetRoles.last_frame") onto the field, which is how a new role added to
+ * the backend enum shows up as a broken label rather than as a missing
+ * translation anyone notices. Falling back to the parameter name is worse than
+ * the role and better than a key path.
+ */
+export const GENERATE_ASSET_ROLES: readonly string[] = [
+  'source',
+  'first_frame',
+  'reference',
+  'mask',
+];
+
 export const GENERATE_FILE_PARAMS: readonly string[] = [
   'input_image',
   'input_audio',

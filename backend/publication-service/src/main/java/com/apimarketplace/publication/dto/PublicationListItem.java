@@ -73,7 +73,13 @@ public record PublicationListItem(
         // raw JSON array of detected feature codes (CLI_AGENT, VECTOR_SEARCH),
         // read as TEXT here like nodeIcons and parsed in toResponseMap().
         Boolean ceExclusive,
-        String ceExclusiveFeatures
+        String ceExclusiveFeatures,
+        /**
+         * True when this publication belongs in the Studio: it PRODUCES a media asset rather than
+         * finding, publishing or reading one. A SECOND AXIS - the category keeps saying what the
+         * application is about.
+         */
+        Boolean studio
 ) {
 
     public Map<String, Object> toResponseMap() {
@@ -103,6 +109,9 @@ public record PublicationListItem(
             response.put("category", null);
         }
 
+        // The studio axis travels beside the category, never instead of it: the reader still needs
+        // to know what the application is ABOUT.
+        response.put("studio", Boolean.TRUE.equals(studio));
         response.put("creditsPerUse", creditsPerUse);
         // publisherId is exposed because the marketplace avatar component
         // resolves /api/proxy/users/{publisherId}/avatar - without it

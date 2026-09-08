@@ -86,7 +86,7 @@ export function SuccessModal({
           </Button>
           <Button
             onClick={onModifyCurrent}
-            variant="contrast"
+            variant="default"
             size="default"
             className="flex-1 flex items-center justify-center gap-2"
           >

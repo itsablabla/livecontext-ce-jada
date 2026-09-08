@@ -332,7 +332,7 @@ public class ConversationAgentService {
             AgentExecutionResponseDto response;
             try {
                 response = useBridge
-                        ? bridgeClient.executeViaBridge(dto)
+                        ? dispatchToBridge(dto, request.getOrgId())
                         : dispatchAgentExecution(dto, request.getUserRoles());
             } catch (RuntimeException ex) {
                 // Inner try only exists to emit a paired execution_completed(FAILED)
@@ -687,6 +687,54 @@ public class ConversationAgentService {
      * subscription gate is enforced on {@code dto.provider()} (resolved), not
      * on the chat-header request provider.
      */
+    /**
+     * Post to the bridge, with the workspace's long-term memory appended first.
+     *
+     * <p><b>This is the second injection point in the product, and it exists because
+     * this path never reaches the first one.</b> Every other execution is dispatched
+     * to agent-service, which appends the block above its own bridge/direct split.
+     * A chat on a CLI provider does not: it posts to the bridge from here, so
+     * agent-service is never in the loop and nothing there can append anything. That
+     * is not an edge case, it is the default for every claude-code, codex and
+     * gemini-cli chat, and without this call those chats would run with no memory
+     * while every other path had it.
+     *
+     * <p>The bridge does read the prompt: it passes {@code systemPrompt} to the CLI
+     * on stdin, so a block appended here reaches the model.
+     *
+     * <p>Both bridge dispatches (streaming and sync) funnel through this method on
+     * purpose. They used to call the bridge client directly, one each, which is
+     * precisely the shape that lets an enrichment be added to one and missed on the
+     * other. {@code MemoryInjectionCallsiteInvariantTest} fails the build if a third
+     * direct call appears.
+     */
+    private AgentExecutionResponseDto dispatchToBridge(AgentExecutionRequestDto dto, String organizationId) {
+        AgentExecutionRequestDto enriched = dto;
+        try {
+            enriched = dto.withSystemPrompt(agentClient.appendMemoryBlock(
+                dto.systemPrompt(),
+                dto.tenantId(),
+                // Threaded from the ChatRequest, NOT read off the thread. This dispatch
+                // runs on an @Async stream worker, where RequestContextHolder is gone -
+                // the same reason every other workspace-dependent call in this class
+                // takes request.getOrgId() explicitly (see the observability call). It
+                // happened to work through the ThreadLocal only because
+                // ChatStreamInitializer wraps the worker in runWithOrgScope; a future
+                // caller that does not would have silently lost memory on every CLI
+                // chat, with nothing above WARN to show for it.
+                organizationId,
+                dto.agentEntityId()));
+        } catch (RuntimeException memoryUnavailable) {
+            // The client swallows its own errors today, and this catch does not rely
+            // on it continuing to. The call sits directly in front of a user's
+            // message: a chat that runs without memory is degraded, a chat that dies
+            // because a memory read timed out is broken.
+            log.warn("Long-term memory unavailable for this bridge run, continuing without it: {}",
+                memoryUnavailable.toString());
+        }
+        return bridgeClient.executeViaBridge(enriched);
+    }
+
     private void executeViaBridge(ChatRequest request, AgentLoopContext context, AgentExecutionRequestDto dto,
                                   StreamingOutput streamOutput, String conversationId) {
         String streamId = streamOutput.getCurrentStreamId();
@@ -714,7 +762,7 @@ public class ConversationAgentService {
             publishFleetEvent(agentEntityId, executionId, "execution_started",
                 dto.model(), dto.source() != null ? dto.source() : "CONVERSATION", taskId);
 
-            AgentExecutionResponseDto response = bridgeClient.executeViaBridge(dto);
+            AgentExecutionResponseDto response = dispatchToBridge(dto, request.getOrgId());
 
             if (response == null) {
                 log.error("Bridge returned null response for conversation: {}", conversationId);
@@ -1251,6 +1299,19 @@ public class ConversationAgentService {
             }
         }
 
+        // Case 1c: a question the agent put to the person (ask_user) that nobody answered yet.
+        // The tool sets userQuestionRequested only while the question is OPEN (its park ran
+        // out of time, or could not start); an answered or dismissed card carries no flag.
+        if (metadata != null && Boolean.TRUE.equals(metadata.get("userQuestionRequested"))
+                && metadata.get("userQuestion") instanceof Map<?, ?> question) {
+            Object toolCallId = question.get("toolCallId");
+            List<Map<String, Object>> questions = question.get("questions") instanceof List<?> l
+                ? (List<Map<String, Object>>) l : List.of();
+            if (toolCallId != null && !String.valueOf(toolCallId).isBlank() && !questions.isEmpty()) {
+                return PendingActionService.buildUserQuestionAction(String.valueOf(toolCallId), questions);
+            }
+        }
+
         // Case 2: approval_needed JSON in the tool content (soft credential warning).
         String content = (String) tr.get("content");
         if (content != null && content.contains("approval_needed")) {
@@ -1543,6 +1604,12 @@ public class ConversationAgentService {
                     authorization.put("argsSummary", action.get("args_summary"));
                     authorization.put("applicationId", action.get("application_id"));
                     event.put("toolAuthorization", authorization);
+                } else if ("user_question".equals(waitingFor)) {
+                    // Frontend discriminant: 'askUser'. Non-blocking: the turn has ended.
+                    Map<String, Object> askUser = new LinkedHashMap<>();
+                    askUser.put("toolCallId", action.get("tool_call_id"));
+                    askUser.put("questions", action.get("questions"));
+                    event.put("askUser", askUser);
                 } else {
                     continue;
                 }

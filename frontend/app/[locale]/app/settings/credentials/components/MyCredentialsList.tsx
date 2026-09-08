@@ -34,6 +34,7 @@ import {
   PaginatedCredentialsResponse,
 } from "@/lib/api/orchestrator";
 import { useQueryClient } from "@tanstack/react-query";
+import { slugOrNull, track } from "@/lib/analytics/analytics";
 import { useTranslations } from "next-intl";
 import { useToast, type ToastData } from "@/components/Toast";
 import { formatDateTime } from "@/lib/utils/dateFormatters";
@@ -329,6 +330,7 @@ export function MyCredentialsList({
     setIsDeleting(true);
     try {
       await orchestratorApi.deleteCredential(deleteCredential.id);
+      track('credential_deleted', { count: 1, integration: slugOrNull(deleteCredential.integration) });
       setDeleteCredential(null);
       // Refresh the list
       fetchCredentials(currentPage);
@@ -349,6 +351,7 @@ export function MyCredentialsList({
         orchestratorApi.deleteCredential(Number(id))
       );
       await Promise.all(deletePromises);
+      track('credential_deleted', { count: deletePromises.length });
       setSelectedCredentials(new Set());
       fetchCredentials(currentPage);
     } catch (err) {

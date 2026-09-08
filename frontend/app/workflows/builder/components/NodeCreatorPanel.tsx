@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { canvasChromeSurfaceClass } from '@/components/ui/canvas-chrome';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { useMcpApis, useMcpApiTools, ApiSystem, ApiTool } from '../hooks/useMcpData';
+import { useMcpApis, useMcpApiTools, usePopularApis, ApiSystem, ApiTool } from '../hooks/useMcpData';
 import { useDataSources, useDataSourceTables, DataSource } from '../hooks/useDataSourceData';
 import { useWorkflows } from '../hooks/useWorkflowsData';
 import { useInterfaces } from '../hooks/useInterfaces';
@@ -33,7 +33,9 @@ import {
 import type { BuilderNodeKind } from '../types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { NodeIcon } from './nodes/shared';
-import { DraggableNodeItem, useBreadcrumbs, useLazyLoadObserver } from './palette/index';
+import { DraggableNodeItem, useBreadcrumbs, useLazyLoadObserver, useOnVisibleOnce } from './palette/index';
+import { usePlanFeatureGate, type PlanLock } from '@/hooks/usePlanFeatureGate';
+import { nodeFeatureKey, catalogFeatureKeys } from '../nodes/planFeatureKeys';
 
 type NodeCreatorPanelProps = {
   isOpen: boolean;
@@ -76,6 +78,32 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
   } = navigation;
 
   const handleBack = useNavigationBack(navigation);
+
+  // Per-plan availability. Asked ONCE for the whole panel (the hook holds a single
+  // shared query) and answered per row from the map already in hand, so a palette
+  // of two hundred integrations still makes one request.
+  const { lockFor } = usePlanFeatureGate();
+
+  const nodeLock = React.useCallback(
+    (paletteId: string): PlanLock => lockFor([nodeFeatureKey(paletteId)]),
+    [lockFor],
+  );
+  const catalogLock = React.useCallback(
+    (apiSlug: string | null | undefined, toolSlug?: string | null): PlanLock =>
+      lockFor(catalogFeatureKeys(apiSlug, toolSlug)),
+    [lockFor],
+  );
+
+  /**
+   * The plan marker is INFORMATION, not a gate: the row still adds its node.
+   * A user may legitimately build the workflow now and subscribe before running
+   * it, and the node carries the restriction visibly on the canvas from the
+   * moment it lands there.
+   */
+  const guardClick = React.useCallback(
+    (_lock: PlanLock, _label: string, action: () => void) => action,
+    [],
+  );
   const paletteTree = React.useMemo(() => getPaletteCategoryTree(), []);
   // Frequently used nodes - hardcoded list with navigation items
   const FEATURED_NAV_IDS = new Set(['ai-agent', 'table', 'interface']);
@@ -90,6 +118,83 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
       return null;
     }).filter(Boolean) as { id: string; label: string; description: string; kind: BuilderNodeKind; family: NodeFamily; isNav: boolean }[],
   []);
+
+  /**
+   * Palette rows that open a picker instead of dropping a node.
+   *
+   * Kept as one list because the search results and the category list must agree on
+   * it: a row that navigates in one place and drops a half-configured node in the
+   * other is the same bug twice. Mirrors the branches of `handleItemClick` and
+   * `handleTriggerClick` below - add an id to both when you add a picker.
+   */
+  /**
+   * The rows that are a FOLDER rather than a thing: the five tiles the palette
+   * opens on, plus the integrations tile.
+   *
+   * It exists because no rule over the props can tell a folder from a row that
+   * drills down - "Triggers" and "Tables trigger" are both `nodeKind: 'entry'`
+   * with a chevron. Declaring it is therefore the ONLY way, and declaring it by
+   * ID is what keeps the three call sites agreeing: the same row reached from
+   * the root, from inside a category, or from a search hit must say the same
+   * thing about itself. It was `paletteRole="category"` hardcoded on the whole
+   * list before, which badged all 29 Core nodes "Category" and withheld the
+   * drag hint from rows that visibly offer a grip.
+   */
+  const GROUP_TILE_IDS = React.useMemo(() => new Set([
+    'triggers', 'ai', 'flow', 'core', 'mcp',
+  ]), []);
+  const paletteRoleFor = React.useCallback(
+    (id: string) => (GROUP_TILE_IDS.has(id) ? ('category' as const) : undefined),
+    [GROUP_TILE_IDS],
+  );
+
+  const NAV_ONLY_IDS = React.useMemo(() => new Set([
+    'mcp', 'triggers', 'tables-trigger', 'table', 'interface', 'ai-agent', 'sub_workflow',
+    'workflows-trigger', 'error-trigger',
+    'create-row', 'create-column', 'read-row', 'update-row', 'delete-row', 'find-row',
+  ]), []);
+
+  /**
+   * Every node the palette can create, flattened once.
+   *
+   * Search used to see only what the CURRENT screen listed, which at the root is the
+   * five category cards: typing "webhook", "split" or "delete row" found nothing,
+   * because those live one or two levels down. This index is what the search box
+   * filters instead, so a node is reachable by its name from anywhere.
+   *
+   * Triggers come from TRIGGER_TYPES rather than the tree because that list is what
+   * the Triggers screen actually renders (it carries `workflows-trigger`, which has no
+   * node class), and claiming them first means a duplicate in the tree is skipped and
+   * every trigger routes through the one handler that knows which ones open a picker.
+   */
+  const searchableNodes = React.useMemo(() => {
+    const topLevelIds = new Set(paletteTree.map((category) => category.id));
+    const seen = new Set<string>();
+    const result: { id: string; name: string; description: string; isTrigger: boolean }[] = [];
+
+    TRIGGER_TYPES.forEach((trigger) => {
+      seen.add(trigger.id);
+      result.push({ id: trigger.id, name: trigger.name, description: trigger.description, isTrigger: true });
+    });
+
+    const walk = (nodes: PaletteCategoryNode[]) => {
+      nodes.forEach((node) => {
+        if (node.children?.length) { walk(node.children); return; }
+        if (node.type !== 'node') return;
+        const id = node.nodeClassId || node.id;
+        // The tree nests a node of the same id under its own category ("triggers"
+        // inside Triggers, "mcp" inside MCPs) - those ARE the category cards, already
+        // listed above the results. The other mcp-* classes exist only to match
+        // existing canvas nodes and are never rendered as palette rows.
+        if (topLevelIds.has(id) || id.startsWith('mcp')) return;
+        if (seen.has(id)) return;
+        seen.add(id);
+        result.push({ id, name: node.name, description: node.description, isTrigger: false });
+      });
+    };
+    walk(paletteTree);
+    return result;
+  }, [paletteTree]);
 
   const findCategoryNode = React.useCallback((id: string | null): PaletteCategoryNode | null => {
     if (!id) return null;
@@ -224,6 +329,83 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
     return apis.filter(api => api.apiName.toLowerCase().includes(query) || api.description?.toLowerCase().includes(query) || api.slug.toLowerCase().includes(query));
   }, [apis, searchQuery, navigationLevel]);
 
+  /**
+   * Nodes matching the search box, at the root screen only.
+   *
+   * Inside a category the existing child filter already answers "what here matches",
+   * and re-listing the whole catalogue underneath it would bury the answer.
+   *
+   * Ordering puts a name hit before a description hit, and a name that STARTS with the
+   * query first of all: typing "split" must offer the Split node before every node
+   * whose description happens to mention splitting.
+   */
+  const filteredNodes = React.useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query || navigationLevel !== 'categories' || selectedCategoryId) return [];
+    const score = (node: { id: string; name: string; description: string }) => {
+      const name = node.name.toLowerCase();
+      if (name.startsWith(query)) return 0;
+      if (name.includes(query)) return 1;
+      if (node.id.toLowerCase().includes(query)) return 2;
+      return 3;
+    };
+    return searchableNodes
+      .map((node) => ({ node, rank: score(node) }))
+      .filter(({ node, rank }) => rank < 3 || (node.description || '').toLowerCase().includes(query))
+      .sort((a, b) => a.rank - b.rank)
+      .map(({ node }) => node);
+  }, [searchableNodes, searchQuery, navigationLevel, selectedCategoryId]);
+
+  // Ranked integrations section - lazy in two steps. `popularSectionRef` latches the
+  // first time the section scrolls into view, which is what enables the query at all;
+  // `popularLoadMoreRef` then pages it. Opening the palette on the categories fetches
+  // nothing.
+  const isRootScreen = navigationLevel === 'categories' && !selectedCategoryId && !searchQuery.trim();
+  const [popularSectionRef, popularSectionSeen] = useOnVisibleOnce(isOpen && isRootScreen);
+  const {
+    data: popularApisData,
+    fetchNextPage: fetchNextPopularPage,
+    hasNextPage: hasNextPopularPage,
+    isFetching: isFetchingPopular,
+    isLoading: isLoadingPopularInitial,
+  } = usePopularApis(isOpen && isRootScreen && popularSectionSeen);
+
+  const popularApis = React.useMemo(() => {
+    const all = popularApisData?.pages.flatMap((page) => page.content ?? []) || [];
+    // The pages come from a total order over a fixed catalogue, so a repeat means two
+    // fetches straddled a flush that reordered the ranking. Keep the first sighting:
+    // dropping the row entirely would make an integration vanish mid-scroll.
+    const unique = new Map<string, typeof all[0]>();
+    all.forEach((api) => { if (api?.slug && !unique.has(api.slug)) unique.set(api.slug, api); });
+    return Array.from(unique.values());
+  }, [popularApisData]);
+
+  const popularLoadMoreRef = useLazyLoadObserver({
+    enabled: isOpen && isRootScreen && popularSectionSeen,
+    hasMore: !!hasNextPopularPage,
+    isLoading: isFetchingPopular,
+    isInitialLoading: isLoadingPopularInitial,
+    dataLength: popularApis.length,
+    onLoadMore: () => fetchNextPopularPage(),
+  });
+
+  /**
+   * Where the tools screen looks up its parent API.
+   *
+   * It used to read the `apis` list alone, which is loaded only by the MCP screen and
+   * by a search. Reached from the ranked integrations section that list is EMPTY, so a
+   * tool picked there produced a node with a blank `apiName` and no integration icon -
+   * silently, because every one of those fields is optional. Both entry points feed the
+   * same lookup, so both produce the same node.
+   */
+  const apiLookup = React.useMemo(() => {
+    const bySlug = new Map<string, ApiSystem>();
+    popularApis.forEach((api) => { if (api?.slug) bySlug.set(api.slug, api); });
+    // The searched/browsed list wins on a collision: it is the fresher of the two.
+    apis.forEach((api) => { if (api?.slug) bySlug.set(api.slug, api); });
+    return bySlug;
+  }, [apis, popularApis]);
+
   // Handlers
   const handleItemClick = (item: PaletteCategoryNode) => {
     const navMap: Record<string, () => void> = {
@@ -255,9 +437,35 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
     setSelectedApiId(api.slug); setNavigationLevel('tools'); setSearchQuery(''); setToolPage(0);
   };
 
+  /**
+   * Click a trigger, from the Triggers screen or from a search result.
+   *
+   * Three of them open a picker rather than dropping a node, and the picker needs
+   * `selectedType` set: reached from the Triggers screen it already was, reached from a
+   * search result it is null, which is exactly how a Tables trigger would have been
+   * built as an ordinary table node. Setting it here makes both routes identical.
+   */
+  const handleTriggerClick = (triggerId: string, name?: string, description?: string) => {
+    if (triggerId === 'tables-trigger') {
+      setNavigationLevel('datasources'); setSearchQuery('');
+      setSelectedDataSourceId(null); setSelectedCategoryId(null); setSelectedType('triggers');
+      return;
+    }
+    if (triggerId === 'workflows-trigger' || triggerId === 'error-trigger') {
+      setNavigationLevel('workflows'); setSearchQuery(''); setSelectedCategoryId(null);
+      setSelectedType(triggerId === 'error-trigger' ? 'error_trigger' : 'triggers');
+      return;
+    }
+    // Standalone trigger resources (webhook/schedule/chat/form): create the React-Flow
+    // node only. The resource itself is created once by the form's auto-create effect
+    // on inspect, using a stable sourceNodeId so refreshes hit the backend dedup
+    // instead of burning quota.
+    onSelectNode?.(getPaletteItemDataFromId(triggerId, name, description));
+  };
+
   const handleToolClick = (tool: ApiTool) => {
     const toolApiSlug = tool.apiSlug || selectedApiId;
-    const api = apis.find(a => a.slug === toolApiSlug);
+    const api = toolApiSlug ? apiLookup.get(toolApiSlug) : undefined;
     const iconSlug = tool.iconSlug || api?.iconSlug;
     const iconUrl = tool.iconUrl || api?.iconUrl;
     onSelectNode?.({
@@ -310,7 +518,11 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
   const hasBreadcrumb = selectedCategoryId || navigationLevel !== 'categories';
 
   return (
-    <TooltipProvider delayDuration={1000}>
+    // 150ms, the same delay the Run tab's step list uses. The palette row's hover
+    // card carries the untruncated description and what a click and a drag each
+    // do, so it is something the user waits for rather than something that gets
+    // in the way; at 1s it read as broken on the rows that need it most.
+    <TooltipProvider delayDuration={150}>
       <div data-node-creator-panel className={clsx(
           'flex flex-col overflow-hidden',
           embedded
@@ -380,31 +592,40 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
               `pr-0` cancels the scroller's gutter for this block only: it used to
               be a direct child of the panel with symmetric padding, and inheriting
               the gutter would leave the grid off-centre and its separator rule
-              stopping short of the right edge. */}
+              stopping short of the right edge. Its `pl-3` matches every other
+              section because the hover cards are placed by adding that inset
+              back (`PALETTE_LIST_ROW_INSET_PX`), so a section indented
+              differently would open its card at a different distance. */}
           {navigationLevel === 'categories' && !selectedCategoryId && (
-            <div className="pl-2 pr-0 pb-4 pt-2 border-b border-gray-200 dark:border-gray-800">
+            <div className="pl-3 pr-0 pb-4 pt-2 border-b border-gray-200 dark:border-gray-800">
               <div className="space-y-2">
                 <div className="px-3 pt-3 text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wide">{t('frequentlyUsed')}</div>
                 <div className="grid grid-cols-2 gap-2">
                   {featuredNodes.map((node) => {
                     const isNavItem = node.isNav || node.id === 'ai-agent';
                     const paletteData = isNavItem ? undefined : getPaletteItemDataFromId(node.id, node.label, node.description);
+                    const lock = nodeLock(node.id);
                     return (
                       <DraggableNodeItem
                         key={node.id}
                         id={node.id}
                         label={node.label}
                         description={node.description}
-                        onClick={() => {
+                        lockedPlan={lock.locked ? lock.requiredPlan : null}
+                        onClick={guardClick(lock, node.label, () => {
                           if (node.isNav) {
                             handleItemClick({ id: node.id, name: node.label, description: node.description } as PaletteCategoryNode);
                           } else {
                             onSelectNode?.(node.id);
                           }
-                        }}
+                        })}
                         dragData={paletteData}
                         disableDrag={isNavItem}
                         showArrow={isNavItem}
+                        // A nav tile here is a GROUP, not the node its class
+                        // describes: 'triggers' is `kind: 'entry'`, so without
+                        // this the folder is badged "Trigger".
+                        paletteRole={isNavItem ? 'category' : undefined}
                         nodeId={node.id}
                         nodeKind={node.kind}
                         nodeFamily={node.family}
@@ -420,6 +641,15 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
           {/* Categories */}
           {navigationLevel === 'categories' && (
             <div className="py-2 pl-3 pr-3 space-y-1">
+              {/* Named like Frequently Used above it. Unlabelled, the five category
+                  cards read as the whole palette, which is exactly what stops people
+                  scrolling to the ranked integrations underneath. Only at the root:
+                  one level down the breadcrumb already names where you are, and only
+                  when there is something under it - a search that matches no category
+                  would otherwise leave a heading standing over nothing. */}
+              {!selectedCategoryId && (!searchQuery.trim() || filteredCategories.length > 0) && (
+                <div className="px-3 pt-1 pb-1 text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wide">{t('paletteCategories')}</div>
+              )}
               {(() => {
                 // When in flow category, display all nodes in single column
                 if (selectedCategoryId === 'flow') {
@@ -430,9 +660,12 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
                         const nodeClass = findNodeClassById(category.nodeClassId || category.id);
                         const paletteData = getPaletteItemDataFromId(category.nodeClassId || category.id, category.name, category.description);
                         const isNavItem = flowNavIds.has(category.nodeClassId || category.id);
+                        const lock = nodeLock(category.nodeClassId || category.id);
                         return (
                           <DraggableNodeItem key={category.id} id={category.nodeClassId || category.id} label={category.name} description={category.description}
-                            onClick={() => isNavItem ? handleItemClick(category) : onSelectNode?.(category.nodeClassId || category.id)}
+                            lockedPlan={lock.locked ? lock.requiredPlan : null}
+                            onClick={guardClick(lock, category.name, () => isNavItem ? handleItemClick(category) : onSelectNode?.(category.nodeClassId || category.id))}
+                            paletteRole={paletteRoleFor(category.nodeClassId || category.id)}
                             dragData={paletteData} disableDrag={isNavItem} showArrow={isNavItem}
                             nodeId={category.nodeClassId || category.id} nodeKind={nodeClass?.kind} nodeFamily={nodeClass?.family as NodeFamily}
                             iconSize="sm" />
@@ -467,9 +700,16 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
                     ? <span className="flex items-center justify-center flex-shrink-0 h-8 w-8 rounded-xl bg-yellow-100 dark:bg-yellow-900/30"><Cpu className="h-5 w-5 text-slate-900 dark:text-slate-100" strokeWidth={1.7} /></span>
                     : undefined;
 
+                  const lock = nodeLock(category.nodeClassId || category.id);
                   return (
                     <DraggableNodeItem key={category.id} id={category.nodeClassId || category.id} label={category.name} description={category.description}
-                      onClick={() => handleItemClick(category)} dragData={paletteData} disableDrag={isNav}
+                      lockedPlan={lock.locked ? lock.requiredPlan : null}
+                      onClick={guardClick(lock, category.name, () => handleItemClick(category))} dragData={paletteData} disableDrag={isNav}
+                      // This list renders the root tiles AND the children of a
+                      // category that has been opened, so only the tiles may
+                      // declare themselves folders; every node inside Core, AI
+                      // or Data resolves from its own props.
+                      paletteRole={paletteRoleFor(category.id)}
                       showArrow={showArrow} nodeId={category.nodeClassId || category.id} nodeKind={nodeClass?.kind} nodeFamily={nodeClass?.family as NodeFamily}
                       bgClassName={isMcp ? 'bg-gray-100 dark:bg-gray-800' : needsFallbackBg ? fallbackBg : undefined} isMcp={isMcp} iconSize="sm"
                       iconOverride={categoryIcon} />
@@ -477,18 +717,84 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
                 });
               })()}
 
+              {/* Search results for NODES.
+                  The palette's own nodes, matched across every category rather than
+                  only the screen in front of you - see `searchableNodes`. Rendered
+                  before the integrations because they need no network round trip and
+                  are the answer most of the time. */}
+              {searchQuery.trim().length > 0 && filteredNodes.length > 0 && (
+                <>
+                  <div className="px-3 pt-4 pb-2 text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wide border-t border-gray-200 dark:border-gray-800 mt-2">{t('paletteNodes')}</div>
+                  {filteredNodes.map((node) => {
+                    const nodeClass = findNodeClassById(node.id);
+                    const isNav = NAV_ONLY_IDS.has(node.id);
+                    const paletteData = getPaletteItemDataFromId(node.id, node.name, node.description);
+                    const lock = nodeLock(node.id);
+                    return (
+                      <DraggableNodeItem key={`node-${node.id}`} id={node.id} label={node.name} description={node.description}
+                        lockedPlan={lock.locked ? lock.requiredPlan : null}
+                        onClick={guardClick(lock, node.name, () => (
+                          node.isTrigger
+                            ? handleTriggerClick(node.id, node.name, node.description)
+                            : handleItemClick({ id: node.id, name: node.name, description: node.description } as PaletteCategoryNode)
+                        ))}
+                        dragData={isNav ? undefined : paletteData} disableDrag={isNav}
+                        showArrow={isNav} arrowType="arrow"
+                        // Only a folder hit is a folder. A NAV_ONLY hit that is a
+                        // TRIGGER opening a picker (tables, workflows, error) is a
+                        // trigger, and said so under the Triggers group - a row
+                        // must not answer differently for having been searched.
+                        paletteRole={paletteRoleFor(node.id)}
+                        nodeId={node.id} nodeKind={node.isTrigger ? 'entry' : nodeClass?.kind} nodeFamily={nodeClass?.family as NodeFamily}
+                        iconSize="sm" />
+                    );
+                  })}
+                </>
+              )}
+
               {/* Search results for APIs */}
               {searchQuery.trim().length > 0 && filteredApis.length > 0 && (
                 <>
                   <div className="px-3 pt-4 pb-2 text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wide border-t border-gray-200 dark:border-gray-800 mt-2">{t('mcp')}</div>
                   {filteredApis.map((api) => (
-                    <DraggableNodeItem key={api.slug} id={`api-${api.slug}`} label={api.apiName} description={api.description}
-                      secondaryInfo={api.toolsCount ? `${api.toolsCount} tool${api.toolsCount > 1 ? 's' : ''}` : undefined}
-                      onClick={() => handleApiClick(api)} showArrow arrowType="arrow"
-                      dragData={{ id: `api-${api.slug}`, label: api.apiName, description: api.description, kind: 'tool', nodeType: 'flowNode', apiData: { apiSlug: api.slug, apiName: api.apiName, iconSlug: api.iconSlug } }}
-                      iconSlug={api.iconSlug} isMcp />
+                    <ApiPaletteRow key={api.slug} api={api} lock={catalogLock(api.slug)}
+                      onOpen={() => handleApiClick(api)} />
                   ))}
                 </>
+              )}
+            </div>
+          )}
+
+          {/* Ranked integrations.
+              The catalogue in PLATFORM-USAGE order, under its own rule and title, so
+              the palette offers what people actually build with instead of asking
+              everyone to guess a name into the search box first. Only at the root and
+              only with the search box empty: while searching, the MCP results above
+              already answer the question being asked.
+
+              No count is shown anywhere - the ORDER is the whole message, and a number
+              next to an integration would read as a recommendation the platform has
+              not earned and would put a cross-tenant volume on a builder's screen.
+
+              Lazy twice over: `popularSectionRef` latches the first time this scrolls
+              into view (nothing is fetched for someone who only used the categories),
+              and `popularLoadMoreRef` pages the rest. */}
+          {isRootScreen && (
+            <div ref={popularSectionRef} className="py-2 pl-3 pr-3 space-y-1 border-t border-gray-200 dark:border-gray-800 mt-2">
+              <div className="px-3 pt-3 pb-1 text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wide">{t('paletteIntegrations')}</div>
+              {isLoadingPopularInitial ? <ApiListSkeleton count={5} /> : (
+                <>
+                  {popularApis.map((api) => (
+                    <ApiPaletteRow key={`popular-${api.slug}`} api={api} lock={catalogLock(api.slug)}
+                      onOpen={() => handleApiClick(api)} />
+                  ))}
+                  {popularSectionSeen && popularApis.length === 0 && !isFetchingPopular && (
+                    <div className="text-center py-8 text-gray-500 dark:text-gray-400">{t('noApiFound')}</div>
+                  )}
+                </>
+              )}
+              {hasNextPopularPage && !isLoadingPopularInitial && (
+                <div ref={popularLoadMoreRef} className="py-4 flex justify-center">{isFetchingPopular && <LoadingSpinner size="sm" />}</div>
               )}
             </div>
           )}
@@ -499,11 +805,8 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
               {isLoadingApisInitial ? <ApiListSkeleton count={5} /> : (
                 <>
                   {apis.map((api) => (
-                    <DraggableNodeItem key={api.slug} id={`api-${api.slug}`} label={api.apiName} description={api.description}
-                      secondaryInfo={api.toolsCount ? `${api.toolsCount} tool${api.toolsCount > 1 ? 's' : ''}` : undefined}
-                      onClick={() => handleApiClick(api)} showArrow arrowType="arrow"
-                      dragData={{ id: `api-${api.slug}`, label: api.apiName, description: api.description, kind: 'tool', nodeType: 'flowNode', apiData: { apiSlug: api.slug, apiName: api.apiName, iconSlug: api.iconSlug } }}
-                      iconSlug={api.iconSlug} isMcp />
+                    <ApiPaletteRow key={api.slug} api={api} lock={catalogLock(api.slug)}
+                      onOpen={() => handleApiClick(api)} />
                   ))}
                   {apis.length === 0 && !isFetchingApis && <div className="text-center py-8 text-gray-500 dark:text-gray-400">{t('noApiFound')}</div>}
                 </>
@@ -514,17 +817,19 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
 
           {/* Tools List */}
           {navigationLevel === 'tools' && (
-            <div className="py-2 pl-2 pr-3 space-y-1">
+            <div className="py-2 pl-3 pr-3 space-y-1">
               {isLoadingTools ? <ToolListSkeleton count={5} /> : (
                 <>
                   {apiTools.filter(t => !searchQuery.trim() || t.name.toLowerCase().includes(searchQuery.toLowerCase()) || t.description?.toLowerCase().includes(searchQuery.toLowerCase())).map((tool) => {
                     const toolApiSlug = tool.apiSlug || selectedApiId;
-                    const parentApi = apis.find(a => a.slug === toolApiSlug);
+                    const parentApi = toolApiSlug ? apiLookup.get(toolApiSlug) : undefined;
                     const iconSlug = tool.iconSlug || parentApi?.iconSlug;
                     const iconUrl = tool.iconUrl || parentApi?.iconUrl;
+                    const lock = catalogLock(toolApiSlug, tool.slug);
                     return (
                       <DraggableNodeItem key={tool.slug} id={`tool-${tool.slug}`} label={tool.name} description={tool.description}
-                        onClick={() => handleToolClick(tool)}
+                        lockedPlan={lock.locked ? lock.requiredPlan : null}
+                        onClick={guardClick(lock, tool.name, () => handleToolClick(tool))}
                         dragData={{ id: `tool-${tool.slug}`, label: tool.name, description: tool.description, kind: 'tool', nodeType: 'flowNode', toolData: { toolSlug: tool.slug, apiSlug: toolApiSlug, apiName: parentApi?.apiName || '', method: tool.method, iconSlug, iconUrl } }}
                         iconSlug={iconSlug} isMcp />
                     );
@@ -558,6 +863,10 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
                       <DraggableNodeItem key={ds.id} id={`${tableNodeId}-${ds.id}`} label={nodeLabel} description={ds.description}
                         onClick={() => onSelectNode?.({ ...paletteData, id: `${tableNodeId}-${ds.id}`, label: nodeLabel, dataSourceData: buildDataSourceData(selectedType, ds) })}
                         dragData={{ ...paletteData, id: `${tableNodeId}-${ds.id}`, label: nodeLabel, dataSourceData: buildDataSourceData(selectedType, ds) }}
+                        // Same row, one level up from the table list below, which
+                        // already says `entry`: under 'triggers' this adds a
+                        // trigger, and the gap showed once the kind became visible.
+                        nodeKind={selectedType === 'triggers' ? 'entry' : undefined}
                         nodeId={tableNodeId} />
                     );
                   })}
@@ -724,19 +1033,11 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
               {TRIGGER_TYPES.filter(t => !searchQuery.trim() || t.name.toLowerCase().includes(searchQuery.toLowerCase())).map((trigger) => {
                 const isNavTrigger = trigger.id === 'tables-trigger' || trigger.id === 'workflows-trigger' || trigger.id === 'error-trigger';
                 const paletteData = getPaletteItemDataFromId(trigger.id, trigger.name, trigger.description);
+                const lock = nodeLock(trigger.id);
                 return (
                   <DraggableNodeItem key={trigger.id} id={trigger.id} label={trigger.name} description={trigger.description}
-                    onClick={async () => {
-                      if (trigger.id === 'tables-trigger') { setNavigationLevel('datasources'); setSearchQuery(''); setSelectedDataSourceId(null); setSelectedCategoryId(null); }
-                      else if (trigger.id === 'workflows-trigger') { setNavigationLevel('workflows'); setSearchQuery(''); setSelectedCategoryId(null); setSelectedType('triggers'); }
-                      else if (trigger.id === 'error-trigger') { setNavigationLevel('workflows'); setSearchQuery(''); setSelectedCategoryId(null); setSelectedType('error_trigger'); }
-                      // Standalone trigger resources (webhook/schedule/chat/form):
-                      // create the React-Flow node only. The resource is created
-                      // once by the form's auto-create effect on inspect, using a
-                      // stable `sourceNodeId = ${kind}-${node.id}` so refreshes and
-                      // remounts hit the backend dedup instead of burning quota.
-                      else onSelectNode?.(paletteData);
-                    }}
+                    lockedPlan={lock.locked ? lock.requiredPlan : null}
+                    onClick={guardClick(lock, trigger.name, () => handleTriggerClick(trigger.id, trigger.name, trigger.description))}
                     dragData={isNavTrigger ? undefined : paletteData} disableDrag={isNavTrigger}
                     showArrow={isNavTrigger} arrowType="arrow" nodeId={trigger.id} nodeKind="entry" iconSize="sm" />
                 );
@@ -757,5 +1058,38 @@ export function NodeCreatorPanel({ isOpen, onClose, onSelectNode, currentWorkflo
         <CreateAgentModal onClose={() => setShowCreateAgentModal(false)} onAgentCreated={() => { setIsLoadingAgents(true); orchestratorApi.getAgents().then(setAgents).catch(() => setAgents([])).finally(() => setIsLoadingAgents(false)); setShowCreateAgentModal(false); }} />
       )}
     </TooltipProvider>
+  );
+}
+
+/**
+ * One integration row.
+ *
+ * <p>Its own component only because the two places that render it are `map`
+ * expressions with no block body, so there is nowhere to put the `const lock`
+ * the other rows declare inline. Behaviour is identical to them.
+ */
+function ApiPaletteRow({
+  api,
+  lock,
+  onOpen,
+}: {
+  api: ApiSystem;
+  lock: PlanLock;
+  onOpen: () => void;
+}) {
+  return (
+    <DraggableNodeItem
+      id={`api-${api.slug}`}
+      label={api.apiName}
+      description={api.description}
+      secondaryInfo={api.toolsCount ? `${api.toolsCount} tool${api.toolsCount > 1 ? 's' : ''}` : undefined}
+      lockedPlan={lock.locked ? lock.requiredPlan : null}
+      onClick={onOpen}
+      showArrow
+      arrowType="arrow"
+      dragData={{ id: `api-${api.slug}`, label: api.apiName, description: api.description, kind: 'tool', nodeType: 'flowNode', apiData: { apiSlug: api.slug, apiName: api.apiName, iconSlug: api.iconSlug } }}
+      iconSlug={api.iconSlug}
+      isMcp
+    />
   );
 }

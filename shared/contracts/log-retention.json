@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "description": "Source of truth for EXECUTION-LOG retention: how long a workspace's run journal is kept, per subscription plan. Consumed by the Java backend (common-lib LogRetentionPolicy, used by the orchestrator and agent purge jobs) and by the frontend pricing surfaces (lib/billing/logRetention.ts, PLAN_FEATURE_KEYS). Do NOT edit the generated files directly: edit this JSON then re-run scripts/generate-log-retention.js. WHY A CONTRACT: before this file the durations existed ONLY in the frontend (PLAN_FEATURE_KEYS plus six locale files), so a backend purge job would have hardcoded a second copy and the two would have drifted at the first pricing change, silently, with the page advertising a window the job no longer applied. RETENTION IS KEYED BY PLAN RANK, NOT BY PLAN CODE, because PlanTier ranks PAYG with STARTER, CREDIT_PACK with FREE, and all four ENTERPRISE SKUs together; keying by literal code would leave those codes unmapped, and an unmapped code must never be guessed. An unmapped or unresolvable plan retains FOREVER (days = null): this job deletes, so it fails LONG, unlike the revenue gate in PlanFeatureGate which fails open. That asymmetry is deliberate. Retention covers the execution journal only (step data, skipped-node and step-output JSON payloads, agent execution messages and tool calls). It never covers files (any storage row carrying an s3_key), chat history (conversation.tool_results), or the credit ledger.",
+  "tiers": [
+    {
+      "rank": 0,
+      "plan": "FREE",
+      "days": 7,
+      "featureKey": "logs7",
+      "note": "CREDIT_PACK shares this rank: a one-off top-up is not a plan."
+    },
+    {
+      "rank": 1,
+      "plan": "STARTER",
+      "days": 30,
+      "featureKey": "logs30",
+      "note": "PAYG shares this rank: paying per call is not a tier upgrade."
+    },
+    {
+      "rank": 2,
+      "plan": "PRO",
+      "days": 30,
+      "featureKey": "logs30"
+    },
+    {
+      "rank": 3,
+      "plan": "TEAM",
+      "days": 90,
+      "featureKey": "logs90",
+      "note": "Raised from 60 to 90 days (3 months) by product decision 2026-09-01."
+    },
+    {
+      "rank": 4,
+      "plan": "ENTERPRISE",
+      "days": null,
+      "featureKey": "logsCustom",
+      "note": "Contractual, per-organization. Null means retain until an explicit override says otherwise; all four ENTERPRISE_* SKUs share rank 4."
+    }
+  ],
+  "selfHostedDays": null,
+  "unresolvedPlanDays": null,
+  "noSubscriptionDays": null,
+  "noSubscriptionNote": "PlanLimitService.loadPlanCode returns the SAME __NONE__ sentinel for 'account found, no active subscription' and for 'account not found', so the sentinel cannot be read as FREE: an unidentifiable tenant would be handed the SHORTEST window and have its journal erased, which is the August 2026 id-form incident turned destructive. The FREE window is therefore applied only on a POSITIVELY identified free account, i.e. when the resolver sends the literal plan code FREE. Anything ambiguous retains.",
+  "properties": {
+    "enforceFrom": "retention.execution-logs.enforce-from",
+    "selfHostedDays": "retention.execution-logs.days",
+    "dryRun": "retention.execution-logs.dry-run"
+  }
+}

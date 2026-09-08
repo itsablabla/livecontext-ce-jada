@@ -386,26 +386,100 @@ public class WorkflowListController {
         // Cost budget (Advanced). Always in CREDITS on the wire (1 credit =
         // $0.001); the frontend converts the CE dollar input to credits before
         // sending. null / 0 / negative clears the budget (= unlimited).
-        if (request.containsKey("budgetCredits")) {
+        //
+        // VALIDATED BEFORE ANYTHING IS MUTATED. Applying the cap first and
+        // validating the cadence afterwards left a rejected request holding a
+        // half-applied entity. Nothing was flushed (this method is not
+        // transactional and open-in-view is off, so the entity is detached),
+        // which is why it was not a live bug - but the 400 path and the success
+        // path then disagree about what the object holds, and only ordering
+        // makes that impossible rather than merely unlikely.
+        java.math.BigDecimal requestedCap = null;
+        boolean capRequested = request.containsKey("budgetCredits");
+        if (capRequested) {
             Object budgetVal = request.get("budgetCredits");
-            if (budgetVal == null || (budgetVal instanceof String s && s.isBlank())) {
-                workflow.setBudgetCredits(null);
-            } else {
+            if (budgetVal != null && !(budgetVal instanceof String s2 && s2.isBlank())) {
                 try {
                     java.math.BigDecimal b = new java.math.BigDecimal(budgetVal.toString());
-                    workflow.setBudgetCredits(b.signum() <= 0 ? null : b);
+                    requestedCap = b.signum() <= 0 ? null : b;
                 } catch (NumberFormatException e) {
                     return ResponseEntity.badRequest().body(Map.of("error", "budget must be a number"));
                 }
             }
         }
+        // Reset cadence of the cap. Unknown values are rejected rather than
+        // silently normalised: a typo that fell back to "never reset" would turn
+        // the cap into a lifetime cap and stop the workflow for good.
+        String requestedMode = null;
+        boolean modeRequested = request.containsKey("budgetPeriodMode");
+        if (modeRequested) {
+            Object modeVal = request.get("budgetPeriodMode");
+            String mode = modeVal == null ? null : modeVal.toString().trim().toLowerCase();
+            if (mode == null || mode.isBlank()) {
+                requestedMode = com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod.MODE_MONTHLY;
+            } else if (List.of(
+                    com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod.MODE_MONTHLY,
+                    com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod.MODE_WEEKLY,
+                    com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod.MODE_CUMULATIVE)
+                    .contains(mode)) {
+                requestedMode = mode;
+            } else {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "error", "budgetPeriodMode must be monthly, weekly or cumulative"));
+            }
+        }
+
+        // Changing the TERMS of the cap restarts its period: judging a brand-new
+        // cap against spend from before it existed, or re-filing a stored figure
+        // under a period it does not belong to, both turn a setting into a trap.
+        boolean hadCapBefore = workflow.getBudgetCredits() != null
+                && workflow.getBudgetCredits().signum() > 0;
+        String modeBefore = com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                .normaliseMode(workflow.getBudgetPeriodMode());
+        boolean hasCapNow = capRequested
+                ? requestedCap != null
+                : hadCapBefore;
+        String modeNow = modeRequested
+                ? com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod.normaliseMode(requestedMode)
+                : modeBefore;
+        boolean periodWasReset = hasCapNow && (!hadCapBefore || !modeNow.equals(modeBefore));
+
+        // The reset runs BEFORE the save, and that order is the recovery story.
+        // It cannot join the save's transaction (the period columns are
+        // insertable/updatable=false, so they are only ever written by explicit
+        // SQL), so the two are separate statements either way. Resetting second
+        // meant a failure between them persisted the cap with the pre-cap spend
+        // still counting, and the retry could not repair it: the cap now exists,
+        // so "the cap just appeared" is false and the reset never runs again.
+        // The user is then blocked by spend from before their own cap, with no
+        // way out. Resetting FIRST fails the request before the cap is stored,
+        // so the retry sees the same starting state and does the right thing.
+        if (periodWasReset) {
+            Instant freshPeriodStart = com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                    .periodStart(modeNow, Instant.now());
+            if (freshPeriodStart == null) {
+                workflowRepository.resetBudgetPeriodCumulative(workflow.getId());
+            } else {
+                workflowRepository.resetBudgetPeriodAt(workflow.getId(), freshPeriodStart);
+            }
+        }
+
+        if (capRequested) {
+            workflow.setBudgetCredits(requestedCap);
+        }
+        if (modeRequested) {
+            workflow.setBudgetPeriodMode(requestedMode);
+        }
         workflow.setUpdatedAt(Instant.now());
+        // Safe next to the period columns: they are insertable/updatable=false,
+        // so this save cannot clobber the live spend with a stale in-memory copy.
         workflowRepository.save(workflow);
 
         Map<UUID, String> boardColumns = batchComputeBoardColumns(List.of(workflow));
         String publicationStatus = resolvePublicationStatus(workflowId, tenantId);
         return ResponseEntity.ok(mapWorkflow(workflow, "ACTIVE".equals(publicationStatus),
-                publicationStatus, boardColumns.getOrDefault(workflow.getId(), "draft")));
+                publicationStatus, boardColumns.getOrDefault(workflow.getId(), "draft"),
+                periodWasReset ? java.math.BigDecimal.ZERO : null));
     }
 
     private String decodeTenantId(String tenantId) {
@@ -550,6 +624,20 @@ public class WorkflowListController {
 
     private WorkflowSummary mapWorkflow(WorkflowEntity entity, boolean isPublished,
                                         String publicationStatus, String boardColumn) {
+        return mapWorkflow(entity, isPublished, publicationStatus, boardColumn, null);
+    }
+
+    /**
+     * @param periodSpentOverride the period spend to report instead of the one
+     *        derived from the entity, or {@code null} to derive it. Needed by
+     *        the metadata update, which restarts the cap's period with explicit
+     *        SQL: the period columns are {@code updatable=false}, so the managed
+     *        entity still holds the PRE-reset figure and a response built from
+     *        it tells the user they are over a cap they just created.
+     */
+    private WorkflowSummary mapWorkflow(WorkflowEntity entity, boolean isPublished,
+                                        String publicationStatus, String boardColumn,
+                                        java.math.BigDecimal periodSpentOverride) {
         long runCount = 0;
         boolean hasActiveRun = false;
         try {
@@ -592,6 +680,21 @@ public class WorkflowListController {
             hasActiveRun,
             boardColumn,
             entity.getBudgetCredits(),
+            com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                    .normaliseMode(entity.getBudgetPeriodMode()),
+            // Rolled over here rather than in the client: the stored figure may
+            // belong to a period that has expired (the reset is lazy, it happens
+            // on the next production cost), and a card must never show last
+            // period's spend against this period's cap.
+            periodSpentOverride != null
+                    ? periodSpentOverride
+                    : com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod.effectiveSpent(
+                            entity.getBudgetPeriodMode(),
+                            entity.getBudgetPeriodStartedAt(),
+                            entity.getBudgetPeriodSpent(),
+                            Instant.now()),
+            com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                    .nextPeriodStart(entity.getBudgetPeriodMode(), Instant.now()),
             entity.getFolderId()
         );
     }

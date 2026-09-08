@@ -77,11 +77,23 @@ describe('useNodeExecutionStatus - epoch view gates the controls', () => {
     expect(status.canExecute).toBe(false);
   });
 
-  it('treats a pinned epoch as historical when the run has not fired yet (currentEpoch 0)', () => {
-    // currentEpoch 0 means "no epoch has opened", so no epoch can be the live
-    // one; guarding on > 0 keeps a stale/absent value from unlocking controls.
+  it('treats a pinned epoch as historical when it is not the one the run is on (currentEpoch 0)', () => {
+    // Epoch 1 is not epoch 0, so it stays a record whatever the run has reached.
     const status = statusAt(1, 0);
     expect(status.isStepByStepMode).toBe(false);
     expect(status.canRerun).toBe(false);
+  });
+
+  it('keeps controls on epoch 0 of a run that has fired exactly ONCE', () => {
+    // The rule used to demand `currentEpoch > 0` as well, to stop an absent value (the store
+    // defaults the field to 0) from unlocking controls. But epoch 0 is a real, common FIRST
+    // fire, so that guard silently emptied the canvas - no play, no rerun, no stepping - for
+    // every once-fired run read through its only epoch, which is the most ordinary run there
+    // is. Nothing is lost by dropping it: before the state loads, readySteps/completedSteps
+    // are empty too, so the sets already gate every control.
+    const status = statusAt(0, 0);
+    expect(status.isStepByStepMode).toBe(true);
+    expect(status.canRerun).toBe(true);
+    expect(status.canExecute).toBe(true);
   });
 });

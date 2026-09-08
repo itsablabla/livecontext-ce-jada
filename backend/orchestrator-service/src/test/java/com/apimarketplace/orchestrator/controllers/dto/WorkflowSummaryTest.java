@@ -35,9 +35,15 @@ class WorkflowSummaryTest {
             Map.of(), plan, schedule, tokens, icons,
             pubId, now, true, "ACTIVE", null,
             WorkflowEntity.WorkflowType.WORKFLOW, 5, true, "production",
-            new java.math.BigDecimal("1000.0000"), null);
+            new java.math.BigDecimal("1000.0000"), "monthly", new java.math.BigDecimal("12.5"),
+            java.time.Instant.parse("2026-10-01T00:00:00Z"), null);
 
         assertThat(summary.budgetCredits()).isEqualByComparingTo("1000.0000");
+        assertThat(summary.budgetPeriodMode()).isEqualTo("monthly");
+        assertThat(summary.budgetPeriodSpent()).isEqualByComparingTo("12.5");
+        // The date the allowance starts again, so a card can say WHEN rather
+        // than only that a reset exists.
+        assertThat(summary.budgetPeriodResetsAt()).isEqualTo(java.time.Instant.parse("2026-10-01T00:00:00Z"));
 
         assertThat(summary.id()).isEqualTo(id);
         assertThat(summary.name()).isEqualTo("My Workflow");
@@ -60,9 +66,14 @@ class WorkflowSummaryTest {
             null, "WF", null, "t1", null,
             null, null, null, 0L,
             null, null, null, null, null,
-            null, null, false, null, null, null, null, false, "draft", null, null);
+            null, null, false, null, null, null, null, false, "draft", null, null, null, null, null);
 
         assertThat(summary.budgetCredits()).isNull();
+        assertThat(summary.budgetPeriodMode()).isNull();
+        assertThat(summary.budgetPeriodSpent()).isNull();
+        // A cap that never resets has no date to give, and null is how that is
+        // said: the popover must show "never" rather than invent one.
+        assertThat(summary.budgetPeriodResetsAt()).isNull();
         assertThat(summary.id()).isNull();
         assertThat(summary.description()).isNull();
         assertThat(summary.plan()).isNull();

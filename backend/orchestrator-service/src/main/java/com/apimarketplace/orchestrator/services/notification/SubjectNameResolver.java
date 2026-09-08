@@ -38,6 +38,7 @@ public interface SubjectNameResolver {
     String AGENT_TASK  = "AGENT_TASK";
     String APPLICATION = "APPLICATION";
     String ORG_INVITATION = "ORG_INVITATION";
+    String BADGE        = "BADGE";
 
     /**
      * Stable string discriminator matching the {@code subject_type} column

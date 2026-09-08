@@ -170,9 +170,13 @@ class SnapshotCloneServiceDatasourceTriggerRemapTest {
         params.put("credential_source", "user");
         params.put("credential_id", 42);
 
-        Map<String, Object> core = new LinkedHashMap<>();
-        core.put("type", "generate");
-        core.put("params", params);
+        // Filed with the AI family, which is where the scrub has to look for it:
+        // generate is keyed `agent:` and travels in `agents`, so a sweep that
+        // only walked the cores would copy the publisher's key id into every
+        // acquirer's plan and never touch it.
+        Map<String, Object> generate = new LinkedHashMap<>();
+        generate.put("type", "generate");
+        generate.put("params", params);
 
         // A different node type keeps its params: `params` is the generic
         // config map EVERY core uses, so an unconditional removal would delete
@@ -184,7 +188,8 @@ class SnapshotCloneServiceDatasourceTriggerRemapTest {
         codeNode.put("params", codeParams);
 
         Map<String, Object> plan = new LinkedHashMap<>();
-        plan.put("cores", new java.util.ArrayList<>(List.of(core, codeNode)));
+        plan.put("agents", new java.util.ArrayList<>(List.of(generate)));
+        plan.put("cores", new java.util.ArrayList<>(List.of(codeNode)));
 
         invokeStrip(plan);
 
@@ -194,6 +199,44 @@ class SnapshotCloneServiceDatasourceTriggerRemapTest {
         // acquired node has to keep running the way it was published.
         assertThat(params.get("credential_source")).isEqualTo("user");
         assertThat(params.get("model")).isEqualTo("seedance-2.0-fast");
+    }
+
+    /**
+     * The bucket every ALREADY PUBLISHED snapshot is in.
+     *
+     * <p>The node moved to the AI family, but a snapshot published before that
+     * move still carries it among the cores and is still cloneable: this strip
+     * walks raw JSON and parses nothing, so nothing rejects the old shape. A
+     * scrub that only walked the new home would hand the publisher's key id to
+     * every acquirer of every workflow published until now.
+     */
+    @Test
+    @DisplayName("Acquire-time credential scrub also strips a generate node still filed under cores, which is where every published one is")
+    @SuppressWarnings("unchecked")
+    void acquireTimeCredentialScrubRemovesGeneratePinnedCredentialInLegacyCoresBucket() throws Exception {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("model", "seedance-2.0-fast");
+        params.put("credential_source", "user");
+        params.put("credential_id", 42);
+
+        Map<String, Object> generate = new LinkedHashMap<>();
+        generate.put("type", "generate");
+        generate.put("params", params);
+
+        Map<String, Object> codeParams = new LinkedHashMap<>();
+        codeParams.put("credential_id", 7);
+        Map<String, Object> codeNode = new LinkedHashMap<>();
+        codeNode.put("type", "code");
+        codeNode.put("params", codeParams);
+
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("cores", new java.util.ArrayList<>(List.of(generate, codeNode)));
+
+        invokeStrip(plan);
+
+        assertThat(params).doesNotContainKey("credential_id");
+        assertThat(codeParams).containsEntry("credential_id", 7);
+        assertThat(params.get("credential_source")).isEqualTo("user");
     }
 
     @Test

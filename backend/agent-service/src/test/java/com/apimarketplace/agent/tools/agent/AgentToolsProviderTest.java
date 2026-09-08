@@ -152,6 +152,19 @@ class AgentToolsProviderTest {
         }
 
         @Test
+        @DisplayName("memory_access_mode is in the schema with enum read/write, or a child's memory scope cannot be set")
+        void memoryAccessModeIsAdvertised() {
+            // Exactly the gap file_access_mode had: AgentCrudModule consumes the
+            // parameter and the help documents it, so an agent that cannot find it
+            // in the schema has no way to create a read-only delegate and nothing
+            // in the payload explaining why.
+            ToolParameter memoryAccessMode = findParam("memory_access_mode");
+
+            assertThat(memoryAccessMode.enumValues()).containsExactlyInAnyOrder("read", "write");
+            assertThat(memoryAccessMode.required()).isFalse();
+        }
+
+        @Test
         @DisplayName("generation is in the schema, and says it is opt-in and spends credits")
         void generationGrantIsAdvertised() {
             // Same shape of gap file_access_mode had, and worse: the execution

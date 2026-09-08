@@ -4,6 +4,8 @@ import com.apimarketplace.catalog.domain.ApiToolEntity;
 import com.apimarketplace.catalog.domain.ApiToolParameterEntity;
 import com.apimarketplace.catalog.domain.ToolNameEntity;
 import com.apimarketplace.catalog.repository.ApiToolParameterRepository;
+import com.apimarketplace.catalog.util.ParameterBodyPath;
+import com.apimarketplace.catalog.util.ParameterOwner;
 import com.apimarketplace.catalog.repository.ApiToolRepository;
 import com.apimarketplace.catalog.repository.ToolNameRepository;
 import com.apimarketplace.credential.client.CredentialClient;
@@ -171,10 +173,36 @@ public class DynamicOptionsResolver {
         Set<String> cached = dynamicParameterCache.getIfPresent(apiToolId);
         if (cached != null) return cached;
 
+        // Both names a parameter answers to. A generation descriptor writes the
+        // place the value lands in the body ('video_inputs[0].voice.voice_id'),
+        // not the name the tool surface uses ('voice_id'), whenever the provider
+        // wants it nested. Indexing only the name left those parameters looking
+        // like free text on the generation surface, so an agent had no way to
+        // learn the account's own avatar and voice ids and no error said why.
+        //
+        // A NESTED claim only, matching the rule the catalogue's own value lists
+        // are matched under: a flat path is a parameter's name and nothing else,
+        // and honouring a foreign row's flat claim would answer one parameter's
+        // question with another parameter's values.
+        // Every name a descriptor could write and find a source under: a row's
+        // own name, and the place it claims to fill. Both go through the same
+        // ownership rule as the values half, which is what decides a flat claim
+        // and an ambiguity, so a key is advertised only when a single row owns
+        // it AND that row declares a source. Advertising one nobody owns would
+        // mark a parameter optionsAvailable and then answer "not fetchable" when
+        // its values were asked for.
+        List<ApiToolParameterEntity> rows = parameters(apiToolId);
+        Set<String> candidates = new LinkedHashSet<>();
+        for (ApiToolParameterEntity p : rows) {
+            if (p.getName() != null) candidates.add(p.getName());
+            String bodyPath = ParameterBodyPath.of(p.getExtras());
+            if (bodyPath != null) candidates.add(bodyPath);
+        }
         Set<String> names = new LinkedHashSet<>();
-        for (ApiToolParameterEntity p : parameters(apiToolId)) {
-            if (p.getName() == null) continue;
-            if (parse(p).isPresent()) names.add(p.getName());
+        for (String candidate : candidates) {
+            if (ParameterOwner.of(rows, candidate).flatMap(this::parse).isPresent()) {
+                names.add(candidate);
+            }
         }
         Set<String> answer = Set.copyOf(names);
         dynamicParameterCache.put(apiToolId, answer);
@@ -195,6 +223,12 @@ public class DynamicOptionsResolver {
         Set<String> unified = new LinkedHashSet<>();
         model.spec().paramMap().forEach((name, binding) -> {
             if (!model.model().capabilities().contains(name)) return;
+            // A SCALED binding writes a different unit from the one the field is
+            // labelled in, so the provider's own values are not values for this
+            // parameter: duration_seconds reaching music_length_ms would offer
+            // 30000 for half a minute. The same guard the catalogue's static
+            // lists are read under.
+            if (binding.scale() != null) return;
             if (binding.path() != null && dynamic.contains(binding.path())) unified.add(name);
         });
         return unified;
@@ -468,15 +502,19 @@ public class DynamicOptionsResolver {
                 .replaceAll("_+$", "");
     }
 
+    /**
+     * The source declared by the parameter this write path addresses.
+     *
+     * <p>Every row is tried by NAME before any row is tried by the
+     * {@code bodyPath} it claims, so a descriptor that writes a nested place
+     * finds the same row {@link #dynamicParameters} advertised, and a name
+     * always beats another row's claim on it. Matching only the name would
+     * advertise a parameter as fetchable and then answer nothing when the
+     * values were asked for.
+     */
     private Optional<DynamicOptions> descriptorFor(UUID apiToolId, String parameterName) {
         if (parameterName == null) return Optional.empty();
-        for (ApiToolParameterEntity p : parameters(apiToolId)) {
-            if (parameterName.equals(p.getName())) {
-                Optional<DynamicOptions> parsed = parse(p);
-                if (parsed.isPresent()) return parsed;
-            }
-        }
-        return Optional.empty();
+        return ParameterOwner.of(parameters(apiToolId), parameterName).flatMap(this::parse);
     }
 
     private Optional<DynamicOptions> parse(ApiToolParameterEntity parameter) {

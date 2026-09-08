@@ -225,8 +225,12 @@ export const SourceCoreNodeInspector = React.memo(function SourceCoreNodeInspect
   const nodeLabel = node.data?.label || node.id;
   const normalizedLabel = normalizeLabel(nodeLabel) || nodeLabel;
 
-  // Build drag prefix: core:label.output (or table: for CRUD/Find nodes)
-  const prefix = (nodeRegistry.isCrudNode(node) || nodeRegistry.isFindNode(node)) ? 'table' : 'core';
+  // Build the drag prefix from what the node IS, never from where it is
+  // rendered. This panel also carries the generate node, which is keyed
+  // `agent:<label>`: a hardcoded `core:` handed the author a reference that
+  // resolves to an empty string instead of failing. Asked of the registry so
+  // the answer is the same one every other surface gives.
+  const prefix = nodeRegistry.getReferencePrefixForNode(node);
   const dragPrefix = `${prefix}:${normalizedLabel}.output`;
 
   const handleNavigate = React.useCallback(() => {

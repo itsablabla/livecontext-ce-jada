@@ -207,6 +207,11 @@ public class FindNode extends BaseNode {
             if (context.runId() != null) {
                 billingIdentifiers.put("__workflowRunId__", context.runId());
             }
+            // Analytics attribution (NOT billing) - same markers as StepNode.
+            if (context.plan() != null && context.plan().getId() != null) {
+                billingIdentifiers.put("__workflowId__", context.plan().getId());
+            }
+            billingIdentifiers.put("__analyticsNodeId__", nodeId);
             // Which credential this step runs on - one decision, owned by
             // StepCredentialSelection, so this node and StepNode cannot drift on the
             // markers they emit.

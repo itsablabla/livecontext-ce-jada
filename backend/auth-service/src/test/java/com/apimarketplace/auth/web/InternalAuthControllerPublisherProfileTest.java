@@ -6,6 +6,7 @@ import com.apimarketplace.auth.domain.UserProfileEntity;
 import com.apimarketplace.auth.repository.OrganizationMemberRepository;
 import com.apimarketplace.auth.repository.UserOnboardingRepository;
 import com.apimarketplace.auth.repository.UserProfileRepository;
+import com.apimarketplace.auth.repository.UserRepository;
 import com.apimarketplace.auth.service.CeLinkEntitlementsService;
 import com.apimarketplace.auth.service.CeLinkService;
 import com.apimarketplace.auth.service.CreditConsumptionDeadLetterService;
@@ -50,6 +51,7 @@ class InternalAuthControllerPublisherProfileTest {
     @Mock private ObjectProvider<CeLinkService> ceLinkServiceProvider;
     @Mock private ObjectProvider<CeLinkEntitlementsService> ceLinkEntitlementsServiceProvider;
     @Mock private UserProfileRepository userProfileRepository;
+    @Mock private UserRepository userRepository;
 
     private InternalAuthController controller;
 
@@ -62,7 +64,8 @@ class InternalAuthControllerPublisherProfileTest {
                 modelPricingService, planLimitService,
                 memberRepository, ceLinkServiceProvider,
                 ceLinkEntitlementsServiceProvider,
-                userProfileRepository);
+                userProfileRepository,
+                userRepository);
     }
 
     @Test

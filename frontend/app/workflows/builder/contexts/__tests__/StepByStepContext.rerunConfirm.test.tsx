@@ -33,7 +33,7 @@ function Probe() {
   return null;
 }
 
-function renderWith(isEnabled: boolean, onRerunStep: (stepId: string) => Promise<any>) {
+function renderWith(isEnabled: boolean, onRerunStep: (stepId: string, epoch?: number) => Promise<any>) {
   return render(
     <StepByStepProvider
       isEnabled={isEnabled}
@@ -79,6 +79,57 @@ describe('rerun confirmation on an automatic run', () => {
     expect(screen.getByText('step a')).toBeTruthy();
   });
 
+  it('names WHICH fire of the run it redoes when an epoch was chosen', async () => {
+    // A run keeps one set of results per fire, so the node alone does not say what is about to
+    // be re-executed: the same restart redoes different work on epoch 2 than on epoch 9. On a
+    // run that then continues unattended, that is the fact the confirmation exists to show.
+    renderWith(false, vi.fn(async () => null));
+    act(() => { void captured!.rerunStep(STEP, 2); });
+
+    await screen.findByRole('dialog');
+    // next-intl is stubbed to echo the key, so this pins the key rather than the English text.
+    expect(screen.getByTestId('rerun-confirm-scope').textContent).toBe('scopeEpoch');
+  });
+
+  it('says so when it redoes the run latest fire instead', async () => {
+    // Both branches are named: silence would read as "epoch unknown" on the view where the
+    // answer is knowable and matters.
+    renderWith(false, vi.fn(async () => null));
+    act(() => { void captured!.rerunStep(STEP); });
+
+    await screen.findByRole('dialog');
+    expect(screen.getByTestId('rerun-confirm-scope').textContent).toBe('scopeLatestEpoch');
+  });
+
+  it('confirms the SECOND click epoch when a second rerun supersedes the first', async () => {
+    // The gate holds one pending rerun. A user who clicks epoch 2, then navigates and clicks
+    // epoch 1 before confirming, must not have epoch 2 replayed by the button they are
+    // looking at - the record carries the epoch, so it has to be replaced with the step.
+    const onRerunStep = vi.fn(async () => null);
+    renderWith(false, onRerunStep);
+    act(() => { void captured!.rerunStep(STEP, 2); });
+    await screen.findByRole('dialog');
+    act(() => { void captured!.rerunStep(STEP, 1); });
+
+    await act(async () => { fireEvent.click(screen.getByTestId('rerun-confirm-accept')); });
+
+    expect(onRerunStep).toHaveBeenCalledTimes(1);
+    expect(onRerunStep).toHaveBeenCalledWith(STEP, 1);
+  });
+
+  it('confirms the epoch the user was shown, not the run newest one', async () => {
+    // The pending record parks the caller's promise; an epoch dropped there would replay the
+    // most recent fire AFTER the user approved an older one, and report success.
+    const onRerunStep = vi.fn(async () => null);
+    renderWith(false, onRerunStep);
+    act(() => { void captured!.rerunStep(STEP, 2); });
+
+    await screen.findByRole('dialog');
+    await act(async () => { fireEvent.click(screen.getByTestId('rerun-confirm-accept')); });
+
+    expect(onRerunStep).toHaveBeenCalledWith(STEP, 2);
+  });
+
   it('runs the rerun once the user confirms, and returns its result', async () => {
     const response = { runId: 'r1' } as any;
     const onRerunStep = vi.fn(async () => response);
@@ -91,7 +142,9 @@ describe('rerun confirmation on an automatic run', () => {
     await act(async () => { fireEvent.click(screen.getByTestId('rerun-confirm-accept')); });
 
     expect(onRerunStep).toHaveBeenCalledTimes(1);
-    expect(onRerunStep).toHaveBeenCalledWith(STEP);
+    // undefined epoch = "replay the run's most recent fire", the caller's own value carried
+    // through the confirmation gate unchanged.
+    expect(onRerunStep).toHaveBeenCalledWith(STEP, undefined);
     await waitFor(() => expect(result).toBe(response));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
@@ -170,7 +223,7 @@ describe('rerun on a stepped run', () => {
 
     // The stepped rerun stops at the target and waits for the user: nothing to confirm.
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(onRerunStep).toHaveBeenCalledWith(STEP);
+    expect(onRerunStep).toHaveBeenCalledWith(STEP, undefined);
     expect(result).toBe(response);
   });
 });

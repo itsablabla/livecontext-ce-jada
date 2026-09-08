@@ -41,6 +41,12 @@ interface DisplayPub {
   creditsPerUse: number;
   displayMode: 'WORKFLOW' | 'INTERFACE' | 'APPLICATION' | 'AGENT' | 'TABLE' | 'SKILL';
   agentAvatarUrl?: string;
+  /**
+   * True when the publisher says this application belongs in the Studio: it PRODUCES a media asset
+   * rather than finding, publishing or reading one. A SECOND AXIS - the category below keeps saying
+   * what the application is about.
+   */
+  studio?: boolean;
   real: WorkflowPublication;
 }
 
@@ -224,7 +230,7 @@ function HighlightCard({ pub, remote, target = 'marketplace', onAcquire, isAcqui
               type="button"
               data-testid="highlight-card-open"
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(openHref); }}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--accent-foreground)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
             >
               <ArrowUpRight className="h-3 w-3" />
               {t('open')}
@@ -234,7 +240,7 @@ function HighlightCard({ pub, remote, target = 'marketplace', onAcquire, isAcqui
               type="button"
               data-testid="highlight-card-acquire"
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAcquire(pub.real); }}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--accent-foreground)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
             >
               <Download className="h-3 w-3" />
               {t('acquire')}
@@ -289,6 +295,7 @@ function toDisplayPub(p: WorkflowPublication): DisplayPub {
     creditsPerUse: p.creditsPerUse || 0,
     displayMode: p.displayMode || 'WORKFLOW',
     agentAvatarUrl: p.agentAvatarUrl,
+    studio: p.studio === true,
     real: p,
   };
 }
@@ -390,26 +397,56 @@ type HighlightMode = 'HIGHLIGHTS' | 'FAVORITES';
 // (private mode / disabled storage) so the toggle never breaks.
 const HIGHLIGHT_MODE_STORAGE_KEY = 'lc.home.highlightMode';
 
-function readStoredHighlightMode(): HighlightMode | null {
+/**
+ * One stored pick per row.
+ *
+ * <p>The unscoped key stays exactly as it was, so the Home row keeps every reader's existing
+ * preference. A category-scoped row gets its own: the two rows show different catalogues, and
+ * sharing one key means toggling the studio row silently moves the Home row too.
+ */
+function highlightModeStorageKey(studioOnly?: boolean): string {
+  return studioOnly ? `${HIGHLIGHT_MODE_STORAGE_KEY}.studio` : HIGHLIGHT_MODE_STORAGE_KEY;
+}
+
+function readStoredHighlightMode(studioOnly?: boolean): HighlightMode | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(HIGHLIGHT_MODE_STORAGE_KEY);
+    const raw = window.localStorage.getItem(highlightModeStorageKey(studioOnly));
     return raw === 'FAVORITES' || raw === 'HIGHLIGHTS' ? raw : null;
   } catch {
     return null;
   }
 }
 
-function writeStoredHighlightMode(mode: HighlightMode): void {
+function writeStoredHighlightMode(mode: HighlightMode, studioOnly?: boolean): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(HIGHLIGHT_MODE_STORAGE_KEY, mode);
+    window.localStorage.setItem(highlightModeStorageKey(studioOnly), mode);
   } catch {
     // Quota / private-mode errors must not break the toggle.
   }
 }
 
-export function HighlightedApps() {
+export interface HighlightedAppsProps {
+  /**
+   * Narrow the row to the Studio: applications that PRODUCE a media asset.
+   *
+   * <p>Omitted, this is the Home row and behaves exactly as before: admin-curated highlights first,
+   * the top of the marketplace as a fallback. Set, the curated step is SKIPPED - curation is a
+   * global editorial choice about the whole catalogue, so reusing it here would fill the studio row
+   * with applications that make nothing.
+   *
+   * <p>An AXIS rather than a category, because a category is single-valued: a video studio would
+   * have had to stop being a Content app to become a studio one.
+   */
+  studioOnly?: boolean;
+  /** Replaces the row's heading when it is category-scoped. */
+  heading?: string;
+  /** Replaces the favourites heading when it is category-scoped. */
+  favoritesHeading?: string;
+}
+
+export function HighlightedApps({ studioOnly, heading, favoritesHeading }: HighlightedAppsProps = {}) {
   const tHl = useTranslations('chat.highlights');
   const { isAuthenticated, isReady, numericUserId } = useAuthGuard();
   // CE cloud-parity (2026-06-10): a cloud-linked CE shows the SAME curated
@@ -473,6 +510,26 @@ export function HighlightedApps() {
     // misled anonymous visitors into thinking the apps existed.
     (async () => {
       try {
+        // The studio row asks the SERVER for the studio axis and skips curation entirely: the
+        // curated list is an editorial choice about the whole catalogue, so filtering it down here
+        // would usually leave nothing, and never leaves the right thing.
+        if (studioOnly) {
+          const scoped = useRemoteSource
+            ? await publicationService.getRemoteMarketplacePublications(0, 24, undefined, undefined, true)
+            : await orchestratorApi.getMarketplacePublications(0, 24, undefined, undefined, true);
+          const scopedApps = (scoped.publications || [])
+            .map(toDisplayPub)
+            // The SAME display modes the unscoped fallback admits. Admitting fewer made a
+            // studio-category table or skill invisible in the studio row while it showed on Home,
+            // which is one catalogue described two ways.
+            .filter(p => p.displayMode === 'APPLICATION' || p.displayMode === 'INTERFACE'
+                      || p.displayMode === 'TABLE' || p.displayMode === 'SKILL')
+            .slice(0, 4);
+          if (cancelled) return;
+          setHighlights(scopedApps);
+          return;
+        }
+
         // 1. Try the admin-curated highlights row first (PublicHighlight DTO).
         const curated = useRemoteSource
           ? await publicationService.getRemoteHighlights('APPLICATION')
@@ -509,7 +566,7 @@ export function HighlightedApps() {
       }
     })();
     return () => { cancelled = true; };
-  }, [isAuthenticated, isReady, isLinkLoading, useRemoteSource, ceUnlinked]);
+  }, [isAuthenticated, isReady, isLinkLoading, useRemoteSource, ceUnlinked, studioOnly]);
 
   // Personal favorites - authenticated only. Hydrated server-side (deleted /
   // deactivated apps already dropped) so it renders directly. Fail-closed to empty.
@@ -555,24 +612,28 @@ export function HighlightedApps() {
           return toDisplayPub(p);
         }));
         if (cancelled) return;
-        // Cap the Home row at 8 favorites; the "see all" CTA links to the full list.
-        setFavorites([...pubCards, ...acquiredCards].slice(0, 8));
+        // Narrowed to the same axis as the row itself. A row headed "My studio apps" listing every
+        // favourite the reader has is two different shelves under one heading.
+        const merged = [...pubCards, ...acquiredCards]
+          .filter(card => !studioOnly || card.studio);
+        // Cap the row at 8 favorites; the "see all" CTA links to the full list.
+        setFavorites(merged.slice(0, 8));
       })
       .catch(() => { if (!cancelled) { setFavorites([]); setAcquiredIds(new Set()); } })
       .finally(() => { if (!cancelled) setFavoritesLoading(false); });
     return () => { cancelled = true; };
-  }, [isAuthenticated, isReady, currentOrgId]);
+  }, [isAuthenticated, isReady, currentOrgId, studioOnly]);
 
   // Restore the persisted pick once on mount (client only). Declared BEFORE the
   // favorites-first effect so storedPrefRef is populated before that effect reads it.
   useEffect(() => {
-    const stored = readStoredHighlightMode();
+    const stored = readStoredHighlightMode(studioOnly);
     storedPrefRef.current = stored;
     if (stored) {
       userPickedRef.current = true;
       setMode(stored);
     }
-  }, []);
+  }, [studioOnly]);
 
   // Favorites-first default, applied ONLY when the user has no persisted pick:
   // once the user has favorites and hasn't explicitly chosen, lead with Favorites;
@@ -594,7 +655,7 @@ export function HighlightedApps() {
   const pickMode = (m: HighlightMode) => {
     userPickedRef.current = true;
     storedPrefRef.current = m;
-    writeStoredHighlightMode(m);
+    writeStoredHighlightMode(m, studioOnly);
     setMode(m);
   };
 
@@ -639,10 +700,23 @@ export function HighlightedApps() {
   return (
     <section className="group/hl w-full max-w-6xl mx-auto px-6 mt-8 md:mt-10 space-y-10">
       <HighlightRow
-        heading={showFavorites ? tHl('favorites') : tHl('title')}
+        heading={showFavorites
+          ? (favoritesHeading ?? tHl('favorites'))
+          : (heading ?? tHl('title'))}
         items={items}
         isLoading={isLoading}
-        href={showFavorites ? '/app/applications' : '/app/marketplace'}
+        // On the MARKETPLACE branch, "see all" keeps the axis: dropping it would answer a narrower
+        // question with the whole catalogue.
+        //
+        // The favourites branch deliberately does not, because there is no narrowed destination to
+        // send anyone to: /app/applications lists what the reader owns and has no studio filter.
+        // Rather than link to a filter that does not exist, the CTA says where it actually goes -
+        // its label is "All applications" (chat.highlights.allFavorites), not "all favourites" - so
+        // a reader leaving the studio row lands on their full library knowing that is what they
+        // asked for. Give that page a studio filter and this is the line that should carry it.
+        href={showFavorites
+          ? '/app/applications'
+          : studioOnly ? '/app/marketplace?studio=true' : '/app/marketplace'}
         ctaLabel={showFavorites ? tHl('allFavorites') : tHl('all')}
         remote={showFavorites ? false : useRemoteSource}
         target={showFavorites ? 'application' : 'marketplace'}

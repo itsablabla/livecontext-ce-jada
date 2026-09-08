@@ -788,6 +788,7 @@ export function InspectorDesktopContent({
                         stepAlias={node?.data?.label}
                         dataType="output"
                         isDraggable={false}
+                        node={node}
                         onLoadedOutputChange={setLoadedRunOutput}
                       />
                     </div>

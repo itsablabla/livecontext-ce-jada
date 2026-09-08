@@ -37,7 +37,9 @@ public class GetRowsNodeSpec implements NodeSpec {
                 OutputFieldDef.builder()
                     .key("rows")
                     .type("array")
-                    .description("Retrieved rows")
+                    .description("Retrieved rows. A cell from a file or image column is the file reference "
+                        + "object {_type:'file', id, path, url, name, mimeType, size} - map the whole cell into a "
+                        + "parameter that takes a file, never one field of it. path and url are each present only when the file has one")
                     .defaultValue(List.of())
                     .build(),
                 OutputFieldDef.builder()

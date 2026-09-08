@@ -5,6 +5,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -37,18 +38,56 @@ class GenerateNodeGrantTest {
     @DisplayName("a plan that writes the node directly answers to the same grant")
     class SetPlanCarriesTheSameGate {
 
-        private Map<String, Object> planWith(Object... coreTypes) {
-            List<Object> cores = new java.util.ArrayList<>();
-            for (Object t : coreTypes) {
-                cores.add(t == null ? "not a map" : Map.of("type", t, "label", "x"));
+        private List<Object> nodes(Object... types) {
+            List<Object> list = new java.util.ArrayList<>();
+            for (Object t : types) {
+                list.add(t == null ? "not a map" : Map.of("type", t, "label", "x"));
             }
-            return Map.of("plan", Map.of("cores", cores));
+            return list;
+        }
+
+        /**
+         * A plan filing the node where it actually lives.
+         *
+         * <p>Generate belongs to the AI family, so a real plan carries it under
+         * {@code agents}. A gate that only walked {@code cores} would let every
+         * such plan past: the node would be created, the provider called, and
+         * the customer charged, on a build that was never granted generation.
+         */
+        private Map<String, Object> planWith(Object... agentTypes) {
+            return Map.of("plan", Map.of("agents", nodes(agentTypes)));
+        }
+
+        /**
+         * The other bucket, still scanned.
+         *
+         * <p>Plans are hand-written by agents and older ones put the node in
+         * {@code cores}. Whichever array it lands in, it is the same paid node,
+         * so the gate reads both rather than trusting the writer to file it
+         * correctly.
+         */
+        private Map<String, Object> planWithCores(Object... coreTypes) {
+            return Map.of("plan", Map.of("cores", nodes(coreTypes)));
         }
 
         @Test
-        @DisplayName("a plan carrying a generate core is recognised, or the grant is reachable by "
+        @DisplayName("a generate node filed under cores is still recognised, since either shape creates it")
+        void aGenerateFiledUnderCoresIsRecognised() {
+            assertThat(WorkflowBuilderProvider.planCarriesAGenerateNode(
+                    planWithCores("agent", "generate", "transform"))).isTrue();
+        }
+
+        @Test
+        @DisplayName("a plan with neither bucket carrying one is not gated")
+        void neitherBucketIsNotGated() {
+            assertThat(WorkflowBuilderProvider.planCarriesAGenerateNode(
+                    planWithCores("decision", "transform"))).isFalse();
+        }
+
+        @Test
+        @DisplayName("a plan carrying a generate node is recognised, or the grant is reachable by "
                 + "writing the node instead of adding it")
-        void aGenerateCoreIsRecognised() {
+        void aGenerateNodeIsRecognised() {
             // add_node was gated and set_plan was not, though both create the
             // same node and spend the same money on the same provider. The
             // whole bypass was one documented tool call.
@@ -63,7 +102,7 @@ class GenerateNodeGrantTest {
         }
 
         @Test
-        @DisplayName("a plan with no generate core is not gated, so ordinary building is untouched")
+        @DisplayName("a plan with no generate node is not gated, so ordinary building is untouched")
         void anOrdinaryPlanIsNotGated() {
             assertThat(WorkflowBuilderProvider.planCarriesAGenerateNode(
                     planWith("agent", "decision", "transform"))).isFalse();
@@ -88,7 +127,7 @@ class GenerateNodeGrantTest {
         }
 
         @Test
-        @DisplayName("set_plan REFUSES a generate core when the grant is absent, with the same message "
+        @DisplayName("set_plan REFUSES a generate node when the grant is absent, with the same message "
                 + "add_node gives")
         void setPlanRefusesWithoutTheGrant() {
             // The detector tests above prove the shape is recognised. This
@@ -261,5 +300,53 @@ class GenerateNodeGrantTest {
             // strictest configuration would be the most permissive.
             assertThat(AgentModuleResolver.callerMayUse(Map.of(KEY, List.of()), "generation")).isFalse();
         }
+    }
+
+    /**
+     * The third bucket a plan can put the node in, and the one that builds it.
+     *
+     * <p>What decides whether a generate node is BUILT is the export step, not
+     * the array the plan arrived in: import copies mcps across verbatim, and the
+     * export files any entry carrying isAgent into the plan's agents. So an
+     * entry written under mcps with isAgent and type generate is saved as an
+     * agent and built as a real generate node, spending the customer's credits
+     * on a paid provider.
+     *
+     * <p>The route was inert while the node was built from cores; moving it to
+     * the AI family is what made it work, so the gate had to follow. Scanning
+     * fewer buckets than the export reads is a grant that refuses the one-node
+     * action while a whole plan carrying the same node walks past it.
+     */
+    @Test
+    @DisplayName("a generate node hidden among the plan's mcps is seen, since that is where it is BUILT from")
+    void aGenerateNodeAmongTheMcpsIsSeen() {
+        Map<String, Object> hidden = new LinkedHashMap<>();
+        hidden.put("id", "__wait__");
+        hidden.put("label", "Sneaky");
+        hidden.put("isAgent", true);
+        hidden.put("type", "generate");
+        hidden.put("params", Map.of("model", "seedance-2.0-fast"));
+
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("mcps", List.of(hidden));
+
+        assertThat(WorkflowBuilderProvider.planCarriesAGenerateNode(Map.of("plan", plan)))
+                .as("the export files this entry under agents and the factory builds it")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("an ordinary mcp step is not mistaken for one, so the gate does not refuse every plan")
+    void anOrdinaryMcpStepIsNotSeen() {
+        Map<String, Object> step = new LinkedHashMap<>();
+        step.put("id", "gmail/send_email");
+        step.put("label", "Notify");
+        step.put("type", "mcp");
+
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("mcps", List.of(step));
+
+        assertThat(WorkflowBuilderProvider.planCarriesAGenerateNode(Map.of("plan", plan)))
+                .isFalse();
     }
 }

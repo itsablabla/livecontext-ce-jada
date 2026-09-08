@@ -34,6 +34,8 @@ import { deriveNodeContextFlags, useNodeContextualButtons } from '../hooks/useNo
 import { useTriggerPinDisplay, requestTriggerPin } from '../hooks/useTriggerPin';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
 import { findNodeClassById } from '../nodes/nodeClasses';
+import { useIsMacPlatform } from '@/lib/utils/platform';
+import { clampMenuLeft } from '@/lib/utils/menuPlacement';
 
 /** Operations the node menu delegates back to the canvas (all operate on raw graph state). */
 export interface NodeContextMenuActions {
@@ -54,9 +56,6 @@ export interface PaneContextMenuActions {
   autoLayout: () => void;
   fitView: () => void;
 }
-
-const isMacPlatform = (): boolean =>
-  typeof navigator !== 'undefined' && /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || '');
 
 /* ----------------------------------------------------------------------------
  * Themed primitives
@@ -86,9 +85,11 @@ function ContextMenuShell({ x, y, onClose, children, ariaLabel }: ContextMenuShe
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const pad = 8;
-    let nx = x;
+    // Horizontally through the shared clamp (measured width, since a context
+    // menu sizes to its longest label); vertically it keeps its own, which the
+    // helper does not cover.
+    const nx = clampMenuLeft(x, rect.width, pad);
     let ny = y;
-    if (x + rect.width + pad > window.innerWidth) nx = Math.max(pad, window.innerWidth - rect.width - pad);
     if (y + rect.height + pad > window.innerHeight) ny = Math.max(pad, window.innerHeight - rect.height - pad);
     setPos({ x: nx, y: ny });
     setReady(true);
@@ -125,7 +126,7 @@ function ContextMenuShell({ x, y, onClose, children, ariaLabel }: ContextMenuShe
       aria-label={ariaLabel}
       data-testid="canvas-context-menu"
       onContextMenu={(e) => e.preventDefault()}
-      className="fixed z-[10000] min-w-[15rem] max-w-[20rem] select-none rounded-xl border border-slate-200 bg-white/95 p-1.5 text-slate-700 shadow-xl backdrop-blur-sm dark:border-slate-700 dark:bg-gray-800/95 dark:text-slate-200"
+      className="fixed z-[10000] min-w-[15rem] max-w-[min(20rem,calc(100vw-1rem))] select-none rounded-xl border border-slate-200 bg-white/95 p-1.5 text-slate-700 shadow-xl backdrop-blur-sm dark:border-slate-700 dark:bg-gray-800/95 dark:text-slate-200"
       style={{ left: pos.x, top: pos.y, visibility: ready ? 'visible' : 'hidden' }}
     >
       {children}
@@ -212,13 +213,17 @@ export function NodeContextMenu({
   const data = node.data;
   const nodeId = node.id;
   const editable = !isRunMode && !isPreviewOnly;
-  const mod = isMacPlatform() ? '⌘' : 'Ctrl';
+  // `Ctrl` is a word on the keycap, and a German keyboard prints `Strg`.
+  const mod = useIsMacPlatform() ? '⌘' : t('ctrlKeyName');
   const { workflowId, isApplicationMode } = useWorkflowMode();
 
   const exec = useNodeExecutionStatus(nodeId, {
     label: data.label,
     kind: data.kind,
     crudOperation: (data as unknown as { dataSourceData?: { crudOperation?: string } }).dataSourceData?.crudOperation,
+    // While one epoch is focused this is THAT epoch's outcome - what the run controls
+    // must speak about there (the context's own sets accumulate across every epoch).
+    status: data.status,
   });
 
   const nodeClass = findNodeClassById(data.id || '');
@@ -394,7 +399,8 @@ interface PaneContextMenuProps {
  */
 export function PaneContextMenu({ x, y, editable, canPaste, hasNodes, actions, onClose }: PaneContextMenuProps) {
   const t = useTranslations('workflowBuilder.contextMenu');
-  const mod = isMacPlatform() ? '⌘' : 'Ctrl';
+  // `Ctrl` is a word on the keycap, and a German keyboard prints `Strg`.
+  const mod = useIsMacPlatform() ? '⌘' : t('ctrlKeyName');
 
   const run = (fn: () => void) => () => {
     fn();

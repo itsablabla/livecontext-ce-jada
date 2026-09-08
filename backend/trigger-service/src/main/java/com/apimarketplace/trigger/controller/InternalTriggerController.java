@@ -4,6 +4,7 @@ import com.apimarketplace.common.scope.ScopeGuard;
 import com.apimarketplace.common.scope.TolerantScope;
 import com.apimarketplace.trigger.client.dto.*;
 import com.apimarketplace.trigger.domain.ScheduledExecutionEntity;
+import com.apimarketplace.trigger.service.PendingFirePolicy;
 import com.apimarketplace.trigger.domain.StandaloneChatEndpointEntity;
 import com.apimarketplace.trigger.domain.StandaloneFormEndpointEntity;
 import com.apimarketplace.trigger.domain.StandaloneWebhookEntity;
@@ -440,15 +441,28 @@ public class InternalTriggerController {
         Instant advancedNextExecutionAt = instantBody(body, "advancedNextExecutionAt", schedule.getNextExecutionAt());
         Instant advancedLastExecutionAt = instantBody(body, "advancedLastExecutionAt", schedule.getLastExecutionAt());
 
+        // Compare on the execution COUNT and the next fire only.
+        //
+        // last_execution_at is deliberately NOT compared, though it is still restored. The
+        // caller observes it on the in-memory entity returned by record-execution, where it
+        // is a raw Instant.now(); this method re-reads the row in a new transaction, i.e.
+        // from Postgres, whose timestamptz keeps microseconds. On any JVM whose clock has
+        // finer resolution than that - Windows gives 100ns - the two can never be equal, so
+        // the guard would refuse EVERY undo and silently log "dispatch markers changed".
+        // Nothing would be wrong in the logs, and a failed manual run would keep its charge:
+        // the whole mechanism three audit rounds went into, defeated by a rounding artefact.
+        // Production is saved only by HotSpot using gettimeofday on Linux, which is an
+        // undocumented platform coincidence, not a design.
+        //
+        // The two remaining fields are exact by construction (an int, and a cron slot
+        // computed to the second) and together they already identify the advance: nothing
+        // can move last_execution_at without also moving one of them.
         if (schedule.getExecutionCount() != advancedExecutionCount
-                || !Objects.equals(schedule.getNextExecutionAt(), advancedNextExecutionAt)
-                || !Objects.equals(schedule.getLastExecutionAt(), advancedLastExecutionAt)) {
+                || !Objects.equals(schedule.getNextExecutionAt(), advancedNextExecutionAt)) {
             logger.warn("[Schedule] Refusing restore-dispatch for schedule {} because dispatch markers changed "
-                            + "(currentCount={}, expectedCount={}, currentNext={}, expectedNext={}, "
-                            + "currentLast={}, expectedLast={})",
+                            + "(currentCount={}, expectedCount={}, currentNext={}, expectedNext={})",
                     scheduleId, schedule.getExecutionCount(), advancedExecutionCount,
-                    schedule.getNextExecutionAt(), advancedNextExecutionAt,
-                    schedule.getLastExecutionAt(), advancedLastExecutionAt);
+                    schedule.getNextExecutionAt(), advancedNextExecutionAt);
             return ResponseEntity.ok(toScheduleDto(schedule));
         }
 
@@ -457,6 +471,162 @@ public class InternalTriggerController {
         schedule.setExecutionCount(previousExecutionCount);
         schedule.setUpdatedAt(Instant.now());
         ScheduledExecutionEntity saved = scheduleRepository.save(schedule);
+        return ResponseEntity.ok(toScheduleDto(saved));
+    }
+
+    /**
+     * Agenda "move THIS occurrence": set {@code next_execution_at} without touching the
+     * cron.
+     *
+     * <p>What it deliberately does NOT do is the whole feature. The cron is left alone,
+     * so once this fire happens the daemon recomputes the following one from the
+     * expression and every later occurrence returns to its normal slot. The user moved a
+     * single run, not the schedule - which is why no extra table is needed to remember an
+     * override: the override IS the pending {@code next_execution_at}, and it expires by
+     * being consumed.
+     *
+     * <p>A target in the past is accepted: it means "run at the next daemon tick", the
+     * same state a schedule that was down for a minute is already in. The caller is
+     * responsible for warning the user, because there is no way to fire in the past.
+     *
+     * <p>ARCHIVED rows are refused (409). They never dispatch, so writing a fire time
+     * onto one would draw an occurrence on the calendar that can never happen.
+     */
+    @PutMapping("/schedules/{scheduleId}/next-fire")
+    @Transactional
+    public ResponseEntity<?> setScheduleNextFire(
+            @PathVariable("scheduleId") UUID scheduleId,
+            @RequestHeader(value = "X-User-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String orgId,
+            @RequestBody Map<String, Object> body) {
+        if (!hasText(tenantId)) {
+            return ResponseEntity.status(401).body(Map.of("error", "X-User-ID is required"));
+        }
+        ScheduledExecutionEntity schedule = scheduleRepository.findById(scheduleId).orElse(null);
+        if (schedule == null || !isRowInStrictScope(schedule, tenantId, orgId)) {
+            // 404 rather than 403 for an out-of-scope row: the caller must not learn that
+            // someone else's schedule carries this id.
+            return ResponseEntity.notFound().build();
+        }
+        if (schedule.getState() == TriggerState.ARCHIVED) {
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "Schedule is archived and will never dispatch"));
+        }
+
+        Instant nextFireAt;
+        try {
+            nextFireAt = instantBody(body, "nextFireAt", null);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "nextFireAt must be an ISO-8601 instant"));
+        }
+        if (nextFireAt == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "nextFireAt is required"));
+        }
+
+        Instant previous = schedule.getNextExecutionAt();
+
+        // Optional compare-and-set on the fire time the caller believed it was moving.
+        //
+        // The agenda refuses a move aimed at anything but the schedule's pending fire, and
+        // that check ran in orchestrator while the write landed here - two services and a
+        // network hop apart. Drag the 09:00 chip at 08:59:59 and the check passes; the
+        // daemon claims and fires 09:00 and advances the row; this write then stamps 14:00
+        // TODAY over tomorrow's slot. The user gets an extra run they did not ask for and
+        // tomorrow's is skipped, with nothing anywhere reporting it. Closing the window
+        // means checking where the write happens, which is here.
+        //
+        // Optional so existing callers that do not know the expected value keep working;
+        // 409 rather than 404 because the row exists and is fine, the caller's belief about
+        // it is what went stale.
+        Instant expectedCurrent;
+        try {
+            expectedCurrent = instantBody(body, "expectedNextFireAt", null);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "expectedNextFireAt must be an ISO-8601 instant"));
+        }
+        if (expectedCurrent != null && !expectedCurrent.equals(previous)) {
+            logger.info("[Schedule] Refusing move of schedule {}: expected pending fire {} but the row "
+                    + "carries {} (it fired or was moved in between)", scheduleId, expectedCurrent, previous);
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "The occurrence moved or fired before the change was applied",
+                    "reason", "NOT_THE_NEXT_OCCURRENCE"));
+        }
+
+        schedule.setNextExecutionAt(nextFireAt);
+        schedule.setUpdatedAt(Instant.now());
+        ScheduledExecutionEntity saved = scheduleRepository.save(schedule);
+        logger.info("[Schedule] Moved next fire of schedule {} from {} to {} (cron '{}' unchanged)",
+                scheduleId, previous, nextFireAt, schedule.getCronExpression());
+        return ResponseEntity.ok(toScheduleDto(saved));
+    }
+
+    /**
+     * Agenda "move ALL occurrences": replace the cron expression and re-derive
+     * {@code next_execution_at} from it.
+     *
+     * <p>The new expression is computed by the CALLER
+     * ({@code com.apimarketplace.common.schedule.CronShifter}), which refuses any pattern
+     * whose "time of day" is ambiguous. This endpoint re-validates rather than trusting
+     * that: a cron that reaches the row unvalidated fires forever at the wrong time, or
+     * gets auto-archived on its next tick by the legacy-cron guard in
+     * {@code record-execution}.
+     *
+     * <p>{@code next_execution_at} is recomputed here and not left to the daemon, because
+     * the row's pending fire belongs to the OLD expression - leaving it would fire once
+     * more at the time the user just moved away from.
+     */
+    @PutMapping("/schedules/{scheduleId}/cron")
+    @Transactional
+    public ResponseEntity<?> updateScheduleCron(
+            @PathVariable("scheduleId") UUID scheduleId,
+            @RequestHeader(value = "X-User-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Organization-ID", required = false) String orgId,
+            @RequestBody Map<String, Object> body) {
+        if (!hasText(tenantId)) {
+            return ResponseEntity.status(401).body(Map.of("error", "X-User-ID is required"));
+        }
+        ScheduledExecutionEntity schedule = scheduleRepository.findById(scheduleId).orElse(null);
+        if (schedule == null || !isRowInStrictScope(schedule, tenantId, orgId)) {
+            return ResponseEntity.notFound().build();
+        }
+        if (schedule.getState() == TriggerState.ARCHIVED) {
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "Schedule is archived and will never dispatch"));
+        }
+
+        Object rawCron = body != null ? body.get("cron") : null;
+        String cron = rawCron != null ? rawCron.toString().trim() : null;
+        if (cron == null || cron.isBlank() || !cronParser.isAcceptableInput(cron)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid cron expression"));
+        }
+        Object rawTimezone = body != null ? body.get("timezone") : null;
+        String timezone = rawTimezone != null && !rawTimezone.toString().isBlank()
+                ? rawTimezone.toString()
+                : schedule.getTimezone();
+        // A zone the platform cannot resolve must not reach the row: the arming maths then
+        // returns nothing and the schedule goes inert with no error anyone would see.
+        if (!com.apimarketplace.common.schedule.CronOccurrences.isResolvableTimezone(timezone)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Unknown timezone"));
+        }
+
+        Instant nextExecutionAt = cronParser.getNextExecution(cron, timezone);
+        if (nextExecutionAt == null) {
+            // Valid syntax, no future firing (an impossible date such as Feb 31). Writing
+            // it would leave a schedule that is armed and can never run.
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Cron expression has no future execution"));
+        }
+
+        String previousCron = schedule.getCronExpression();
+        schedule.setCronExpression(cron);
+        schedule.setTimezone(timezone);
+        schedule.setNextExecutionAt(nextExecutionAt);
+        schedule.setUpdatedAt(Instant.now());
+        ScheduledExecutionEntity saved = scheduleRepository.save(schedule);
+        logger.info("[Schedule] Rewrote cron of schedule {} from '{}' to '{}' ({}), next fire {}",
+                scheduleId, previousCron, cron, timezone, nextExecutionAt);
         return ResponseEntity.ok(toScheduleDto(saved));
     }
 
@@ -783,12 +953,31 @@ public class InternalTriggerController {
         // `getNextExecution` return null and the row would persist with the
         // `+60s` fallback below, dispatching forever at the wrong cadence.
         // Mirrors the public-path validator at ScheduleController.createOrUpdateSchedule:98.
+        // isValid, not isAcceptableInput. This endpoint is internal: ScheduleSyncService
+        // replays the cron already stored in a pinned plan, on every workflow save, pin and
+        // run start. That is machine replay, not a user submitting a new expression, so the
+        // question is "can this fire", not "should we accept this". Asking the strict one
+        // here would 400 a legacy row whose cron predates the rule - and TriggerClient
+        // swallows that error, so the row's sync would simply stop updating, silently.
+        // The strict predicate belongs on the doors a person types into.
         if (!cronParser.isValid(cron)) {
             logger.warn("[Schedule] Rejected invalid cron '{}' on /schedules/create (workflow={}, trigger={})",
                     cron, workflowId, triggerId);
             return ResponseEntity.badRequest().body(Map.of(
                     "error", "Invalid cron expression",
                     "cron", cron));
+        }
+
+        // A zone the platform cannot resolve must not reach the row. The arming maths
+        // answers null for one, and the +60s fallback below then arms the schedule a minute
+        // out - where record-execution recomputes null, falls back again, and the schedule
+        // fires EVERY MINUTE FOREVER. The legacy-cron reaper does not catch it: its
+        // predicate asks whether the CRON is valid, and the cron is fine.
+        if (!com.apimarketplace.common.schedule.CronOccurrences.isResolvableTimezone(timezone)) {
+            logger.warn("[Schedule] Rejected unresolvable timezone '{}' on /schedules/create (workflow={}, trigger={})",
+                    timezone, workflowId, triggerId);
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Unknown timezone", "timezone", timezone));
         }
 
         // Compute real next execution from cron expression
@@ -844,11 +1033,18 @@ public class InternalTriggerController {
             }
         }
 
+        // Captured before the shape is overwritten - see PendingFirePolicy. Sync re-upserts
+        // this row with an unchanged cron on every save/pin/run start, so recomputing here
+        // used to be the shortest-lived way to lose a moved occurrence.
+        String storedCron = schedule.getCronExpression();
+        String storedZone = schedule.getTimezone();
+        Instant storedFire = schedule.getNextExecutionAt();
         schedule.setCronExpression(cron);
         schedule.setTimezone(timezone);
         schedule.setMaxExecutions(maxExecutions);
         schedule.setEnabled(enabled);
-        schedule.setNextExecutionAt(nextExecution);
+        schedule.setNextExecutionAt(PendingFirePolicy.resolve(
+                storedFire, storedCron, storedZone, cron, timezone, nextExecution));
         schedule.setUpdatedAt(Instant.now());
 
         // Name and workflowName for display in Settings → Triggers
@@ -950,9 +1146,24 @@ public class InternalTriggerController {
         if (enabled) {
             triggerLifecycleManager.armSchedule(scheduleId, TriggerLifecycleManager.Source.ADMIN);
             schedule = scheduleRepository.findById(scheduleId).orElse(schedule);
-            Instant nextExecution = cronParser.getNextExecution(schedule.getCronExpression(), schedule.getTimezone());
-            if (nextExecution != null) {
-                schedule.setNextExecutionAt(nextExecution);
+            // Recompute ONLY when the stored fire time can no longer be honoured.
+            //
+            // A pending fire in the future is not stale, it is a DECISION: the agenda's
+            // "move this occurrence" writes exactly here and leaves the cron alone, and the
+            // paused marker tells the user in writing "would resume {when}" using this
+            // value. Overwriting it on resume silently threw that away and fired at the
+            // cron slot instead, contradicting what the UI had just promised.
+            //
+            // A pending fire in the PAST cannot be honoured (the pause outlived it), so it
+            // is recomputed - which also stops the marker advertising a resume time that
+            // has already gone by.
+            Instant recomputed = cronParser.getNextExecution(
+                    schedule.getCronExpression(), schedule.getTimezone());
+            Instant resolved = PendingFirePolicy.resolve(
+                    schedule.getNextExecutionAt(), schedule.getCronExpression(), schedule.getTimezone(),
+                    schedule.getCronExpression(), schedule.getTimezone(), recomputed);
+            if (!java.util.Objects.equals(resolved, schedule.getNextExecutionAt())) {
+                schedule.setNextExecutionAt(resolved);
                 schedule.setUpdatedAt(Instant.now());
                 scheduleRepository.save(schedule);
             }
@@ -1046,7 +1257,7 @@ public class InternalTriggerController {
         String cron = body.get("cron");
         String timezone = body.getOrDefault("timezone", "UTC");
 
-        boolean valid = cronParser.isValid(cron);
+        boolean valid = cronParser.isAcceptableInput(cron);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("valid", valid);
 
@@ -1449,12 +1660,22 @@ public class InternalTriggerController {
         // Strict-validation gate - same defense in depth as /schedules/create.
         // Agent schedule rows are upserted by agent-service via TriggerClient and a
         // bad cron here would dispatch the agent indefinitely at the wrong cadence.
-        if (!cronParser.isValid(cron)) {
+        if (!cronParser.isAcceptableInput(cron)) {
             logger.warn("[Schedule] Rejected invalid cron '{}' on /schedules/agent (agentEntity={})",
                     cron, agentEntityId);
             return ResponseEntity.badRequest().body(Map.of(
                     "error", "Invalid cron expression",
                     "cron", cron));
+        }
+
+        // Same refusal as the workflow door, for the same reason: an unresolvable zone
+        // arms the row a minute out and every recompute re-arms it a minute out, so the
+        // agent runs every 60 seconds forever - spending credits on each one.
+        if (!com.apimarketplace.common.schedule.CronOccurrences.isResolvableTimezone(timezone)) {
+            logger.warn("[Schedule] Rejected unresolvable timezone '{}' on /schedules/agent (agentEntity={})",
+                    timezone, agentEntityId);
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Unknown timezone", "timezone", timezone));
         }
 
         // Compute next execution from cron expression
@@ -1486,6 +1707,10 @@ public class InternalTriggerController {
         boolean isNewSchedule = existingSchedule.isEmpty();
         boolean enabled = body.get("enabled") == null || Boolean.parseBoolean(body.get("enabled").toString());
 
+        // Captured before the shape is overwritten - see PendingFirePolicy.
+        String storedAgentCron = schedule.getCronExpression();
+        String storedAgentZone = schedule.getTimezone();
+        Instant storedAgentFire = schedule.getNextExecutionAt();
         schedule.setCronExpression(cron);
         schedule.setTimezone(timezone);
         schedule.setMaxExecutions(maxExecutions);
@@ -1506,7 +1731,8 @@ public class InternalTriggerController {
         } else if (isNewSchedule) {
             schedule.setWithMemory(false);
         }
-        schedule.setNextExecutionAt(computedNext);
+        schedule.setNextExecutionAt(PendingFirePolicy.resolve(
+                storedAgentFire, storedAgentCron, storedAgentZone, cron, timezone, computedNext));
         applyScheduleEnabledState(schedule, enabled);
         schedule.setUpdatedAt(Instant.now());
         if (name != null) {
@@ -1573,10 +1799,15 @@ public class InternalTriggerController {
                 return ResponseEntity.ok(toScheduleDto(schedule));
             }
             schedule = scheduleRepository.findById(schedule.getId()).orElse(schedule);
-            Instant nextExecution = cronParser.getNextExecution(
+            // The agent twin of the workflow resume path: a pending fire still ahead is
+            // the user's move and is preserved.
+            Instant recomputed = cronParser.getNextExecution(
                     schedule.getCronExpression(), schedule.getTimezone());
-            if (nextExecution != null) {
-                schedule.setNextExecutionAt(nextExecution);
+            Instant resolved = PendingFirePolicy.resolve(
+                    schedule.getNextExecutionAt(), schedule.getCronExpression(), schedule.getTimezone(),
+                    schedule.getCronExpression(), schedule.getTimezone(), recomputed);
+            if (!java.util.Objects.equals(resolved, schedule.getNextExecutionAt())) {
+                schedule.setNextExecutionAt(resolved);
                 schedule.setUpdatedAt(Instant.now());
                 scheduleRepository.save(schedule);
             }
@@ -1707,6 +1938,7 @@ public class InternalTriggerController {
         dto.setAgentEntityId(entity.getAgentEntityId());
         dto.setSchedulePrompt(entity.getSchedulePrompt());
         dto.setWithMemory(entity.getWithMemory());
+        dto.setLastDisabledReason(entity.getLastDisabledReason());
         return dto;
     }
 
@@ -1720,6 +1952,21 @@ public class InternalTriggerController {
      * {@code ScheduleController.isRowInScope} uses strict isolation via
      * {@link ScopeGuard#isInStrictScope}.
      */
+    /**
+     * Strict-isolation predicate for the two agenda write endpoints.
+     *
+     * <p>Deliberately NOT the tolerant {@link #isRowInScope} used by the internal cascade
+     * paths: its {@code @TolerantScope} justification is "caller already gated upstream by
+     * the workflow-deletion path", which does not describe a user pressing a button on a
+     * calendar. Tolerant scope would let a caller in one workspace write to a row they own
+     * but which is tagged for another. Orchestrator's {@code AgendaActionService} applies
+     * the same strict check; this is the layer below it agreeing rather than relaxing.
+     */
+    private static boolean isRowInStrictScope(ScheduledExecutionEntity s, String tenantId, String orgId) {
+        if (s == null) return false;
+        return ScopeGuard.isInStrictScope(tenantId, orgId, s.getTenantId(), s.getOrganizationId());
+    }
+
     @TolerantScope(reason = "internal cascade DELETE - caller already gated upstream by orchestrator workflow-deletion path")
     private static boolean isRowInScope(ScheduledExecutionEntity s, String tenantId, String orgId) {
         if (s == null) return false;

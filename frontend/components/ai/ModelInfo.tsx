@@ -41,6 +41,8 @@ import { formatUtcDate } from '@/lib/utils/dateFormatters';
 import { cn } from '@/lib/utils';
 import type { AIModel } from '@/hooks/useModels';
 import { getProviderDisplayName } from '@/lib/ai-providers/providerIcons';
+import { formatCreditEstimate, type CostProfileId, type ModelCostBasis } from '@/lib/billing/model-cost-estimate';
+import { getClientLocale } from '@/lib/utils/locale';
 import { UpgradeRequiredBadge } from '@/components/billing/UpgradeRequiredBadge';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -264,17 +266,34 @@ interface ModelOptionDisplayProps {
    * client. The caller asks `useMonthlyCreditsCannotPay` once.
    */
   upgradeRequired?: boolean;
+  /**
+   * Multiplier + cost profiles from `useModelCostBasis`, or null to show no
+   * estimate (which is what CE gets). Passed in for the same reason as
+   * `upgradeRequired`: the answer belongs to the whole list, and a query per
+   * row would put an observer behind every option.
+   */
+  costBasis?: ModelCostBasis | null;
+  /**
+   * Which shape of work the estimate prices. The surfaces differ by two orders
+   * of magnitude, so the picker says which one it is: an agent that calls tools
+   * is not a classify step, and quoting one figure for both would mislead on
+   * every screen but one.
+   */
+  costProfile?: CostProfileId;
   className?: string;
 }
 
 /**
  * Inline rich row: model name on the first line, then a meta line with tier,
- * capability icons, context window, optional price, and a deprecation flag.
+ * capability icons, context window, optional price, an optional credit
+ * estimate, and a deprecation flag.
  */
 export function ModelOptionDisplay({
   model,
   variant = 'default',
   upgradeRequired = false,
+  costBasis = null,
+  costProfile = 'agentConversation',
   className,
 }: ModelOptionDisplayProps) {
   const t = useTranslations('modelInfo');
@@ -284,6 +303,10 @@ export function ModelOptionDisplay({
   const deprecated = !!model.deprecatedAt;
   const showPrice = variant !== 'compact' && priceIn !== null && priceOut !== null;
   const maxInline = variant === 'compact' ? 3 : 4;
+  // What the choice will actually cost, in the same credits the ledger debits,
+  // said BEFORE the model is picked. Null on CE, on an unpriced row, and on a
+  // catalogue sentinel rate.
+  const creditEstimate = formatCreditEstimate(model.pricing, costBasis, costProfile, getClientLocale());
 
   return (
     <div className={cn('flex flex-col gap-0.5 min-w-0 w-full', className)}>
@@ -338,6 +361,25 @@ export function ModelOptionDisplay({
         {showPrice && (
           <span>{t('priceShort', { input: priceIn, output: priceOut })}</span>
         )}
+        {creditEstimate && (ctx || showPrice) && (
+          <span aria-hidden className="text-slate-300 dark:text-slate-600">·</span>
+        )}
+        {creditEstimate && (
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="whitespace-nowrap">
+                  {t('creditEstimateShort', { credits: creditEstimate })}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className={MENU_TOOLTIP_Z}>
+                <div className="text-xs max-w-[15rem]">
+                  {t(`creditEstimateTooltip.${costProfile}`, { credits: creditEstimate })}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
     </div>
   );
@@ -351,6 +393,10 @@ interface ModelInfoPopoverProps {
   model: AIModel;
   /** Optional custom trigger; defaults to a small (i) icon button. */
   trigger?: React.ReactNode;
+  /** See {@link ModelOptionDisplayProps.costBasis}. Passed by the same caller. */
+  costBasis?: ModelCostBasis | null;
+  /** See {@link ModelOptionDisplayProps.costProfile}. */
+  costProfile?: CostProfileId;
   className?: string;
 }
 
@@ -359,9 +405,19 @@ interface ModelInfoPopoverProps {
  * pricing, and deprecation info. Use this next to inline displays where the
  * user might want the full picture without leaving the picker.
  */
-export function ModelInfoPopover({ model, trigger, className }: ModelInfoPopoverProps) {
+export function ModelInfoPopover({
+  model,
+  trigger,
+  costBasis = null,
+  costProfile = 'agentConversation',
+  className,
+}: ModelInfoPopoverProps) {
   const t = useTranslations('modelInfo');
   const [open, setOpen] = React.useState(false);
+  // The row's estimate lives behind a hover tooltip, which a touch device can
+  // never open. This card IS the touch path (it opens on tap), so the figure and
+  // its explanation are repeated here rather than being pointer-only.
+  const creditEstimate = formatCreditEstimate(model.pricing, costBasis, costProfile, getClientLocale());
 
   const priceIn = formatPricePerMillion(model.pricing?.input);
   const priceOut = formatPricePerMillion(model.pricing?.output);
@@ -464,6 +520,20 @@ export function ModelInfoPopover({ model, trigger, className }: ModelInfoPopover
                 </>
               )}
             </dl>
+          )}
+
+          {creditEstimate && (
+            <div className="rounded-md border border-slate-200 dark:border-slate-700 p-2">
+              <div className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1">
+                {t('creditEstimateLabel')}
+              </div>
+              <div className="text-sm font-semibold text-theme-primary">
+                {t('creditEstimateShort', { credits: creditEstimate })}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {t(`creditEstimateTooltip.${costProfile}`, { credits: creditEstimate })}
+              </p>
+            </div>
           )}
 
           {(priceIn || priceOut || priceCacheRead || priceBatchIn) && (

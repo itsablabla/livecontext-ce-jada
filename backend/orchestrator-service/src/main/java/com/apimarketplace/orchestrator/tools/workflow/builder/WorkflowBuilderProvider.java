@@ -74,6 +74,19 @@ public class WorkflowBuilderProvider implements ToolsProvider {
     private final WorkflowManagementService workflowService;
     private final InterfaceClient interfaceClient;
     private final NodeTypeSearchService nodeTypeSearchService;
+
+    /**
+     * Per-plan availability of node types. Setter-injected and optional so the
+     * existing constructor stays as it is (this class is built by hand in tests)
+     * and so an assembly without auth-client simply gates nothing.
+     */
+    private com.apimarketplace.auth.client.entitlement.PlanFeatureGate planFeatureGate;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setPlanFeatureGate(
+            com.apimarketplace.auth.client.entitlement.PlanFeatureGate planFeatureGate) {
+        this.planFeatureGate = planFeatureGate;
+    }
     private final AdHocNodeExecutionService adHocNodeExecutionService;
     private final NodeLibraryService nodeLibraryService;
     private final NodeParamsValidator nodeParamsValidator;
@@ -1536,7 +1549,7 @@ public class WorkflowBuilderProvider implements ToolsProvider {
 
     ToolExecutionResult delegatePlanImport(Map<String, Object> params, String tenantId, ToolExecutionContext ctx) {
         // Same gate as add_node, because this creates the same node. A plan can
-        // carry a generate core directly, so gating only the one-node action
+        // carry a generate node directly, so gating only the one-node action
         // left the grant reachable by writing the node into a plan instead of
         // adding it, which is the same money on the same provider.
         if (planCarriesAGenerateNode(params)) {
@@ -1575,27 +1588,47 @@ public class WorkflowBuilderProvider implements ToolsProvider {
     }
 
     /**
-     * Whether a submitted plan declares a generate core.
+     * Whether a submitted plan declares a generate node.
      *
      * <p>Read defensively, because this runs BEFORE the plan is validated: any
      * shape may arrive, and a shape this does not recognise is a plan that
      * walks past the grant. Package-private so that is testable directly, which
      * is cheaper and more pointed than driving the whole provider.
+     *
+     * <p><b>Both lists are scanned, and that is the whole point.</b> generate
+     * is filed under {@code agents} now that it is an AI node, but a plan
+     * written by hand can put anything anywhere, and what decides whether a
+     * node is BUILT is the export step, not the array it arrived in. Scanning
+     * fewer buckets than the export reads leaves a grant that refuses the
+     * one-node action while a whole plan carrying the same node walks past it,
+     * and the node spends the customer's credits on a paid provider, which is
+     * the reason the grant exists.
+     *
+     * <p><b>Why mcps is in the list.</b> The export files any session entry
+     * carrying {@code isAgent} into the plan's agents, and import copies the
+     * mcps array in verbatim, so an entry written there with
+     * {@code isAgent: true, type: "generate"} is saved as an agent and built as
+     * a real generate node. That route was inert while the node was built from
+     * cores; moving it to the AI family is what made it work, so the gate has to
+     * follow.
      */
     @SuppressWarnings("unchecked")
     static boolean planCarriesAGenerateNode(Map<String, Object> params) {
         Object planObj = params == null ? null : params.get("plan");
         if (!(planObj instanceof Map)) return false;
-        Object coresObj = ((Map<String, Object>) planObj).get("cores");
-        if (!(coresObj instanceof List)) return false;
-        for (Object core : (List<Object>) coresObj) {
-            if (!(core instanceof Map)) continue;
-            Object type = ((Map<String, Object>) core).get("type");
-            // "generate" exactly, because that is the only value the plan
-            // validator turns into a generate core. Matching more would refuse
-            // plans that never create one.
-            if (type instanceof String s && "generate".equalsIgnoreCase(s.trim())) {
-                return true;
+        Map<String, Object> plan = (Map<String, Object>) planObj;
+        for (String bucket : List.of("agents", "cores", "mcps")) {
+            Object listObj = plan.get(bucket);
+            if (!(listObj instanceof List)) continue;
+            for (Object node : (List<Object>) listObj) {
+                if (!(node instanceof Map)) continue;
+                Object type = ((Map<String, Object>) node).get("type");
+                // "generate" exactly, because that is the only value the plan
+                // validator turns into a generate node. Matching more would
+                // refuse plans that never create one.
+                if (type instanceof String s && "generate".equalsIgnoreCase(s.trim())) {
+                    return true;
+                }
             }
         }
         return false;
@@ -1680,6 +1713,65 @@ public class WorkflowBuilderProvider implements ToolsProvider {
                         + "still be built.");
     }
 
+    /**
+     * @return a refusal naming the plan that includes {@code type}, or {@code null}
+     *         when the workspace may use it (including every failure mode - a gate
+     *         that cannot read its configuration never blocks a build).
+     */
+    private ToolExecutionResult planRefusalOrNull(String type, String tenantId) {
+        if (planFeatureGate == null || type == null || type.isBlank()) {
+            return null;
+        }
+        String required;
+        try {
+            required = planFeatureGate.upgradeRequiredFor(tenantId, planFeatureKeys(type));
+        } catch (Exception e) {
+            log.warn("Plan gate lookup failed for node type '{}' - allowing: {}", type, e.getMessage());
+            return null;
+        }
+        if (required == null) {
+            return null;
+        }
+        return ToolExecutionResult.failure(ToolErrorCode.PERMISSION_DENIED,
+                "'" + type + "' is not included in this workspace's plan. It is available from the "
+                        + required + " plan. "
+                        + "You cannot change the plan yourself: tell the user which node you needed and that "
+                        + "upgrading to " + required + " unlocks it. In the meantime, build the step with a node "
+                        + "type the workspace already has (call workflow(action='search') to list them).");
+    }
+
+    /**
+     * Gate keys for a {@code type} as add_node receives it, most specific first.
+     *
+     * <p>A node type is one key. A catalog tool written as {@code apiSlug/toolSlug}
+     * is also checked as {@code tool:} then {@code api:}, so an agent is told at
+     * BUILD time that the integration is not on this plan instead of building a
+     * workflow that fails on its first run. The bare-slug and UUID forms carry no
+     * API slug, so they are only caught later, by catalog-service.
+     */
+    /**
+     * Spellings this builder accepts for one node type, mapped to the type the gate is keyed by.
+     *
+     * <p>Without this a gated node is addable under its alias: {@code browseragent} keys as
+     * {@code node:browseragent}, which no requirement row names, so the build-time refusal is
+     * skipped and the workflow instead fails at the step when {@code NodePlanGate} asks about the
+     * real type. The run-time gate is the enforcement, but a node that builds and then always
+     * fails is exactly what this check exists to prevent.
+     */
+    private static final Map<String, String> PLAN_KEY_ALIASES = Map.of(
+            "browseragent", "browser_agent");
+
+    private static java.util.List<String> planFeatureKeys(String type) {
+        String value = type.trim().toLowerCase(java.util.Locale.ROOT);
+        int slash = value.indexOf('/');
+        if (slash > 0 && slash < value.length() - 1) {
+            return java.util.List.of(
+                    "tool:" + value.substring(slash + 1),
+                    "api:" + value.substring(0, slash));
+        }
+        return java.util.List.of("node:" + PLAN_KEY_ALIASES.getOrDefault(value, value));
+    }
+
     private ToolExecutionResult executeAddNode(Map<String, Object> params, String tenantId, ToolExecutionContext ctx) {
         String type = safeString(params.get("type"));
         if (type == null || type.isBlank()) {
@@ -1693,6 +1785,15 @@ public class WorkflowBuilderProvider implements ToolsProvider {
         String label = safeString(params.get("label"));
         if (label == null || label.isBlank()) {
             return ToolExecutionResult.failure(ToolErrorCode.MISSING_PARAMETER, "label is required for type='" + type + "'");
+        }
+
+        // Refuse a node type this workspace's plan does not include, HERE rather than at
+        // run time: a node that can be added and then always fails is worse than one that
+        // was never added, and the agent can pick a different type while it still has the
+        // task in hand.
+        ToolExecutionResult planRefusal = planRefusalOrNull(type, tenantId);
+        if (planRefusal != null) {
+            return planRefusal;
         }
 
         Object paramsObj = params.get("params");

@@ -36,7 +36,7 @@ public class RestTemplateConfig {
     private int videoReadTimeout;
 
     /**
-     * Read timeout for a generation call ({@code core:generate}). The catalog waits for the
+     * Read timeout for a generation call ({@code agent:generate}). The catalog waits for the
      * provider to finish before it answers, and an async video model legitimately takes
      * minutes. Kept separate so no other HTTP call inherits a window this long.
      *
@@ -51,6 +51,10 @@ public class RestTemplateConfig {
      */
     @Value("${http.client.timeout.generation-read:1500000}")
     private int generationReadTimeout;
+
+    /** Read window for the node-usage push - see {@link #nodeUsageRestTemplate()}. */
+    @Value("${orchestrator.node-usage.read-timeout-ms:10000}")
+    private int nodeUsageReadTimeout;
 
     @Bean
     public RestTemplate restTemplate() {
@@ -83,7 +87,7 @@ public class RestTemplateConfig {
     }
 
     /**
-     * Dedicated RestTemplate for the {@code core:generate} node's call into catalog-service.
+     * Dedicated RestTemplate for the {@code agent:generate} node's call into catalog-service.
      *
      * <p><b>Built on the JDK HTTP client, NOT on {@code HttpURLConnection}, and
      * that is the whole point of this bean.</b> Every other template here uses
@@ -109,6 +113,39 @@ public class RestTemplateConfig {
      *
      * @see #generationReadTimeout
      */
+    /**
+     * Dedicated RestTemplate for the node-usage push into catalog-service (V461).
+     *
+     * <p>Two properties the shared template cannot give it, both of which matter more
+     * than the call itself does.
+     *
+     * <p><b>A short read window.</b> The push runs on a {@code @Scheduled} thread out of
+     * a pool of three. Inheriting the shared 10-minute read timeout would let one
+     * unresponsive catalog hold a scheduler thread for ten minutes, starving jobs that
+     * do matter, to deliver a popularity counter.
+     *
+     * <p><b>No silent re-send.</b> {@code HttpURLConnection} re-sends a POST by itself on
+     * an IOException from a connection the peer closed while idle
+     * ({@code sun.net.http.retryPost}), which for this endpoint means one window counted
+     * twice. The JDK client does not retry a non-idempotent method, so the caller's own
+     * give-back-and-retry stays the only retry there is - see
+     * {@code generationRestTemplate} above, which exists for the same reason with far
+     * higher stakes.
+     */
+    @Bean(name = "nodeUsageRestTemplate")
+    public RestTemplate nodeUsageRestTemplate() {
+        java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+                .followRedirects(java.net.http.HttpClient.Redirect.NEVER)
+                .connectTimeout(java.time.Duration.ofMillis(connectTimeout))
+                .build();
+        org.springframework.http.client.JdkClientHttpRequestFactory factory =
+                new org.springframework.http.client.JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(java.time.Duration.ofMillis(nodeUsageReadTimeout));
+        RestTemplate restTemplate = new RestTemplate();
+        restTemplate.setRequestFactory(factory);
+        return restTemplate;
+    }
+
     @Bean(name = "generationRestTemplate")
     public RestTemplate generationRestTemplate() {
         java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()

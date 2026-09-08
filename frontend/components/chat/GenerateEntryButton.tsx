@@ -6,11 +6,10 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { useGenerationModels } from '@/hooks/useGenerationModels';
 import { useCanMutateInCurrentOrg } from '@/lib/stores/current-org-store';
-import { warmGenerationModal } from '@/components/chat/generationModalEntry';
 import { menuItemClass } from '@/components/ui/menu';
 
 /**
- * The control that opens the generation dialog, wherever one is offered.
+ * The control that leads to the studio, wherever making an asset is offered.
  *
  * <p><b>Why this is a component and not a pattern to copy.</b> Every surface
  * that offers a generation has to answer the same two questions before drawing
@@ -27,6 +26,9 @@ import { menuItemClass } from '@/components/ui/menu';
  *
  * <p>Renders NOTHING when a generation cannot be started here, and asks the
  * catalogue nothing on behalf of a reader who could not act on the answer.
+ *
+ * <p>It used to open a dialog, and to prefetch that dialog's chunk on hover. Both are gone with the
+ * dialog: the studio is a route, and a route's code is fetched by the router.
  */
 export interface GenerateEntryButtonProps {
   /**
@@ -41,22 +43,25 @@ export interface GenerateEntryButtonProps {
   variant: 'toolbar' | 'icon' | 'menuitem';
   /** What the control is called, and its accessible name. */
   label: string;
-  /** Open the dialog. The caller mounts it, so it can do its own thing with the result. */
+  /**
+   * Go to the studio. Named `onOpen` because that is what it is to the reader, and because every
+   * caller of this button already spells it that way.
+   */
   onOpen: () => void;
 }
 
 /** @see the module docblock above for why the gate lives here and not per surface. */
 export function GenerateEntryButton({ variant, label, onOpen }: GenerateEntryButtonProps) {
-  // The dialog's own sentence, restated on the control that opens it, so the
-  // two can never drift into two different facts about the same catalogue.
-  const tGeneration = useTranslations('generationModal');
+  // The studio's own sentence, restated on the control that leads to it, so the two can never
+  // drift into two different facts about the same catalogue.
+  const tGeneration = useTranslations('generation');
 
   // A generation writes a file into the workspace and spends credits, so a
   // read-only VIEWER is not offered one. Asked only of a reader who could act
   // on the answer, so they cost the install no request either.
   const canGenerate = useCanMutateInCurrentOrg();
-  // Through the SAME query key and cache the dialog reads: a surface and the
-  // dialog it opens cost one request between them, not two.
+  // Through the SAME query key and cache the studio reads: a surface and the studio it leads to
+  // cost one request between them, not two.
   const { availability } = useGenerationModels(canGenerate);
 
   // Ties the disabled control to the sentence saying why. Per instance, not a
@@ -75,9 +80,8 @@ export function GenerateEntryButton({ variant, label, onOpen }: GenerateEntryBut
   // first fetch lands.
   if (!canGenerate || availability === 'absent') return null;
 
-  // Served, but with nothing in it. The feature IS here and an administrator
-  // can seed it, so the control stays, visibly unavailable and carrying the
-  // reason, rather than vanishing.
+  // Served, but with nothing in it. The feature IS here and an administrator can seed it, so the
+  // control stays, visibly unavailable and carrying the reason, rather than vanishing.
   const empty = availability === 'empty';
 
   return (
@@ -99,10 +103,6 @@ export function GenerateEntryButton({ variant, label, onOpen }: GenerateEntryBut
         }
         aria-label={label}
         onClick={onOpen}
-        // Both, because they are two different readers: a pointer hovers, a
-        // keyboard focuses, and neither should be the one that waits.
-        onMouseEnter={warmGenerationModal}
-        onFocus={warmGenerationModal}
         disabled={empty}
         aria-describedby={empty ? reasonId : undefined}
       >
@@ -112,7 +112,7 @@ export function GenerateEntryButton({ variant, label, onOpen }: GenerateEntryBut
             and nothing about producing a file. The wand keeps that lineage while
             saying the control MAKES something, and it leaves the plain sparkle
             free to go on meaning "AI" everywhere else. Deliberately not an image
-            glyph: this dialog also makes video, audio, voice and music, and
+            glyph: the studio also makes video, audio, voice and music, and
             `ImagePlus` would both under-describe it and read as "upload" next to
             the attachment button it sits beside. */}
         <WandSparkles className={variant === 'toolbar' ? 'h-4 w-4 sm:mr-1.5' : 'h-4 w-4 flex-shrink-0'} />

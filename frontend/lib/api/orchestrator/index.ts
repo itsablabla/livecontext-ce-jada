@@ -56,6 +56,16 @@ export type {
 } from './dashboard.service';
 export { fileService, getFileUrlById, fileRefToUrl, isFileRef, findFileRefs, type FileRef } from './file.service';
 export { SkillService, skillService } from './skill.service';
+export {
+  MemoryService,
+  memoryService,
+  type Memory,
+  type MemoryType,
+  type MemorySource,
+  type MemoryScope,
+  type MemoryWriteRequest,
+  type MemoryUpdateRequest,
+} from './memory.service';
 export { SkillFolderService, skillFolderService } from './skill-folder.service';
 export { AgentToolsService, agentToolsService } from './agent-tools.service';
 export { WebhookSettingsService, webhookSettingsService } from './webhook-settings.service';
@@ -383,6 +393,7 @@ export const orchestratorApi = {
   restoreVersion: versionService.restoreVersion.bind(versionService),
   renameVersion: versionService.renameVersion.bind(versionService),
   pinVersion: versionService.pinVersion.bind(versionService),
+
 
   // ========================================
   // Skill Service

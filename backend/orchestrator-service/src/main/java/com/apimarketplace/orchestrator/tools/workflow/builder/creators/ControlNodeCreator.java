@@ -218,7 +218,7 @@ public class ControlNodeCreator extends CreatorBase {
 
     /**
      * Processes audio/video files on the optional renderer component
-     * (probe, mux_audio, mix, extract_audio).
+     * (probe, mux_audio, mix, extract_audio, concat, frame, overlay, subtitles).
      * Delegates to UtilityNodeCreator for the actual implementation.
      *
      * @see UtilityNodeCreator#executeAddMedia(WorkflowBuilderSession, Map)

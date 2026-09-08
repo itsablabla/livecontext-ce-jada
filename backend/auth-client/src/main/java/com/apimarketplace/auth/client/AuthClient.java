@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
+import com.apimarketplace.auth.client.dto.BadgeProfileDto;
 import com.apimarketplace.auth.client.dto.CeLinkEntitlementsResult;
 import com.apimarketplace.auth.client.dto.OrgRestrictionDto;
 import com.apimarketplace.auth.client.dto.PublisherProfileDto;
@@ -18,6 +19,7 @@ import com.apimarketplace.common.auth.UserSummaryDto;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -129,6 +131,129 @@ public class AuthClient {
      * Plan limit lookup response. {@code limit} is null when unlimited.
      */
     public record PlanLimitResponse(String planCode, Integer limit) {}
+
+    /**
+     * Fetches the plan gate: every feature key that requires more than FREE, plus
+     * the caller's own plan code when {@code providerId} is given.
+     *
+     * <p>Returns {@code null} on any failure so callers can fail OPEN. A node must
+     * never be blocked because auth-service was briefly unreachable: the cost of
+     * that mistake is a run that fails for a reason the user cannot act on.
+     */
+    public PlanFeatureResponse getPlanFeatures(String providerId) {
+        String url = baseUrl + "/api/internal/auth/plan-features";
+        HttpEntity<Void> entity = new HttpEntity<>(buildHeaders(providerId));
+        try {
+            ResponseEntity<Map<String, Object>> response = boundedRestTemplate.exchange(
+                    url, HttpMethod.GET, entity,
+                    new ParameterizedTypeReference<>() {});
+            Map<String, Object> body = response.getBody();
+            if (body == null) return null;
+            Map<String, String> requirements = new HashMap<>();
+            Object raw = body.get("requirements");
+            if (raw instanceof Map<?, ?> map) {
+                for (Map.Entry<?, ?> e : map.entrySet()) {
+                    if (e.getKey() != null && e.getValue() != null) {
+                        requirements.put(e.getKey().toString(), e.getValue().toString());
+                    }
+                }
+            }
+            Object planCode = body.get("planCode");
+            return new PlanFeatureResponse(
+                    Collections.unmodifiableMap(requirements),
+                    planCode != null ? planCode.toString() : null);
+        } catch (Exception e) {
+            log.warn("Failed to fetch plan features for user={}: {} - failing OPEN", providerId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * The plan gate as one payload: {@code featureKey -> minimum plan}, and the
+     * plan of the user the request was made for ({@code null} when none was given).
+     */
+    public record PlanFeatureResponse(Map<String, String> requirements, String planCode) {}
+
+    /**
+     * Execution-log retention windows for the WORKSPACES {@code organizationIds},
+     * in days.
+     *
+     * <p>Keyed by organization id, not by tenant: a workspace's window is its
+     * owner's plan, and the sweepers group journal rows by the workspace they
+     * live in before asking. Passing a tenant id here yields no entry.
+     *
+     * <p><b>A workspace absent from the returned map retains indefinitely</b>,
+     * and so does every workspace when this call fails: the empty map an error
+     * produces is indistinguishable from "nobody has a finite window", which is
+     * exactly the behaviour a deleting caller needs. Note the direction, opposite
+     * to every other method on this client: the others fail OPEN because they
+     * gate access and the cost of being wrong is a refused feature. This one
+     * feeds a purge, so it fails LONG, and returning an empty map on error is the
+     * whole mechanism. A caller must never read absence as "no retention".
+     *
+     * @param organizationIds at most 500 per call; the endpoint refuses a longer
+     *                        list rather than truncating it
+     */
+    public Map<String, Integer> getLogRetentionDays(Collection<String> organizationIds) {
+        if (organizationIds == null || organizationIds.isEmpty()) {
+            return Map.of();
+        }
+        // Paged here rather than clamped at each caller. The endpoint REFUSES an
+        // oversized list (it must not truncate), so a sweeper configured with a
+        // larger page would otherwise get a 400, read the resulting empty map as
+        // "nobody has a window", and silently retain everything while reporting the
+        // workspaces as considered. Safe, but invisible; chunking removes the trap.
+        List<String> all = new ArrayList<>(organizationIds);
+        Map<String, Integer> merged = new HashMap<>();
+        for (int start = 0; start < all.size(); start += LOG_RETENTION_MAX_BATCH) {
+            List<String> chunk = all.subList(start, Math.min(start + LOG_RETENTION_MAX_BATCH, all.size()));
+            merged.putAll(fetchLogRetentionChunk(chunk));
+        }
+        return Collections.unmodifiableMap(merged);
+    }
+
+    /** Matches the endpoint's own cap; a longer list is refused, never truncated. */
+    private static final int LOG_RETENTION_MAX_BATCH = 500;
+
+    /**
+     * The purge outbox after {@code afterSeq}, oldest first, at most {@code limit} rows
+     * (the endpoint caps at 200). Consumed by {@code PurgeFollower} in every service.
+     *
+     * <p><b>Fails EMPTY.</b> A transport failure returns an empty list, which the follower
+     * reads as "nothing new": it keeps its cursor and asks again next pass. Nothing is ever
+     * skipped by an error here, and nothing is ever deleted on the strength of one.
+     */
+    public java.util.List<com.apimarketplace.auth.client.purge.PurgeRecord> getPurges(long afterSeq, int limit) {
+        String url = baseUrl + "/api/internal/auth/purges?after=" + afterSeq + "&limit=" + limit;
+        HttpEntity<Void> entity = new HttpEntity<>(buildHeaders(null));
+        try {
+            ResponseEntity<java.util.List<com.apimarketplace.auth.client.purge.PurgeRecord>> response =
+                    boundedRestTemplate.exchange(url, HttpMethod.GET, entity,
+                            new ParameterizedTypeReference<>() {});
+            java.util.List<com.apimarketplace.auth.client.purge.PurgeRecord> body = response.getBody();
+            return body != null ? body : java.util.List.of();
+        } catch (Exception e) {
+            log.warn("Failed to read the purge log after #{}: {} - nothing applied this pass", afterSeq, e.getMessage());
+            return java.util.List.of();
+        }
+    }
+
+    private Map<String, Integer> fetchLogRetentionChunk(List<String> organizationIds) {
+        String url = baseUrl + "/api/internal/auth/log-retention";
+        HttpEntity<List<String>> entity =
+                new HttpEntity<>(new ArrayList<>(organizationIds), buildHeaders(null));
+        try {
+            ResponseEntity<Map<String, Integer>> response = boundedRestTemplate.exchange(
+                    url, HttpMethod.POST, entity,
+                    new ParameterizedTypeReference<>() {});
+            Map<String, Integer> body = response.getBody();
+            return body != null ? body : Map.of();
+        } catch (Exception e) {
+            log.warn("Failed to fetch log-retention windows for {} workspace(s): {} - retaining all",
+                    organizationIds.size(), e.getMessage());
+            return Map.of();
+        }
+    }
 
     /**
      * Cloud-side authorization check for CE LLM relay calls. The caller is the
@@ -587,6 +712,31 @@ public class AuthClient {
     }
 
     // ========== Helpers ==========
+
+    /**
+     * Fetches the badge evaluator's view of a user: when the account was created
+     * and whether its public profile page exists.
+     *
+     * <p>Returns {@code null} when auth-service answers 404 (unknown or disabled
+     * user) OR on any transport failure - the two are deliberately merged
+     * because both callers treat null the same way. The evaluator skips the
+     * cohort / tenure metrics for that pass (those badges unlock on the next
+     * one), and the public badge endpoint answers 404, which is also the right
+     * response for a genuinely missing user.
+     */
+    public BadgeProfileDto getBadgeProfile(String userId) {
+        if (userId == null || userId.isBlank()) return null;
+        String url = baseUrl + "/api/internal/auth/users/" + userId + "/badge-profile";
+        HttpEntity<Void> entity = new HttpEntity<>(buildHeaders(userId));
+        try {
+            ResponseEntity<BadgeProfileDto> response = boundedRestTemplate.exchange(
+                    url, HttpMethod.GET, entity, BadgeProfileDto.class);
+            return response.getBody();
+        } catch (Exception e) {
+            log.warn("Failed to fetch badge profile for user {}: {}", userId, e.getMessage());
+            return null;
+        }
+    }
 
     private static HttpHeaders buildHeaders(String tenantId) {
         HttpHeaders headers = new HttpHeaders();

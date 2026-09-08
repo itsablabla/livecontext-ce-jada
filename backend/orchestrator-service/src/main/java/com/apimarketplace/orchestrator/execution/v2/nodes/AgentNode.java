@@ -567,6 +567,72 @@ public class AgentNode extends BaseNode {
         logger.info("🤖 Agent node executing: nodeId={}, label={}, type={}, itemId={}",
             nodeId, agentConfig.label(), agentType, context.itemId());
 
+        // ─── Workflow spending cap (V474): the OUTER bound, checked before the
+        // agent's own budget. An agent execution is the only thing that spends
+        // credits inside a run, so this is the one place where refusing to start
+        // actually prevents the spend. The epoch gate in ReusableTriggerService
+        // only runs between epochs and therefore cannot stop the case this
+        // feature exists for: one epoch looping on the same agent all night.
+        //
+        // Every run is capped EXCEPT a builder test fire - see
+        // WorkflowBudgetState.appliesToRun(), which owns that rule and is also
+        // what decides whose spend is counted, so the two can never disagree.
+        //
+        // The guard is per agent START, so it bounds but does not eliminate the
+        // overshoot: the items of a split all read the state before any of them
+        // settles, so a fan-out of N can pass together and overshoot by up to
+        // one agent execution each. Pre-charging is not possible (the cost is
+        // only known after the call), and refusing the whole split on the first
+        // item would be worse. Sequential agents stop on the very next call.
+        //
+        // Reaching the cap FAILS the node rather than stopping the whole run,
+        // which mirrors the agent-budget branch right below and keeps the
+        // behaviour predictable inside a split (each parallel item fails the
+        // same way, cheaply, with no provider call). No credits are spent
+        // either way, which is the promise; the epoch gate then prevents the
+        // next fire until the period rolls over.
+        //
+        // The lookup runs before EVERY agent call, including each item of a
+        // split, and that cost is deliberate. Caching it per run would be the
+        // obvious optimisation and it would break the feature: the figure this
+        // reads is moved by settles landing while the run is in flight, so a
+        // cached copy lets exactly the loop this guard exists to stop keep
+        // spending past the cap until the entry expires. It is one indexed
+        // lookup on a unique column; freshness is the product here.
+        //
+        // This branch deliberately raises NO notification. The durable
+        // BUDGET_REACHED row is published once, by RunCostService, on the settle
+        // that actually crosses the cap - which is the same event whether the
+        // next blocked call is here or at the epoch gate. Notifying here as well
+        // would fire on every item of a split refused by the same crossing.
+        if (workflowRunRepository != null && context.runId() != null) {
+            try {
+                com.apimarketplace.orchestrator.services.credit.WorkflowBudgetState budgetState =
+                        workflowRunRepository.findBudgetStateByRunIdPublic(context.runId()).orElse(null);
+                java.time.Instant budgetNow = java.time.Instant.now();
+                if (budgetState != null && budgetState.blocksAt(budgetNow)) {
+                    long duration = System.currentTimeMillis() - startTime;
+                    String budgetError = "WORKFLOW_BUDGET_REACHED: this workflow has spent "
+                            + budgetState.effectiveSpent(budgetNow) + " of its "
+                            + budgetState.budgetCredits() + " credit cap for the current "
+                            + com.apimarketplace.orchestrator.services.credit.WorkflowBudgetPeriod
+                                    .normaliseMode(budgetState.periodMode())
+                            + " period, so agent '" + agentConfig.label() + "' was not started";
+                    logger.warn("💸 [AgentNode] {} (nodeId={}, runId={})", budgetError, nodeId, context.runId());
+                    Map<String, Object> budgetOutput = new HashMap<>();
+                    budgetOutput.put("resolved_params", buildResolvedInputForInspector(context, Map.of()));
+                    budgetOutput.put("error", budgetError);
+                    return NodeExecutionResult.failureWithOutput(nodeId, budgetError, budgetOutput, duration);
+                }
+            } catch (Exception e) {
+                // Fail OPEN on a lookup error: a bookkeeping glitch must not
+                // freeze a production workflow. The epoch gate still guards the
+                // next fire, and the agent's own budget still applies below.
+                logger.warn("[AgentNode] workflow budget check failed for runId={}, proceeding: {}",
+                        context.runId(), e.getMessage());
+            }
+        }
+
         // Check credit budget before execution
         if (agentClient != null && agentConfig.agentConfigId() != null) {
             try {
@@ -1865,6 +1931,7 @@ public class AgentNode extends BaseNode {
         passAccessMode(credentials, tc, "applicationAccessMode");
         passAccessMode(credentials, tc, "skillAccessMode");
         passAccessMode(credentials, tc, "fileAccessMode");
+        passAccessMode(credentials, tc, "memoryAccessMode");
     }
 
     private void passAllowedIds(Map<String, Object> credentials, Map<String, Object> toolsConfig,
@@ -2592,6 +2659,16 @@ public class AgentNode extends BaseNode {
     }
 
     /**
+     * Canonical stop reason for a single-shot (classify / guardrail) execution,
+     * derived from its outcome status: COMPLETED for a success, ERROR otherwise.
+     */
+    public static String deriveSingleShotStopReason(String status) {
+        return "COMPLETED".equals(status)
+                ? com.apimarketplace.agent.domain.AgentStopReason.COMPLETED.name()
+                : com.apimarketplace.agent.domain.AgentStopReason.ERROR.name();
+    }
+
+    /**
      * Build a minimal AgentObservabilityRequest for classify/guardrail executions.
      */
     private com.apimarketplace.agent.client.dto.AgentObservabilityRequest buildMinimalObservabilityRequest(
@@ -2604,6 +2681,12 @@ public class AgentNode extends BaseNode {
         req.setAgentType(agentType);
         req.setNodeId(nodeId);
         req.setStatus(status);
+        // A classify/guardrail call is a single-shot LLM round trip: it has no
+        // loop guard to name a stop reason, so derive the canonical one from the
+        // outcome. Without it the run is unclassifiable downstream (the
+        // product-analytics terminal_category and the agent-health views both
+        // read stop_reason, and classify was 75% of all agent runs with none).
+        req.setStopReason(deriveSingleShotStopReason(status));
         req.setErrorMessage(errorMessage);
 
         if (agentConfig.agentConfigId() != null) {

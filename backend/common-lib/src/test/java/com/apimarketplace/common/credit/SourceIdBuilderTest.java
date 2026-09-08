@@ -154,8 +154,8 @@ class SourceIdBuilderTest {
     @Test
     @DisplayName("two calls in the SAME run and step differ only by callRef, and that is what makes them two charges")
     void differentCallRefsInOneStepProduceDifferentKeys() {
-        String first = SourceIdBuilder.markupDebitWithCall("run-1", "core:generate", "call-a");
-        String second = SourceIdBuilder.markupDebitWithCall("run-1", "core:generate", "call-b");
+        String first = SourceIdBuilder.markupDebitWithCall("run-1", "agent:generate", "call-a");
+        String second = SourceIdBuilder.markupDebitWithCall("run-1", "agent:generate", "call-b");
         assertThat(first).isNotEqualTo(second);
 
         String firstChat = SourceIdBuilder.markupDebitChat("stream-1", "seedance/create", "call-a");
@@ -190,8 +190,8 @@ class SourceIdBuilderTest {
     @Test
     @DisplayName("a per-call key never collides with a legacy 6-segment markupDebit row")
     void doesNotCollideWithLegacyShape() {
-        String legacy = SourceIdBuilder.markupDebit("run-1", "core:generate", 0, 0, 0, 0);
-        String perCall = SourceIdBuilder.markupDebitWithCall("run-1", "core:generate", "0");
+        String legacy = SourceIdBuilder.markupDebit("run-1", "agent:generate", 0, 0, 0, 0);
+        String perCall = SourceIdBuilder.markupDebitWithCall("run-1", "agent:generate", "0");
         assertThat(perCall).isNotEqualTo(legacy);
     }
 

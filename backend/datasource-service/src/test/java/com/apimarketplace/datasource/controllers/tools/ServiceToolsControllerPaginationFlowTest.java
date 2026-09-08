@@ -61,11 +61,11 @@ class ServiceToolsControllerPaginationFlowTest {
     void setUp() {
         org.springframework.mock.env.MockEnvironment env = new org.springframework.mock.env.MockEnvironment();
         env.setProperty("app.edition", "ce");
-        var vectorGate = new com.apimarketplace.datasource.services.VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env));
+        var vectorGate = new com.apimarketplace.datasource.services.VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env), null);
         DataSourceTableModule tableModule = new DataSourceTableModule(
             dataSourceService, new ObjectMapper(), new DataSourceAgentDefaultsConfig(), vectorGate);
         DataSourceToolsProvider provider = new DataSourceToolsProvider(
-            tableModule, rowModule, schemaModule, publishModule, vectorGate);
+            tableModule, rowModule, schemaModule, publishModule);
         controller = new ServiceToolsController(provider);
     }
 

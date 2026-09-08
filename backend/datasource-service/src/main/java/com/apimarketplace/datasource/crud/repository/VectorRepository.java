@@ -137,7 +137,6 @@ public class VectorRepository {
         String queryLiteral = toVectorLiteral(queryVector);
 
         MapSqlParameterSource params = new MapSqlParameterSource();
-        params.addValue("data_source_id", dataSourceId);
         params.addValue("tenant_id", tenantId);
         params.addValue("column_name", columnName);
         params.addValue("query_vector", queryLiteral);
@@ -156,7 +155,17 @@ public class VectorRepository {
         sql.append(" :query_vector").append(vectorCast).append(") AS distance ");
         sql.append("FROM ").append(VECTOR_TABLE).append(" v ");
         sql.append("JOIN data_source_items i ON v.item_id = i.id ");
-        sql.append("WHERE v.data_source_id = :data_source_id ");
+        // data_source_id is inlined as a LITERAL, deliberately, and it is the one
+        // predicate that must be. The HNSW index is PARTIAL on
+        // "WHERE data_source_id = 42", and the planner can only use it when it can
+        // PROVE the query's predicate implies the index's. With a bind parameter
+        // that proof is impossible under a generic plan: the index is silently
+        // dropped for a Bitmap Heap Scan + Sort that returns the same rows 153x
+        // slower (measured: 0.685 ms vs 105 ms). Today production is protected only
+        // because every JDBC URL carries prepareThreshold=0 for PgBouncer, which
+        // incidentally forces custom plans; this makes the query correct regardless
+        // of plan mode. The value is a Long from our own database, never user text.
+        sql.append("WHERE v.data_source_id = ").append(dataSourceId.longValue()).append(' ');
         sql.append("AND v.tenant_id = :tenant_id ");
         sql.append("AND v.column_name = :column_name ");
 
@@ -247,7 +256,26 @@ public class VectorRepository {
             default -> "vector_cosine_ops";
         };
 
-        String indexName = "idx_vectors_ds_" + dataSourceId;
+        String indexName = indexName(dataSourceId);
+
+        // The invalid-index trap. CREATE INDEX CONCURRENTLY that fails part-way (a
+        // dimension-cast error on a stray row, a lost connection, a killed build)
+        // leaves an INVALID index that still bears this name. IF NOT EXISTS then
+        // sees the corpse on every later attempt and does nothing, so the
+        // datasource sequential-scans forever, with no error anywhere: the
+        // measured 153x penalty, permanently, silently. isIndexValid existed for
+        // this and had no callers.
+        IndexState state = indexState(dataSourceId);
+        if (state == IndexState.VALID) {
+            log.debug("HNSW index {} already valid, nothing to build", indexName);
+            return;
+        }
+        if (state == IndexState.INVALID) {
+            log.warn("HNSW index {} exists but is INVALID (a previous build failed) - dropping it "
+                    + "concurrently before rebuilding", indexName);
+            dropHnswIndex(dataSourceId);
+        }
+
         String sql = String.format(
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON %s " +
             "USING hnsw ((embedding::vector(%d)) %s) WHERE data_source_id = %d",
@@ -261,28 +289,69 @@ public class VectorRepository {
 
     /**
      * Drop the HNSW index for a specific datasource.
+     *
+     * <p><b>CONCURRENTLY, and therefore outside any transaction.</b> A plain
+     * {@code DROP INDEX} takes ACCESS EXCLUSIVE on {@code data_source_vectors},
+     * which is the table SHARED by every tenant's vectors: it would stall every
+     * vector read and write on the platform while it waited behind any long
+     * query. Wired to datasource deletion, that turns "delete my table" into a
+     * platform-wide pause. {@code CONCURRENTLY} takes only SHARE UPDATE EXCLUSIVE
+     * and cannot run inside a transaction block, hence NOT_SUPPORTED, exactly like
+     * {@link #createHnswIndex}.
      */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void dropHnswIndex(Long dataSourceId) {
-        String indexName = "idx_vectors_ds_" + dataSourceId;
-        String sql = "DROP INDEX IF EXISTS " + indexName;
-        log.info("Dropping HNSW index {}", indexName);
+        String indexName = indexName(dataSourceId);
+        String sql = "DROP INDEX CONCURRENTLY IF EXISTS " + indexName;
+        log.info("Dropping HNSW index {} (concurrently)", indexName);
         jdbcTemplate.getJdbcTemplate().execute(sql);
     }
 
+    /** Where the per-datasource partial index stands. */
+    public enum IndexState { MISSING, VALID, INVALID }
+
     /**
-     * Check if the HNSW index for a datasource is valid.
+     * The state of a datasource's HNSW index. Distinguishes "no index" from "an
+     * index that a failed CONCURRENTLY build left behind as INVALID": the two
+     * need opposite handling, and collapsing them onto a boolean is what let the
+     * invalid-index trap go unnoticed.
+     */
+    public IndexState indexState(Long dataSourceId) {
+        // Anchored on the table's OID, not on the name alone: pg_class.relname is
+        // not schema-qualified, and the one database holds every schema, so a
+        // same-named leftover in public could otherwise be the row read here. If
+        // THAT one were invalid, every build would drop the real, valid index and
+        // rebuild it.
+        String sql = "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                + "WHERE i.indrelid = '" + VECTOR_TABLE + "'::regclass AND c.relname = :index_name";
+        List<Boolean> rows = jdbcTemplate.queryForList(sql,
+                new MapSqlParameterSource("index_name", indexName(dataSourceId)), Boolean.class);
+        if (rows.isEmpty()) {
+            return IndexState.MISSING;
+        }
+        return Boolean.TRUE.equals(rows.get(0)) ? IndexState.VALID : IndexState.INVALID;
+    }
+
+    /**
+     * Whether the datasource's HNSW index exists AND is usable. Kept for callers
+     * that only need the boolean; prefer {@link #indexState} when the difference
+     * between missing and invalid matters, which it does for any rebuild logic.
      */
     public boolean isIndexValid(Long dataSourceId) {
-        String indexName = "idx_vectors_ds_" + dataSourceId;
-        String sql = "SELECT indisvalid FROM pg_index WHERE indexrelid = :index_name::regclass";
-        try {
-            Boolean valid = jdbcTemplate.queryForObject(sql,
-                new MapSqlParameterSource("index_name", indexName), Boolean.class);
-            return Boolean.TRUE.equals(valid);
-        } catch (Exception e) {
-            // Index does not exist
-            return false;
-        }
+        return indexState(dataSourceId) == IndexState.VALID;
+    }
+
+    /** Number of per-datasource HNSW indexes on the shared table: the operational ceiling. */
+    public int countHnswIndexes() {
+        Integer n = jdbcTemplate.getJdbcTemplate().queryForObject(
+                "SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                        + "WHERE i.indrelid = '" + VECTOR_TABLE + "'::regclass "
+                        + "AND c.relname LIKE 'idx_vectors_ds_%'", Integer.class);
+        return n != null ? n : 0;
+    }
+
+    private static String indexName(Long dataSourceId) {
+        return "idx_vectors_ds_" + dataSourceId;
     }
 
     /** Maximum supported vector dimension (pgvector HNSW limit). */

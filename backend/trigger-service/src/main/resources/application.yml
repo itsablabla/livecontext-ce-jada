@@ -77,3 +77,29 @@ management:
   endpoint:
     health:
       show-details: always
+  # Latency buckets for http.server.requests. Without them the service emits only
+  # a count and a sum, so it is invisible to the HighApiLatency SLO in
+  # deploy/config/alert-rules.yml, which reads the le="5.0" bucket. Six of the
+  # twelve services had no buckets at all, so a latency regression on this one
+  # could not have alerted.
+  #
+  # `slo` WITHOUT `percentiles-histogram`, unlike the five services instrumented
+  # earlier. `percentiles-histogram: true` emits Micrometer's full ladder, measured
+  # at 74 buckets per timer on this deployment; these five jobs carried ~170 timers
+  # between them when measured 2026-09-01, and that count grows with every new endpoint,
+  # so the ladder would add on the order of 12,000 series. The monitoring box
+  # (ops-host) runs prometheus with about 1 GiB of the 7 GiB free and already alerts
+  # on HighMemoryUsage, so that is a real cost for data nothing reads: the alert
+  # rule needs exactly one boundary. The SLO boundaries alone give 6 bucket series per
+  # timer (the 5 declared, plus +Inf), so on the order of 1,000, and the same le="5.0".
+  #
+  # Only the SLO reads these. The Grafana overview's p95/p99 panels are restricted
+  # to the five jobs that carry the full ladder, because histogram_quantile over
+  # five boundaries returns the highest finite bound and would render a confident
+  # flat line at exactly 5s for a job whose real p99 is minutes.
+  #
+  # Pinned by gateway/.../ApiLatencySloContractTest.
+  metrics:
+    distribution:
+      slo:
+        http.server.requests: 100ms, 500ms, 1s, 3s, 5s

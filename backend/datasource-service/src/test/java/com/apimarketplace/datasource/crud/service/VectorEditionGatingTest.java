@@ -67,13 +67,28 @@ class VectorEditionGatingTest {
     private static VectorFeatureGate gate(String edition) {
         MockEnvironment env = new MockEnvironment();
         env.setProperty("app.edition", edition);
-        return new VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env));
+        return new VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env), null);
     }
 
     private CrudExecutorService service(String edition) {
         return new CrudExecutorService(crudRepository, vectorRepository, dataSourceService,
-                breakdownService, columnValueCoercer, columnRepository, sqlSanitizer,
+                breakdownService, columnValueCoercer, new com.apimarketplace.datasource.crud.service.MediaCellHydrator(new com.apimarketplace.datasource.crud.service.ColumnValueCoercer()), columnRepository, sqlSanitizer,
                 rowEventPublisher, gate(edition), eventPublisher);
+    }
+
+    /** A managed-cloud service whose plan gate answers {@code required} for the vector key. */
+    private CrudExecutorService cloudServiceRequiring(String required) {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("app.edition", "cloud");
+        com.apimarketplace.auth.client.entitlement.PlanFeatureGate plans =
+                org.mockito.Mockito.mock(com.apimarketplace.auth.client.entitlement.PlanFeatureGate.class);
+        lenient().when(plans.allows(anyString(), anyList())).thenReturn(required == null);
+        lenient().when(plans.upgradeRequiredFor(anyString(), anyList())).thenReturn(required);
+        VectorFeatureGate planGate =
+                new VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env), plans);
+        return new CrudExecutorService(crudRepository, vectorRepository, dataSourceService,
+                breakdownService, columnValueCoercer, new com.apimarketplace.datasource.crud.service.MediaCellHydrator(new com.apimarketplace.datasource.crud.service.ColumnValueCoercer()), columnRepository, sqlSanitizer,
+                rowEventPublisher, planGate, eventPublisher);
     }
 
     private DataSource vectorDataSource() {
@@ -100,12 +115,87 @@ class VectorEditionGatingTest {
         return request;
     }
 
+    /**
+     * The behaviour the 2026-09-03 change exists for: on managed cloud the answer comes from the
+     * OWNING workspace's plan, not from the deployment. The class below still covers the case
+     * where no plan gate is wired at all, which stays closed.
+     */
     @Nested
-    @DisplayName("managed cloud (blocked)")
+    @DisplayName("managed cloud, plan-gated")
+    class CloudPlanGated {
+
+        @Test
+        @DisplayName("a workspace whose plan includes vectors runs the similarity search")
+        void aboveTheBarSearches() {
+            stubDataSource(vectorDataSource());
+            when(vectorRepository.similaritySearch(anyLong(), anyString(), anyString(),
+                    any(float[].class), org.mockito.ArgumentMatchers.anyInt(), anyString(),
+                    org.mockito.ArgumentMatchers.anyInt(), any(), any(), any()))
+                    .thenReturn(List.of());
+
+            CrudResult result = cloudServiceRequiring(null).execute(similarityRequest(), TENANT);
+
+            assertThat(result.success()).isTrue();
+        }
+
+        @Test
+        @DisplayName("a workspace below the bar is refused with the plan NAMED, not with a wall")
+        void belowTheBarIsToldWhichPlan() {
+            stubDataSource(vectorDataSource());
+
+            CrudResult result = cloudServiceRequiring("PRO").execute(similarityRequest(), TENANT);
+
+            assertThat(result.success()).isFalse();
+            // The whole point of carrying the plan through: "upgrade to PRO" is actionable where
+            // "not available on this deployment" was a dead end for a cloud customer.
+            assertThat(result.message()).contains("PRO");
+            verify(vectorRepository, never()).similaritySearch(anyLong(), anyString(), anyString(),
+                    any(float[].class), org.mockito.ArgumentMatchers.anyInt(), anyString(),
+                    org.mockito.ArgumentMatchers.anyInt(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("inserting a vector VALUE below the bar is refused with the plan named")
+        void insertVectorValueBelowTheBar() {
+            stubDataSource(vectorDataSource());
+            CreateRowRequest request = new CreateRowRequest();
+            request.setDataSourceId(1L);
+            request.setRows(List.of(new CreateRowRequest.RowData(null, new LinkedHashMap<>(
+                    Map.of("title", "doc", "embedding", List.of(0.1, 0.2, 0.3, 0.4))))));
+
+            CrudResult result = cloudServiceRequiring("PRO").execute(request, TENANT);
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.message()).contains("PRO");
+        }
+
+        @Test
+        @DisplayName("creating a vector column below the bar is refused with the same named plan")
+        void createVectorColumnBelowTheBar() {
+            stubDataSource(vectorDataSource());
+            CreateColumnRequest request = new CreateColumnRequest();
+            request.setDataSourceId(1L);
+            request.setColumns(List.of(new CreateColumnRequest.ColumnDefinition(
+                    "embedding2", "vector", null, Map.of("dimension", 8))));
+
+            CrudResult result = cloudServiceRequiring("PRO").execute(request, TENANT);
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.message()).contains("PRO");
+        }
+    }
+
+    /**
+     * Managed cloud with NO plan gate wired: refused, and deliberately so. Not a lookup failure,
+     * an assembly that cannot ask the question, which must not open the shared database to
+     * everyone.
+     */
+    @Nested
+    @DisplayName("managed cloud (no plan gate wired)")
     class CloudBlocked {
 
         @Test
-        @DisplayName("similarity search is rejected with the edition message - even on a table that has vectors")
+        @DisplayName("similarity search is rejected - even on a table that has vectors")
         void similarityRejected() {
             stubDataSource(vectorDataSource());
 

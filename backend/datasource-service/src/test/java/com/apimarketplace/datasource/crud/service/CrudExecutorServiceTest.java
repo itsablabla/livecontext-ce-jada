@@ -58,7 +58,7 @@ class CrudExecutorServiceTest {
 
     @BeforeEach
     void setUp() {
-        executorService = new CrudExecutorService(crudRepository, vectorRepository, dataSourceService, breakdownService, columnValueCoercer, dataSourceColumnRepository, sqlSanitizer, rowEventPublisher, ceVectorGate(), org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class));
+        executorService = new CrudExecutorService(crudRepository, vectorRepository, dataSourceService, breakdownService, columnValueCoercer, new com.apimarketplace.datasource.crud.service.MediaCellHydrator(new com.apimarketplace.datasource.crud.service.ColumnValueCoercer()), dataSourceColumnRepository, sqlSanitizer, rowEventPublisher, ceVectorGate(), org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class));
     }
 
     private DataSource createDataSource(Long id, String name, String tenantId) {
@@ -190,7 +190,7 @@ class CrudExecutorServiceTest {
         // Uses a REAL SqlSanitizer so operator/column normalization behaves like production.
         private CrudExecutorService svcWithRealSanitizer() {
             return new CrudExecutorService(crudRepository, vectorRepository, dataSourceService, breakdownService,
-                    columnValueCoercer, dataSourceColumnRepository, new SqlSanitizer(), rowEventPublisher,
+                    columnValueCoercer, new com.apimarketplace.datasource.crud.service.MediaCellHydrator(new com.apimarketplace.datasource.crud.service.ColumnValueCoercer()), dataSourceColumnRepository, new SqlSanitizer(), rowEventPublisher,
                     ceVectorGate(), org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class));
         }
 
@@ -1081,7 +1081,7 @@ class CrudExecutorServiceTest {
     private static com.apimarketplace.datasource.services.VectorFeatureGate ceVectorGate() {
         org.springframework.mock.env.MockEnvironment env = new org.springframework.mock.env.MockEnvironment();
         env.setProperty("app.edition", "ce");
-        return new com.apimarketplace.datasource.services.VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env));
+        return new com.apimarketplace.datasource.services.VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env), null);
     }
 
     @Nested

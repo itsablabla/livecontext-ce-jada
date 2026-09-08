@@ -196,6 +196,48 @@ class CatalogV1ControllerTest {
         }
 
         @Test
+        @DisplayName("analytics attribution comes from X-Lc-Workflow-Id / X-Lc-Node-Id headers only; a body cannot claim a workflow")
+        void analyticsAttributionIsHeaderOnly() throws Exception {
+            when(catalogV1Service.executeTool(eq("slack/send-message"), any(ToolExecutionRequest.class), any(), any(), any()))
+                    .thenReturn(ToolExecutionResponse.builder().success(true).build());
+
+            // Header form (the orchestrator gateway): bound.
+            mockMvc.perform(post("/catalog/v1/tools/{apiSlug}/{toolSlug}/execute", "slack", "send-message")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .header("X-Lc-Workflow-Id", "6f1c2a3e-1234-4bcd-9ef0-123456789abc")
+                            .header("X-Lc-Node-Id", "mcp:slack/send_message")
+                            .content("{}"))
+                    .andExpect(status().isOk());
+            org.mockito.ArgumentCaptor<ToolExecutionRequest> captor =
+                    org.mockito.ArgumentCaptor.forClass(ToolExecutionRequest.class);
+            verify(catalogV1Service).executeTool(eq("slack/send-message"), captor.capture(), any(), any(), any());
+            assertEquals("6f1c2a3e-1234-4bcd-9ef0-123456789abc", captor.getValue().getAnalyticsWorkflowId());
+            assertEquals("mcp:slack/send_message", captor.getValue().getAnalyticsNodeId());
+
+            // Malformed values (the gateway does not strip these headers) are dropped, not stored.
+            org.mockito.Mockito.clearInvocations(catalogV1Service);
+            mockMvc.perform(post("/catalog/v1/tools/{apiSlug}/{toolSlug}/execute", "slack", "send-message")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .header("X-Lc-Workflow-Id", "not a uuid <script>")
+                            .header("X-Lc-Node-Id", "x".repeat(300))
+                            .content("{}"))
+                    .andExpect(status().isOk());
+            verify(catalogV1Service).executeTool(eq("slack/send-message"), captor.capture(), any(), any(), any());
+            assertNull(captor.getValue().getAnalyticsWorkflowId(), "a non-UUID workflow id is dropped");
+            assertNull(captor.getValue().getAnalyticsNodeId(), "an oversized node id is dropped");
+
+            // Body form (any caller): ignored, the fields are sealed off the wire.
+            org.mockito.Mockito.clearInvocations(catalogV1Service);
+            mockMvc.perform(post("/catalog/v1/tools/{apiSlug}/{toolSlug}/execute", "slack", "send-message")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"analyticsWorkflowId\":\"someone-elses-workflow\",\"analyticsNodeId\":\"mcp:x\",\"parameters\":{}}"))
+                    .andExpect(status().isOk());
+            verify(catalogV1Service).executeTool(eq("slack/send-message"), captor.capture(), any(), any(), any());
+            assertNull(captor.getValue().getAnalyticsWorkflowId(), "body must not be able to set the workflow attribution");
+            assertNull(captor.getValue().getAnalyticsNodeId(), "body must not be able to set the node attribution");
+        }
+
+        @Test
         @DisplayName("an ordinary call carries no generation context, so nothing is priced as a generation")
         void anOrdinaryCallCarriesNoGenerationContext() throws Exception {
             // Hard-coding the three values would satisfy the test above while

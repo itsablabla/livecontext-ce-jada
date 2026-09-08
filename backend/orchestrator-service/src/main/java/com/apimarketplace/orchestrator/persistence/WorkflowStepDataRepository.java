@@ -467,23 +467,37 @@ public interface WorkflowStepDataRepository extends JpaRepository<WorkflowStepDa
      * untouched: the max-spawn filter is per-coordinate and distinct epochs/iterations/items
      * are distinct coordinates.
      *
+     * <p><b>Why a window function and not a correlated subquery:</b> the per-coordinate max used
+     * to be a scalar subquery re-evaluated for EVERY row of the run, and each evaluation scanned
+     * the whole {@code (run_id, step_alias)} index group - i.e. every epoch of that node. Cost was
+     * therefore quadratic in the number of epochs, which is why the logs modal took seconds to open
+     * on a long-lived run: measured on a synthetic run of 20 nodes, 2 items, 1 000 epochs
+     * (40 000 rows), 10.7 s with the subquery against 69 ms with the window (400 epochs: 1 975 ms
+     * against 37 ms). {@code MAX(...) OVER (PARTITION BY <the same coordinate>)} computes every
+     * group in one pass, and {@code AggregatedStepsQueryPostgresTest} pins that both forms return
+     * the same rows, spawn supersession included.
+     *
      * @param runId The public run ID
      * @return List of projections with alias, status, count, toolId, min startTime, max endTime
      */
     @Query(value = """
-        SELECT w.step_alias as "stepAlias", w.status as status, COUNT(*) as count,
-               MIN(w.tool_id) as "toolId", MIN(w.start_time) as "minStartTime", MAX(w.end_time) as "maxEndTime",
-               CAST(GREATEST(COALESCE(SUM(GREATEST((EXTRACT(EPOCH FROM w.end_time) - EXTRACT(EPOCH FROM w.start_time)) * 1000, 0)), 0), 0) AS BIGINT) as "sumExecutionTimeMs"
-        FROM workflow_step_data w
-        WHERE w.run_id = :runId AND w.step_alias IS NOT NULL
-          AND COALESCE(w.spawn, 0) = (
-              SELECT MAX(COALESCE(w2.spawn, 0)) FROM workflow_step_data w2
-              WHERE w2.run_id = w.run_id AND w2.step_alias = w.step_alias
-                AND COALESCE(w2.trigger_id, '') = COALESCE(w.trigger_id, '')
-                AND COALESCE(w2.epoch, 0) = COALESCE(w.epoch, 0)
-                AND COALESCE(w2.iteration, 0) = COALESCE(w.iteration, 0)
-                AND COALESCE(w2.item_index, 0) = COALESCE(w.item_index, 0))
-        GROUP BY w.step_alias, w.status
+        SELECT t.step_alias as "stepAlias", t.status as status, COUNT(*) as count,
+               MIN(t.tool_id) as "toolId", MIN(t.start_time) as "minStartTime", MAX(t.end_time) as "maxEndTime",
+               CAST(GREATEST(COALESCE(SUM(GREATEST((EXTRACT(EPOCH FROM t.end_time) - EXTRACT(EPOCH FROM t.start_time)) * 1000, 0)), 0), 0) AS BIGINT) as "sumExecutionTimeMs"
+        FROM (
+            SELECT w.step_alias, w.status, w.tool_id, w.start_time, w.end_time,
+                   COALESCE(w.spawn, 0) AS spawn_norm,
+                   MAX(COALESCE(w.spawn, 0)) OVER (
+                       PARTITION BY w.step_alias,
+                                    COALESCE(w.trigger_id, ''),
+                                    COALESCE(w.epoch, 0),
+                                    COALESCE(w.iteration, 0),
+                                    COALESCE(w.item_index, 0)) AS max_spawn
+            FROM workflow_step_data w
+            WHERE w.run_id = :runId AND w.step_alias IS NOT NULL
+        ) t
+        WHERE t.spawn_norm = t.max_spawn
+        GROUP BY t.step_alias, t.status
         """, nativeQuery = true)
     List<com.apimarketplace.orchestrator.repository.AggregatedStepProjection> getAggregatedStepsByRunId(@Param("runId") String runId);
 
@@ -492,24 +506,41 @@ public interface WorkflowStepDataRepository extends JpaRepository<WorkflowStepDa
      * Same as getAggregatedStepsByRunId but restricted to a single epoch.
      * Used for per-epoch node timing display in the epoch timeline.
      *
+     * <p>Same single-pass max-spawn window as the whole-run query. The inner filter is
+     * {@code COALESCE(epoch, 0) = :epoch} because that is the set the correlated subquery used to
+     * take its max over (it compared coalesced epochs), while the outer {@code t.epoch = :epoch}
+     * reproduces the old outer predicate, which a NULL epoch never satisfied. Keeping the two
+     * apart matters only for the legacy NULL-epoch rows, and keeps this a pure rewrite.
+     *
+     * <p>The trade that buys: wrapping the epoch column in COALESCE makes the filter non-sargable,
+     * so this reads the whole run's rows where the previous form could seek on
+     * {@code idx_wsd_resolution}'s epoch column. It is still far cheaper than the correlated max it
+     * replaces (measured 6.9 ms on a 40 000-row run), so the trade is worth it as written. If this
+     * query ever becomes hot, {@code (w.epoch = :epoch OR (:epoch = 0 AND w.epoch IS NULL))} is the
+     * sargable equivalent, and the NULL-epoch case in the test class is what proves it equivalent.
+     *
      * @param runId The public run ID
      * @param epoch The epoch to filter by
      * @return List of projections with alias, status, count, toolId, min startTime, max endTime
      */
     @Query(value = """
-        SELECT w.step_alias as "stepAlias", w.status as status, COUNT(*) as count,
-               MIN(w.tool_id) as "toolId", MIN(w.start_time) as "minStartTime", MAX(w.end_time) as "maxEndTime",
-               CAST(GREATEST(COALESCE(SUM(GREATEST((EXTRACT(EPOCH FROM w.end_time) - EXTRACT(EPOCH FROM w.start_time)) * 1000, 0)), 0), 0) AS BIGINT) as "sumExecutionTimeMs"
-        FROM workflow_step_data w
-        WHERE w.run_id = :runId AND w.step_alias IS NOT NULL AND w.epoch = :epoch
-          AND COALESCE(w.spawn, 0) = (
-              SELECT MAX(COALESCE(w2.spawn, 0)) FROM workflow_step_data w2
-              WHERE w2.run_id = w.run_id AND w2.step_alias = w.step_alias
-                AND COALESCE(w2.trigger_id, '') = COALESCE(w.trigger_id, '')
-                AND COALESCE(w2.epoch, 0) = COALESCE(w.epoch, 0)
-                AND COALESCE(w2.iteration, 0) = COALESCE(w.iteration, 0)
-                AND COALESCE(w2.item_index, 0) = COALESCE(w.item_index, 0))
-        GROUP BY w.step_alias, w.status
+        SELECT t.step_alias as "stepAlias", t.status as status, COUNT(*) as count,
+               MIN(t.tool_id) as "toolId", MIN(t.start_time) as "minStartTime", MAX(t.end_time) as "maxEndTime",
+               CAST(GREATEST(COALESCE(SUM(GREATEST((EXTRACT(EPOCH FROM t.end_time) - EXTRACT(EPOCH FROM t.start_time)) * 1000, 0)), 0), 0) AS BIGINT) as "sumExecutionTimeMs"
+        FROM (
+            SELECT w.step_alias, w.status, w.tool_id, w.start_time, w.end_time, w.epoch,
+                   COALESCE(w.spawn, 0) AS spawn_norm,
+                   MAX(COALESCE(w.spawn, 0)) OVER (
+                       PARTITION BY w.step_alias,
+                                    COALESCE(w.trigger_id, ''),
+                                    COALESCE(w.epoch, 0),
+                                    COALESCE(w.iteration, 0),
+                                    COALESCE(w.item_index, 0)) AS max_spawn
+            FROM workflow_step_data w
+            WHERE w.run_id = :runId AND w.step_alias IS NOT NULL AND COALESCE(w.epoch, 0) = :epoch
+        ) t
+        WHERE t.epoch = :epoch AND t.spawn_norm = t.max_spawn
+        GROUP BY t.step_alias, t.status
         """, nativeQuery = true)
     List<com.apimarketplace.orchestrator.repository.AggregatedStepProjection> getAggregatedStepsByRunIdAndEpoch(
         @Param("runId") String runId, @Param("epoch") int epoch);

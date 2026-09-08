@@ -110,7 +110,7 @@ class WorkflowPublicationServicePublisherSnapshotTest {
                 WORKFLOW_ID, TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         assertThat(pub.getPublisherName()).isEqualTo("Real Admin Name");
         assertThat(pub.getPublisherEmail()).isEqualTo("admin@example.com");
@@ -138,7 +138,7 @@ class WorkflowPublicationServicePublisherSnapshotTest {
                 WORKFLOW_ID, TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         // Pre-fix, republish persisted the request body's publisherName
         // verbatim, leaving stale snapshots whenever the body diverged from
@@ -159,7 +159,7 @@ class WorkflowPublicationServicePublisherSnapshotTest {
                 WORKFLOW_ID, TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of()))
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null))
                 .isInstanceOf(PublisherProfileUnavailableException.class)
                 .hasMessageContaining("Failed to resolve publisher identity");
     }
@@ -177,7 +177,7 @@ class WorkflowPublicationServicePublisherSnapshotTest {
                 WORKFLOW_ID, TENANT, null,
                 "Title", "Desc", INTERFACE_ID, "run-1",
                 null, 0,
-                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of());
+                PublicationVisibility.PRIVATE, null, DisplayMode.INTERFACE, null, false, Map.of(), null);
 
         assertThat(pub.getPublisherName()).isEqualTo("Léa T.");
         assertThat(pub.getPublisherEmail()).isNull();

@@ -10,7 +10,7 @@ import { removeLocalePrefix } from '@/lib/utils/locale';
 // Types
 // ============================================
 
-export type AppView = 'chat' | 'settings' | 'workflow' | 'data' | 'agent' | 'interface' | 'marketplace' | 'applications' | 'project' | 'tasks' | 'files' | 'board';
+export type AppView = 'chat' | 'studio' | 'settings' | 'workflow' | 'data' | 'agent' | 'interface' | 'marketplace' | 'applications' | 'project' | 'tasks' | 'files' | 'board' | 'agenda';
 
 export interface CurrentViewInfo {
   view: AppView;
@@ -63,11 +63,21 @@ export function useCurrentView(): CurrentViewInfo {
     let view: AppView = 'chat';
     let isDetailPage = false;
 
-    if (normalizedPathname.startsWith('/app/c/') || normalizedPathname === '/app' || normalizedPathname === '/app/chat' || normalizedPathname.startsWith('/app/chat')) {
+    // Declared BEFORE the chat branch and given its own view. It used to fall through to 'chat'
+    // because the initialiser says so, and everything downstream worked by that accident: the
+    // sidebar loaded its conversations there only because the studio LOOKED like chat. Anyone
+    // giving that initialiser an honest default would have blanked the sidebar on this route,
+    // silently. A view of its own turns the accident into a decision.
+    if (normalizedPathname.startsWith('/app/studio')) {
+      view = 'studio';
+      isDetailPage = !!conversationId;
+    } else if (normalizedPathname.startsWith('/app/c/') || normalizedPathname === '/app' || normalizedPathname === '/app/chat' || normalizedPathname.startsWith('/app/chat')) {
       view = 'chat';
       isDetailPage = !!conversationId;
     } else if (normalizedPathname.startsWith('/app/board')) {
       view = 'board';
+    } else if (normalizedPathname.startsWith('/app/agenda')) {
+      view = 'agenda';
     } else if (normalizedPathname.startsWith('/app/workflow')) {
       view = 'workflow';
       isDetailPage = !!workflowId && workflowId !== 'new';

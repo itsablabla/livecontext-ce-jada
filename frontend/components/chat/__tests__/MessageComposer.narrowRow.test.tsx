@@ -2,14 +2,14 @@
 /**
  * What the composer's button row does when it runs out of width.
  *
- * <p>The row is one grid: the three leading controls (attach, tools & skills,
+ * <p>The row is one grid: the leading controls (attach, tools & skills)
  * generate) on the left, the model selector, the mic and the send button on the
  * right. The bubble around it is `overflow-hidden`, so when the row no longer
  * fits, nothing wraps and nothing scrolls - the RIGHT end is simply cut off, and
  * the right end is the send/stop button. In a side panel dragged to its 320px
  * minimum, 82px of that button was missing, with nothing on screen saying why.
  *
- * <p>The fix is to merge the three leading controls into one button opening a
+ * <p>The fix is to merge those leading controls into one button opening a
  * menu below a measured width. This pins that behaviour: which controls are
  * offered on each side of the line, that the same three actions are reachable
  * either way, that the measurement follows the ELEMENT rather than the viewport
@@ -51,8 +51,12 @@ vi.mock('@/lib/api/orchestrator/generation.service', () => ({
     }),
   },
 }));
-vi.mock('@/components/chat/CreateGenerationModal', () => ({
-  CreateGenerationModal: () => null,
+// next-intl's navigation module cannot resolve 'next/navigation' under vitest, so the composer's
+// locale-aware router is stood in for. This suite is about layout, not about where it goes.
+vi.mock('@/i18n/navigation', () => ({
+  useRouter: () => ({ push: () => undefined }),
+  usePathname: () => '/app',
+  Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
 }));
 
 import { MessageComposer } from '../MessageComposer';
@@ -136,13 +140,12 @@ async function settle() {
 }
 
 describe('MessageComposer - the button row when width runs out', () => {
-  it('a wide composer keeps the three leading controls side by side', async () => {
+  it('a wide composer keeps the leading controls side by side', async () => {
     renderComposer(800);
     await settle();
 
     expect(attachButton()).toBeInTheDocument();
     expect(toolsButton()).toBeInTheDocument();
-    expect(await screen.findByLabelText('chat.generateAsset')).toBeInTheDocument();
     // No menu offered while there is room: an overflow control that is always
     // there is just a fourth button competing for the width it was meant to save.
     expect(moreButton()).not.toBeInTheDocument();
@@ -157,12 +160,11 @@ describe('MessageComposer - the button row when width runs out', () => {
     // of them were still drawn in the row, the row would be exactly as cramped.
     expect(attachButton()).not.toBeInTheDocument();
     expect(toolsButton()).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('chat.generateAsset')).not.toBeInTheDocument();
     // Still the row's last control, and still a send button.
     expect(sendButton()).toBeInTheDocument();
   });
 
-  it('the merged menu offers the same three actions', async () => {
+  it('the merged menu offers the same actions the row was showing', async () => {
     renderComposer(320);
     await settle();
 
@@ -170,7 +172,6 @@ describe('MessageComposer - the button row when width runs out', () => {
 
     expect(await screen.findByText('chat.attachFiles')).toBeInTheDocument();
     expect(screen.getByText('credentials.toolsAndSkills')).toBeInTheDocument();
-    expect(screen.getByText('chat.generateAsset')).toBeInTheDocument();
   });
 
   it('Tools & Skills opens the same panel from the menu as from the button', async () => {

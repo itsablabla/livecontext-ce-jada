@@ -22,6 +22,8 @@ import { StepTooltipContent } from './StepTooltipContent';
 import { WaterfallView } from './WaterfallView';
 import { formatCompactDuration, type EpochTimestamp, type StepEntry } from './runFormatting';
 import { computeDagOrder, sortByDagOrder } from '@/lib/workflow/dagStepOrder';
+import { runCostGaugeState } from '@/components/budget/budgetPeriod';
+import { BudgetChip } from '@/components/budget/BudgetChip';
 
 export interface RunStepsPanelProps {
   /** The run being inspected (needs runId/id, costCredits, budgetCredits, costByEpoch). */
@@ -33,6 +35,12 @@ export interface RunStepsPanelProps {
     costCredits?: number | null;
     budgetCredits?: number | null;
     costByEpoch?: Record<string, number>;
+    /** Production spend in the current budget period - the figure the cap is
+     *  compared against. Null for an editor run, which never counts against it. */
+    periodSpentCredits?: number | null;
+    budgetPeriodResetsAt?: string | null;
+    /** monthly | weekly | cumulative - names the period above. */
+    budgetPeriodMode?: string | null;
   } | null;
   /** Aggregated steps streamed over WebSocket (all epochs). undefined = still loading. */
   streamedSteps?: StepEntry[];
@@ -543,24 +551,48 @@ export function RunStepsPanel({
       {currentRunInfo?.costCredits != null && (() => {
         const total = currentRunInfo.costCredits ?? 0;
         const budget = currentRunInfo.budgetCredits ?? null;
-        const hasBudget = budget != null && budget > 0;
-        const overBudget = hasBudget && total >= budget;
         const viewingEpoch = selectedEpoch != null;
         const shown = viewingEpoch
           ? (currentRunInfo.costByEpoch?.[String(selectedEpoch)] ?? 0)
           : total;
+        // The cap is compared against the PERIOD spend, never this run's
+        // lifetime cost: a pinned workflow keeps one run for months, so its
+        // total passes the cap long before the period does. Painting the
+        // total red against the cap would announce a stop that has not
+        // happened. An editor run sends no period figure (it does not count
+        // against the cap), so it simply shows its cost with no gauge.
+        const periodSpent = currentRunInfo.periodSpentCredits ?? null;
+        // The gauge draws itself and owns its own colour; the bar only decides
+        // WHETHER it belongs here (a cap exists, and we are not looking at a
+        // single epoch, where a period total next to an epoch cost would invite
+        // a comparison between two unrelated things).
+        const { showGauge } = runCostGaugeState({
+          budgetCredits: budget,
+          periodSpentCredits: periodSpent,
+          viewingEpoch,
+        });
         return (
           <div className="flex-shrink-0 flex justify-end px-3 py-1.5">
             <span className="inline-flex items-center gap-1 text-xs tabular-nums whitespace-nowrap">
               <Coins className="h-3 w-3 flex-shrink-0 text-gray-400 dark:text-gray-500" aria-hidden />
-              <span className={`transition-colors ${
-                overBudget && !viewingEpoch ? 'text-red-500 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'
-              }`}>
+              <span className="text-gray-500 dark:text-gray-400" title={t('budget.runCostTitle')}>
                 {formatCostCompact(shown)}
-                {hasBudget && !viewingEpoch && (
-                  <span className="text-gray-400 dark:text-gray-500">{' / '}{formatCostCompact(budget)}</span>
-                )}
               </span>
+              {showGauge && (
+                <>
+                  <span className="text-gray-400 dark:text-gray-500" aria-hidden="true">·</span>
+                  <BudgetChip
+                    spent={periodSpent as number}
+                    cap={budget as number}
+                    periodMode={currentRunInfo.budgetPeriodMode}
+                    resetsAt={currentRunInfo.budgetPeriodResetsAt}
+                    // The coin two spans to the left already labels this
+                    // cluster as money; a second one between the run cost and
+                    // the period spend would read as a different unit.
+                    showIcon={false}
+                  />
+                </>
+              )}
             </span>
           </div>
         );

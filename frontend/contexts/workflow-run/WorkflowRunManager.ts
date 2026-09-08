@@ -327,6 +327,12 @@ export class WorkflowRunManager {
           edges: runState.edges,
           rawState: runState,
           currentEpoch: runState.currentEpoch,
+          // The cold load is exactly the client this field exists for: read from the WS batch
+          // alone it stays empty until the first one lands, and an empty list reads as "nothing
+          // is executing" - the answer a targeted epoch replay is refused on. On the TRACKING
+          // literal, not the metadata one: it describes what the run is doing right now, so it
+          // belongs behind the same seq guard as the step sets.
+          activeEpochs: runState.activeEpochs,
           epochTimestamps: runState.epochTimestamps,
           seq: runState.seq,
         });
@@ -585,14 +591,22 @@ export class WorkflowRunManager {
       }
 
       // Live run-cost update: an agent execution settled its credits. Payload
-      // { epoch, epochCostCredits, totalCostCredits, budgetCredits }. The total
-      // is authoritative (accumulated across all epochs).
+      // { epoch, epochCostCredits, totalCostCredits, periodSpentCredits,
+      // budgetCredits }. The total is authoritative (accumulated across all
+      // epochs); periodSpentCredits is what the cap is compared against and is
+      // null for a builder run, which never counts against it.
+      //
+      // An ABSENT field is passed through as undefined so the store keeps the
+      // last known figure. Coercing it to null here blanked the gauge on any
+      // event that simply did not carry the field, which reads to the user as
+      // "your spend went away" at the exact moment they are watching it.
       case 'runCost': {
         this.store.setRunCost(
           typeof data.totalCostCredits === 'number' ? data.totalCostCredits : undefined,
           data.budgetCredits ?? null,
           typeof data.epoch === 'number' ? data.epoch : undefined,
           typeof data.epochCostCredits === 'number' ? data.epochCostCredits : undefined,
+          data.periodSpentCredits === undefined ? undefined : data.periodSpentCredits,
         );
         break;
       }
@@ -608,6 +622,9 @@ export class WorkflowRunManager {
                 runId: data.runId ?? this.runId,
                 spentCredits: data.spentCredits ?? null,
                 budgetCredits: data.budgetCredits ?? null,
+                // The cap is a per-period allowance that resets on its own. A
+                // toast that omits the period reads as a permanent stop.
+                periodMode: data.periodMode ?? null,
               },
             }));
           }
@@ -929,13 +946,17 @@ export class WorkflowRunManager {
 
   /**
    * Rerun a step (reset downstream and re-execute).
+   *
+   * @param epoch the fire of the run to replay, or undefined to replay the most recent one
+   *   (the default the canvas uses while it reads the live state). A caller reading an OLDER
+   *   epoch names it, so the replay lands in the epoch on screen instead of the newest.
    */
-  async rerunStep(stepId: string): Promise<RerunResult> {
+  async rerunStep(stepId: string, epoch?: number): Promise<RerunResult> {
     this.store.setLoading(true);
 
     try {
       const plan = this.getCurrentPlan?.() ?? undefined;
-      const response = await orchestratorApi.rerunFromStep(this.runId, stepId, plan);
+      const response = await orchestratorApi.rerunFromStep(this.runId, stepId, plan, epoch);
 
       // Update seq from response (rerun wrote to StateSnapshot, seq was bumped).
       // This ensures any stale WS events from before the rerun are discarded.
@@ -1368,6 +1389,7 @@ export class WorkflowRunManager {
       edges: runState.edges,
       rawState: runState,
       currentEpoch: runState.currentEpoch,
+      activeEpochs: runState.activeEpochs,
       epochTimestamps: runState.epochTimestamps,
     });
 
@@ -1631,6 +1653,16 @@ export class WorkflowRunManager {
         // Detect agent node completion → dispatch event so conversation panel reloads messages.
         // partial_success counts: the node finished and produced its messages, it merely carries
         // an older failure in its accumulated tally.
+        // Dispatched for the whole agent: family, generate included, and filtered
+        // by the listener - the same division of labour as the core: case above,
+        // and for the same reason: the WS payload carries no node type, so the
+        // only thing to discriminate on HERE is the key, and the key is derived
+        // from a label the author chose. Excluding generate by an agent:generate
+        // prefix looked cheap and was wrong twice over: it misses the node it
+        // targets as soon as it is called anything else (Make Clip ->
+        // agent:make_clip) and it silences a real LLM agent that happens to be
+        // called "Generate Report". What it saved was one reload of a panel that
+        // already reloads itself on a timer.
         if (stepId?.startsWith('agent:')
             && ['completed', 'success', 'partial_success'].includes((step.status || '').toLowerCase())) {
           this.handleAgentStepCompleted(stepId, step);

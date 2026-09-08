@@ -1,7 +1,7 @@
 /**
  * Generation Service
  *
- * The model catalog behind the `core:generate` node. A model id decides the
+ * The model catalog behind the `agent:generate` node. A model id decides the
  * format produced, which parameters are accepted and what a run costs, so the
  * inspector needs the whole row (limits included) before it can render a form
  * or quote a price.
@@ -156,6 +156,16 @@ export interface GenerationResult {
     billed_quantity?: number;
     billed_unit?: string;
     provider_response?: Record<string, unknown>;
+    /**
+     * The provider's own short-lived link to an asset that was produced and CHARGED for but could
+     * not be fetched and stored.
+     *
+     * <p>Only ever present beside `success: false`. Billing commits before the asset is stored, so
+     * a transient fetch failure leaves a paid generation with no file row; this link is the only
+     * route back to it, and the endpoint attaches it to the failing response for that reason. A
+     * caller that reads only `error` throws away the thing the reader paid for.
+     */
+    asset_url?: string;
   };
   error?: string;
   errorCode?: string;

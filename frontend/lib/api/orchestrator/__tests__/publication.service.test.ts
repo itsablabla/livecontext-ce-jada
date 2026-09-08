@@ -115,4 +115,33 @@ describe('PublicationService.getSuggestedApplications - param serialization', ()
       params: { limit: '8' },
     });
   });
+
+  it('sendsPrimaryGoalAsThePrimaryGoalQueryParam', async () => {
+    mockedGet.mockResolvedValueOnce({ count: 0, publications: [] } as any);
+
+    await service.getSuggestedApplications({ primaryGoal: 'reporting', profession: 'sales' });
+
+    expect(mockedGet).toHaveBeenCalledWith('/publications/suggestions', {
+      params: { limit: '8', profession: 'sales', primaryGoal: 'reporting' },
+    });
+  });
+
+  it('omitsPrimaryGoalParamWhenNullOrAbsent_olderUserPath', async () => {
+    mockedGet.mockResolvedValueOnce({ count: 0, publications: [] } as any);
+    mockedGet.mockResolvedValueOnce({ count: 0, publications: [] } as any);
+
+    // Users onboarded before the persona questionnaire have no stored goal.
+    await service.getSuggestedApplications({ primaryGoal: null, profession: 'sales' });
+    await service.getSuggestedApplications({ profession: 'sales' });
+
+    expect(mockedGet).toHaveBeenNthCalledWith(1, '/publications/suggestions', {
+      params: { limit: '8', profession: 'sales' },
+    });
+    expect(mockedGet).toHaveBeenNthCalledWith(2, '/publications/suggestions', {
+      params: { limit: '8', profession: 'sales' },
+    });
+    for (const [, options] of mockedGet.mock.calls) {
+      expect((options as { params: Record<string, string> }).params).not.toHaveProperty('primaryGoal');
+    }
+  });
 });

@@ -335,6 +335,7 @@ export default function AgentsPage() {
             ['generation', 'Produce an asset from a prompt: image, video, audio, voice or music. Spends credits per create, at the rate the chosen model sets.'],
             ['files', 'Browse and reuse workspace files (docs, images, exports, uploads); get/view returns a ref usable by a workflow node.'],
             ['wait', 'Block server-side for a set number of seconds (1-240) between status checks or after a rate limit, instead of busy-polling.'],
+            ['ask_user', 'Put a multiple-choice question to the person in the chat and read their pick back; outside a live chat it answers unavailable.'],
           ]}
         />
         <p>

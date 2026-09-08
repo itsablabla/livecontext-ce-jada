@@ -427,7 +427,7 @@ class WorkflowRepositoryIntegrationTest {
     }
 
     @Nested
-    @DisplayName("findPinnedVersionScopeRows - [id, pinnedVersion, tenantId, organizationId] projection")
+    @DisplayName("findPinnedVersionScopeRows - [id, pinnedVersion, tenantId, orgId, cap, mode, spent, start]")
     class PinnedVersionScopeRows {
 
         @Test
@@ -451,6 +451,59 @@ class WorkflowRepositoryIntegrationTest {
             assertThat(rowA[1]).isEqualTo(5);        // pinnedVersion
             assertThat(rowA[2]).isEqualTo(TENANT_A); // tenantId
             assertThat(rowA[3]).isEqualTo(TENANT_A); // organizationId
+        }
+
+        @Test
+        @DisplayName("the four budget columns land in positions 4..7, in that order")
+        void budgetColumnsHoldTheirPositions() {
+            // ApplicationRunVersionBatchService consumes this projection BY
+            // INDEX, and its unit test builds the Object[] itself, so a column
+            // reordered in the query leaves every one of those tests green
+            // while an application card shows the cadence in the cap field.
+            // Only a real query can catch that, and only with values chosen so
+            // a swap is visible: the cap and the spend are both BigDecimal, so
+            // they must differ, and neither may equal the pinned version.
+            WorkflowEntity a = createWorkflow(TENANT_A, "Capped", USER_A);
+            a.setPinnedVersion(5);
+            a.setBudgetCredits(new java.math.BigDecimal("250"));
+            a.setBudgetPeriodMode("weekly");
+            entityManager.persist(a);
+            entityManager.flush();
+            entityManager.getEntityManager()
+                    .createNativeQuery("UPDATE workflows SET budget_period_spent = 37, "
+                            + "budget_period_started_at = ?1 WHERE id = ?2")
+                    .setParameter(1, Instant.parse("2026-09-01T00:00:00Z"))
+                    .setParameter(2, a.getId())
+                    .executeUpdate();
+            entityManager.flush();
+            entityManager.clear();
+
+            Object[] row = workflowRepository.findPinnedVersionScopeRows(List.of(a.getId())).get(0);
+
+            assertThat((java.math.BigDecimal) row[4])
+                    .as("[4] is the CAP, not the spend").isEqualByComparingTo("250");
+            assertThat(row[5]).as("[5] is the cadence").isEqualTo("weekly");
+            assertThat((java.math.BigDecimal) row[6])
+                    .as("[6] is the SPEND, not the cap").isEqualByComparingTo("37");
+            assertThat(row[7]).as("[7] is the period start").isNotNull();
+        }
+
+        @Test
+        @DisplayName("an uncapped workflow projects nulls in the budget positions, not a shifted row")
+        void uncappedProjectsNullBudgetColumns() {
+            WorkflowEntity a = createWorkflow(TENANT_A, "Uncapped", USER_A);
+            entityManager.persist(a);
+            entityManager.flush();
+            entityManager.clear();
+
+            Object[] row = workflowRepository.findPinnedVersionScopeRows(List.of(a.getId())).get(0);
+
+            assertThat(row).hasSize(8);
+            assertThat(row[4]).isNull();
+            // 'monthly' regardless of who supplies it (the entity field
+            // initialiser here, the column DEFAULT in production): what this
+            // pins is that position 5 carries the cadence and is never null.
+            assertThat(row[5]).as("position 5 is the cadence, and it is never null").isEqualTo("monthly");
         }
 
         @Test

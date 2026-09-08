@@ -2,7 +2,11 @@
 
 import * as React from 'react';
 import { createPortal } from 'react-dom';
+import { clampMenuLeft } from '@/lib/utils/menuPlacement';
 import clsx from 'clsx';
+
+/** Width of the suggestions popover, shared by its clamp and its box. */
+const SUGGESTIONS_WIDTH = 480;
 
 interface ExpressionEditorProps {
   value: string;
@@ -806,8 +810,8 @@ export function ExpressionEditor({
   // Popover component
   const popover = showSuggestions && filteredSuggestions.length > 0 && typeof window !== 'undefined' ? createPortal(
     <div
-      className="fixed z-[99999] w-[480px] max-h-[420px] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl flex flex-col"
-      style={{ top: popoverPosition.top, left: popoverPosition.left }}
+      className="fixed z-[99999] max-w-[calc(100vw-1rem)] max-h-[420px] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl flex flex-col"
+      style={{ top: popoverPosition.top, left: clampMenuLeft(popoverPosition.left, SUGGESTIONS_WIDTH), width: SUGGESTIONS_WIDTH }}
       onMouseDown={(e) => e.preventDefault()}
     >
       {/* Tabs Header */}

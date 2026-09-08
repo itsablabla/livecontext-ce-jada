@@ -792,6 +792,60 @@ class ExtractFromFileNodeTest {
             assertEquals("30", items.get(0).get("age"));
         }
 
+        /**
+         * A table media cell naming a file this workspace knows only by id has no storage path.
+         * The node used to skip its FileRef branch for exactly that value and fall through to the
+         * string fallback, where String.valueOf turned the Map into "{_type=file, id=...}" and the
+         * node COMPLETED with that text as the extracted document - green, and wrong. It must fail
+         * instead, naming the one thing that is missing.
+         */
+        @Test
+        @DisplayName("A file reference with no storage path FAILS naming the path, never extracts its own toString")
+        void fileRefWithoutAPathFailsInsteadOfExtractingItsToString() {
+            Map<String, Object> pathless = new LinkedHashMap<>();
+            pathless.put("_type", "file");
+            pathless.put("id", "c7963596-ab99-46af-9cb5-fccb64461702");
+            pathless.put("url", "/api/proxy/files/by-id/c7963596-ab99-46af-9cb5-fccb64461702/raw");
+            pathless.put("name", "notes.csv");
+            when(templateAdapter.resolveTemplates(anyMap(), any(ExecutionContext.class)))
+                .thenReturn(Map.of("__expr__", pathless));
+
+            Core.ExtractFromFileConfig config = new Core.ExtractFromFileConfig(
+                "csv", "{{table:queue.output.items[0].doc}}", ",", null, "yes", null, null, null, null, null, null);
+            ExtractFromFileNode node = new ExtractFromFileNode("core:extract", config);
+            node.setTemplateAdapter(templateAdapter);
+            node.setFileStorageService(fileStorageService);
+
+            NodeExecutionResult result = node.execute(context);
+
+            assertFalse(result.isSuccess(), "extracting the map's toString would be a green failure");
+            assertTrue(result.errorMessage().orElse("").contains("no storage path"),
+                "the failure must name the missing path, got: " + result.errorMessage());
+        }
+
+        @Test
+        @DisplayName("A file reference with no storage path FAILS the same way in binary (pdf) mode")
+        void fileRefWithoutAPathFailsInBinaryModeToo() {
+            Map<String, Object> pathless = new LinkedHashMap<>();
+            pathless.put("_type", "file");
+            pathless.put("id", "c7963596-ab99-46af-9cb5-fccb64461702");
+            pathless.put("name", "report.pdf");
+            when(templateAdapter.resolveTemplates(anyMap(), any(ExecutionContext.class)))
+                .thenReturn(Map.of("__expr__", pathless));
+
+            Core.ExtractFromFileConfig config = new Core.ExtractFromFileConfig(
+                "pdf", "{{table:queue.output.items[0].doc}}", null, null, "yes", null, null, null, null, null, null);
+            ExtractFromFileNode node = new ExtractFromFileNode("core:extract", config);
+            node.setTemplateAdapter(templateAdapter);
+            node.setFileStorageService(fileStorageService);
+
+            NodeExecutionResult result = node.execute(context);
+
+            assertFalse(result.isSuccess());
+            assertTrue(result.errorMessage().orElse("").contains("no storage path"),
+                "the failure must name the missing path, got: " + result.errorMessage());
+        }
+
         @Test
         @DisplayName("Should download and parse XLSX from FileRef")
         void shouldDownloadAndParseXlsxFromFileRef() throws Exception {

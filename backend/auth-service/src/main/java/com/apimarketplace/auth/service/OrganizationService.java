@@ -32,6 +32,13 @@ import java.util.UUID;
 @Transactional
 public class OrganizationService {
 
+    /**
+     * Product-analytics emitter (PostHog). Optional so hand-built test instances and
+     * analytics-less deployments are untouched; a null field emits nothing.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics;
+
     private static final Logger log = LoggerFactory.getLogger(OrganizationService.class);
 
     private final OrganizationRepository organizationRepository;
@@ -106,6 +113,7 @@ public class OrganizationService {
         memberRepository.save(member);
 
         log.info("🏢 Added user {} as OWNER of organization {}", user.getId(), org.getId());
+        if (analytics != null) analytics.organizationCreated(user.getId(), org, true);
 
         return org;
     }
@@ -144,6 +152,7 @@ public class OrganizationService {
         memberRepository.save(member);
 
         log.info("🏢 Created workspace {} (slug {}, owner {}, cap {})", org.getId(), slug, owner.getId(), max);
+        if (analytics != null) analytics.organizationCreated(owner.getId(), org, false);
         return org;
     }
 

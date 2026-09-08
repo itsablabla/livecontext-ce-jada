@@ -56,11 +56,28 @@ public class NodeStructureValidator implements WorkflowValidator {
             checkDualWrite(node, nodeId, result);
             checkNestedTemplates(node, nodeId, result);
         }
-        // MCP / interface / table / trigger nodes can also carry nested templates;
-        // dual-write only applies to core nodes since they're the only ones with
-        // a nested config slot governed by NESTED_CONFIG_KEYS.
+        // MCP / interface / table / trigger nodes can also carry nested templates.
+        //
+        // Dual-write, though, applies only to a node that HAS a nested config
+        // slot governed by NESTED_CONFIG_KEYS. Among the mcps that is `generate`
+        // alone: it lives here because it is addressed as `agent:<label>`, while
+        // still keeping its whole configuration under `params`, so it was the one
+        // nested-config node nobody checked.
+        //
+        // Deliberately not run over every mcp entry. It would be harmless today,
+        // because checkDualWrite returns for a type with no slot and the two mcp
+        // types that DO have one (`transform` and `wait`, from the __transform__
+        // and __wait__ tool ids) keep their arguments flat. But that is a fact
+        // about current data, not an invariant, and the modifier's own guard names
+        // those two as the ones to leave alone: the day one of them gains a
+        // params-shaped child, every save starts emitting a NODE_DUAL_WRITE
+        // warning nobody can act on.
         for (Map<String, Object> node : session.getMcps()) {
-            checkNestedTemplates(node, stringOrNull(node.get("id")), result);
+            String nodeId = stringOrNull(node.get("id"));
+            if ("generate".equals(node.get("type")) || Boolean.TRUE.equals(node.get("isGenerate"))) {
+                checkDualWrite(node, nodeId, result);
+            }
+            checkNestedTemplates(node, nodeId, result);
         }
         for (Map<String, Object> node : session.getInterfaces()) {
             checkNestedTemplates(node, stringOrNull(node.get("id")), result);

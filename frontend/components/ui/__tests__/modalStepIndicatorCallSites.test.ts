@@ -75,12 +75,17 @@ const NOT_A_STEP_HEADER = [
   },
 ];
 
-/** Every surface that shows a multi-step header, and must not re-draw one. */
+/**
+ * Every surface that shows a multi-step header, and must not re-draw one.
+ *
+ * <p>The generation modal used to be on this list and is gone: the studio replaced it, and a
+ * composer has no steps to show. Removing the row rather than pointing it somewhere else is the
+ * honest edit - there is no surface left to hold to the rule.
+ */
 const CALL_SITES = [
   ['the agent modal', join('components', 'chat', 'CreateAgentModal.tsx')],
   ['the data-source modal', join('components', 'chat', 'CreateDataSourceModal.tsx')],
   ['the interface modal', join('components', 'chat', 'CreateInterfaceModal.tsx')],
-  ['the generation modal', join('components', 'chat', 'CreateGenerationModal.tsx')],
   ['the add-column modal', join('components', 'data-table', 'modals', 'AddColumnModal.tsx')],
   ['the project modal', join('components', 'project', 'ProjectMultiStepModal.tsx')],
   ['the share-workflow modal', join('components', 'workflow', 'ShareWorkflowModal.tsx')],

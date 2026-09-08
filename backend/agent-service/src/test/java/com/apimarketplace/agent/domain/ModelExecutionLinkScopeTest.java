@@ -14,8 +14,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * source map onto a scope.
  *
  * <p><b>Why this test exists.</b> A link scoped to surface X only takes effect when a
- * real run is tagged with X as its {@code AgentExecutionRequestDto.source} at the
- * resolve chokepoint ({@code AgentRemoteExecutionService.resolveActivitySource}).
+ * real run reports X as its activity source: the agent path off
+ * {@code AgentExecutionRequestDto.source}, and the classify, guardrail and sub-agent
+ * paths from their own {@code ACTIVITY_SOURCE} constant.
  * Two halves make that work, and each is guarded separately:
  * <ul>
  *   <li><b>Resolver side (here).</b> {@link #everyNonAllSurfaceIsResolvableFromItsOwnName()}
@@ -33,7 +34,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <p>Each surface below has a real producer of its source token:
  * <ul>
  *   <li>WORKFLOW - {@code AgentNode} stamps {@code source="WORKFLOW"} on every
- *       workflow agent node run.</li>
+ *       workflow agent node run, and {@code ClassifyService}/{@code GuardrailService}
+ *       report the same surface for classify and guardrail nodes.</li>
  *   <li>CHAT - interactive general chat (the {@code CHAT}/{@code CONVERSATION}
  *       source).</li>
  *   <li>WEBHOOK - {@code AgentWebhookDispatchService} dispatches a standalone
@@ -92,7 +94,7 @@ class ModelExecutionLinkScopeTest {
         assertThat(ModelExecutionLinkScope.fromActivitySource("all")).isNull();      // ... case-insensitively
         assertThat(ModelExecutionLinkScope.fromActivitySource(null)).isNull();
         assertThat(ModelExecutionLinkScope.fromActivitySource("   ")).isNull();
-        assertThat(ModelExecutionLinkScope.fromActivitySource("SUB_AGENT")).isNull(); // guardrail/classify/sub-agent never reach the chokepoint
+        assertThat(ModelExecutionLinkScope.fromActivitySource("SUB_AGENT")).isNull(); // a sub-agent run matches no surface, so only an ALL link routes it
     }
 
     // ── parse: admin token handling ──────────────────────────────────────────

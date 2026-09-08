@@ -154,14 +154,14 @@ class ServiceToolsControllerTest {
                     "parameters", Map.of("action", "create"),
                     "agentId", "agent-1",
                     "workflowRunId", "run-42",
-                    "workflowNodeId", "core:make_clip",
+                    "workflowNodeId", "agent:make_clip",
                     "enabledModules", List.of("catalog", "workflow", "generation")));
 
             Map<String, Object> credentials = generation.lastContext.credentials();
             assertThat(credentials).containsEntry("__workflowRunId__", "run-42");
             // The consumer reads `__nodeId__`, not `__workflowNodeId__`: copying
             // it under the sender's name would look right and still be absent.
-            assertThat(credentials).containsEntry("__nodeId__", "core:make_clip");
+            assertThat(credentials).containsEntry("__nodeId__", "agent:make_clip");
             assertThat(credentials).containsEntry("__agentId__", "agent-1");
         }
 

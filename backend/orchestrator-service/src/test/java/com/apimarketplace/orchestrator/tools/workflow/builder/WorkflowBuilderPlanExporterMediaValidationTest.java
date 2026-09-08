@@ -114,7 +114,7 @@ class WorkflowBuilderPlanExporterMediaValidationTest {
     }
 
     @Test
-    @DisplayName("media core without params.operation is rejected listing the seven operations")
+    @DisplayName("media core without params.operation is rejected listing every operation")
     void mediaWithoutOperationRejected() {
         WorkflowBuilderSession session = newSession();
 
@@ -397,9 +397,108 @@ class WorkflowBuilderPlanExporterMediaValidationTest {
                 .isTrue();
     }
 
+    // ---- v3 operation: subtitles -------------------------------------------
+
     @Test
-    @DisplayName("the unknown-operation error now lists all seven operations")
-    void unknownOperationListsSevenOperations() {
+    @DisplayName("subtitles missing BOTH video and cues yields both dedicated errors")
+    void subtitlesMissingBothRejectedWithBothErrors() {
+        WorkflowBuilderSession session = newSession();
+
+        ToolExecutionResult result = setPlan(session,
+                List.of(mediaCore(Map.of("operation", "subtitles"))));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error())
+                .contains("'params.video' is required for media subtitles")
+                .contains("'params.cues' is required for media subtitles");
+    }
+
+    @Test
+    @DisplayName("subtitles with an EMPTY cues array is rejected like no cues at all")
+    void subtitlesEmptyCuesRejected() {
+        WorkflowBuilderSession session = newSession();
+
+        ToolExecutionResult result = setPlan(session,
+                List.of(mediaCore(Map.of(
+                        "operation", "subtitles",
+                        "video", "{{core:reel.output.file}}",
+                        "cues", List.of()))));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("'params.cues' is required for media subtitles");
+    }
+
+    @Test
+    @DisplayName("subtitles beyond 600 cues is rejected naming the cap and the count given")
+    void subtitlesTooManyCuesRejected() {
+        WorkflowBuilderSession session = newSession();
+        List<Map<String, Object>> cues = new ArrayList<>();
+        for (int i = 0; i < 601; i++) {
+            cues.add(Map.of("start_seconds", i, "end_seconds", i + 0.5, "text", "line " + i));
+        }
+
+        ToolExecutionResult result = setPlan(session,
+                List.of(mediaCore(Map.of(
+                        "operation", "subtitles",
+                        "video", "{{core:reel.output.file}}",
+                        "cues", cues))));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("at most 600 entries").contains("601");
+    }
+
+    @Test
+    @DisplayName("subtitles with video + cues passes validation")
+    void subtitlesWithVideoAndCuesImportsSuccessfully() {
+        WorkflowBuilderSession session = newSession();
+
+        ToolExecutionResult result = setPlan(session,
+                List.of(mediaCore(Map.of(
+                        "operation", "subtitles",
+                        "video", "{{core:reel.output.file}}",
+                        "style", "tiktok",
+                        "cues", List.of(Map.of(
+                                "start_seconds", 0, "end_seconds", 2.4, "text", "It starts here"))))));
+
+        assertThat(result.success())
+                .as("a well-formed subtitles core must be accepted, got: " + result.error())
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("subtitles cues given as an EXPRESSION passes validation (a caption track is often computed upstream)")
+    void subtitlesTemplatedCuesAccepted() {
+        WorkflowBuilderSession session = newSession();
+
+        ToolExecutionResult result = setPlan(session,
+                List.of(mediaCore(Map.of(
+                        "operation", "subtitles",
+                        "video", "{{core:reel.output.file}}",
+                        "cues", "{{core:build_cues.output.result.cues}}"))));
+
+        assertThat(result.success())
+                .as("a computed caption track must be importable, got: " + result.error())
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("a BLANK cues expression is still rejected - it names no source at all")
+    void subtitlesBlankCuesExpressionRejected() {
+        WorkflowBuilderSession session = newSession();
+
+        ToolExecutionResult result = setPlan(session,
+                List.of(mediaCore(Map.of(
+                        "operation", "subtitles",
+                        "video", "{{core:reel.output.file}}",
+                        "cues", "   "))));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("'params.cues' is required for media subtitles");
+    }
+
+    @Test
+    @DisplayName("the unknown-operation error now lists all eight operations")
+    void unknownOperationListsEveryOperation() {
         WorkflowBuilderSession session = newSession();
 
         ToolExecutionResult result = setPlan(session,
@@ -410,7 +509,8 @@ class WorkflowBuilderPlanExporterMediaValidationTest {
                 .contains("unknown media operation 'transcode'")
                 .contains("concat")
                 .contains("frame")
-                .contains("overlay");
+                .contains("overlay")
+                .contains("subtitles");
     }
 
     @Test

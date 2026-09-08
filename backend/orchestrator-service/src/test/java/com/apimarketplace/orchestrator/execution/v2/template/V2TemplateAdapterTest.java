@@ -327,6 +327,26 @@ class V2TemplateAdapterTest {
 
             assertTrue(adapter.hasUnresolvedTemplates(Map.of("field", "{{missing}}"), context));
         }
+
+        @Test
+        @DisplayName("A JS template literal that survives resolution still counts as unresolved here - the skip decision is NOT the persistence decision")
+        void jsTemplateLiteralStillCountsAsUnresolvedForTheSkipDecision() {
+            when(mockPlan.getTriggers()).thenReturn(List.of());
+            when(mockPlan.getId()).thenReturn("plan-1");
+
+            ExecutionContext context = createContext(Map.of(), Map.of());
+            String jsLiteral = "const url = `${base}/items`;";
+            when(mockTemplateEngine.evaluateTemplate(eq(jsLiteral), any(WorkflowExecutionContext.class)))
+                .thenReturn(jsLiteral);
+
+            // StepDataPersistenceService used to DELETE a value like this from the
+            // Params column for containing `${`, throwing away a code node's real
+            // source. That filter is gone, and this method is deliberately NOT the
+            // same decision: it gates whether a step is SKIPPED for missing
+            // dependencies, where a false negative silently runs a step on a
+            // half-resolved input. Pinned so the two are not conflated again.
+            assertTrue(adapter.hasUnresolvedTemplates(Map.of("code", jsLiteral), context));
+        }
     }
 
     @Nested

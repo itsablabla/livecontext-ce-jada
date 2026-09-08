@@ -67,6 +67,7 @@ class SplitNodeExecutorTest {
                 "core:split1",
                 "{{trigger:webhook.messages}}",
                 0,  // maxItems
+                null,  // splitStrategy: not the subject of this test
                 WORKFLOW_ITEM_INDEX,
                 context
             );
@@ -82,6 +83,55 @@ class SplitNodeExecutorTest {
         }
 
         @Test
+        @DisplayName("reports its configuration under the PLAN's key names, strategy included (run-mode Params alignment)")
+        @SuppressWarnings("unchecked")
+        void reportsResolvedParamsUnderPlanKeyNames() {
+            List<Object> items = List.of("a", "b", "c");
+            when(templateAdapter.evaluateTemplate(eq("{{trigger:webhook.messages}}"), any()))
+                .thenReturn(items);
+            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any(), anyInt()))
+                .thenReturn(SplitContext.create("core:split1:0", items));
+
+            NodeExecutionResult result = executor.execute(
+                "run1", "core:split1", "{{trigger:webhook.messages}}", 5,
+                "stop-on-error", WORKFLOW_ITEM_INDEX, context);
+
+            Map<String, Object> resolvedParams =
+                (Map<String, Object>) result.output().get("resolved_params");
+
+            // The names the builder form and the plan use. They used to be
+            // source_expression / max_items / item_count, and the strategy was not
+            // reported at all - so a configured field was invisible in the run view.
+            assertThat(resolvedParams)
+                .containsEntry("list", "{{trigger:webhook.messages}}")
+                .containsEntry("maxItems", 5)
+                .containsEntry("splitStrategy", "stop-on-error")
+                .containsEntry("itemCount", 3)
+                .doesNotContainKeys("source_expression", "max_items", "item_count");
+        }
+
+        @Test
+        @DisplayName("omits the strategy rather than inventing one when the caller does not know it")
+        @SuppressWarnings("unchecked")
+        void omitsUnknownSplitStrategy() {
+            List<Object> items = List.of("a");
+            when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(items);
+            when(contextManager.createContext(any(), any(), anyInt(), isNull(), any(), anyInt()))
+                .thenReturn(SplitContext.create("core:split1:0", items));
+
+            NodeExecutionResult result = executor.execute(
+                "run1", "core:split1", "{{trigger:webhook.messages}}", 0, null, WORKFLOW_ITEM_INDEX, context);
+
+            Map<String, Object> resolvedParams =
+                (Map<String, Object>) result.output().get("resolved_params");
+            assertThat(resolvedParams).doesNotContainKey("splitStrategy");
+            // Same rule for an unset cap: 0 means "no cap was configured", and
+            // rendering it would tell the reader they limited the split to nothing.
+            assertThat(resolvedParams).doesNotContainKey("maxItems");
+            assertThat(resolvedParams).containsEntry("itemCount", 1);
+        }
+
+        @Test
         @DisplayName("emitted persisted keys match the non-runtime keys declared by SplitNodeSpec (runtime <-> spec guard)")
         void emittedKeysMatchSplitNodeSpec() {
             List<Object> items = List.of("a", "b", "c");
@@ -91,7 +141,7 @@ class SplitNodeExecutorTest {
                 .thenReturn(SplitContext.create("core:split1:0", items));
 
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", "{{trigger:webhook.messages}}", 0, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", "{{trigger:webhook.messages}}", 0, null, WORKFLOW_ITEM_INDEX, context);
 
             // The live producer's top-level output keys, minus the engine-envelope keys that
             // GenericOutputSchemaMapper strips (node_type / resolved_params / item_index...).
@@ -120,7 +170,7 @@ class SplitNodeExecutorTest {
                 .thenReturn(SplitContext.create("core:split1:0", List.of("a", "b")));
 
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", "{{items}}", 0, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", "{{items}}", 0, null, WORKFLOW_ITEM_INDEX, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.COMPLETED);
             assertThat(result.output().get("terminated")).isEqualTo(true);
@@ -135,7 +185,7 @@ class SplitNodeExecutorTest {
                 .thenReturn(SplitContext.create("core:split1:0", List.of()));
 
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", "{{items}}", 0, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", "{{items}}", 0, null, WORKFLOW_ITEM_INDEX, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.COMPLETED);
             assertThat(result.output().get("item_count")).isEqualTo(0);
@@ -158,7 +208,7 @@ class SplitNodeExecutorTest {
                 });
 
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", "{{items}}", 3, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", "{{items}}", 3, null, WORKFLOW_ITEM_INDEX, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.COMPLETED);
             // The executor should limit items to 3
@@ -173,7 +223,7 @@ class SplitNodeExecutorTest {
                 .thenThrow(new RuntimeException("Evaluation error"));
 
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", "{{invalid}}", 0, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", "{{invalid}}", 0, null, WORKFLOW_ITEM_INDEX, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.FAILED);
             assertThat(result.errorMessage()).isPresent();
@@ -183,7 +233,7 @@ class SplitNodeExecutorTest {
         @DisplayName("should return FAILURE when expression is null")
         void shouldReturnFailureWhenExpressionNull() {
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", null, 0, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", null, 0, null, WORKFLOW_ITEM_INDEX, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.FAILED);
         }
@@ -192,7 +242,7 @@ class SplitNodeExecutorTest {
         @DisplayName("should return FAILURE when expression is blank")
         void shouldReturnFailureWhenExpressionBlank() {
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", "   ", 0, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", "   ", 0, null, WORKFLOW_ITEM_INDEX, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.FAILED);
         }
@@ -210,7 +260,7 @@ class SplitNodeExecutorTest {
                 .thenAnswer(inv -> SplitContext.create("core:split1:0", inv.getArgument(4)));
 
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", "{{run.output}}", 0, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", "{{run.output}}", 0, null, WORKFLOW_ITEM_INDEX, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.COMPLETED);
             assertThat(result.output().get("item_count")).isEqualTo(3);
@@ -227,7 +277,7 @@ class SplitNodeExecutorTest {
                 .thenAnswer(inv -> SplitContext.create("core:split1:0", inv.getArgument(4)));
 
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", "{{table.output}}", 0, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", "{{table.output}}", 0, null, WORKFLOW_ITEM_INDEX, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.COMPLETED);
             assertThat(result.output().get("item_count")).isEqualTo(2);
@@ -242,7 +292,7 @@ class SplitNodeExecutorTest {
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(singleObject);
 
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", "{{single}}", 0, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", "{{single}}", 0, null, WORKFLOW_ITEM_INDEX, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.FAILED);
             assertThat(result.errorMessage()).isPresent();
@@ -257,7 +307,7 @@ class SplitNodeExecutorTest {
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn("not-a-list");
 
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", "{{scalar}}", 0, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", "{{scalar}}", 0, null, WORKFLOW_ITEM_INDEX, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.FAILED);
             assertThat(result.errorMessage()).isPresent();
@@ -272,7 +322,7 @@ class SplitNodeExecutorTest {
             when(templateAdapter.evaluateTemplate(any(), any())).thenReturn(null);
 
             NodeExecutionResult result = executor.execute(
-                "run1", "core:split1", "{{null}}", 0, WORKFLOW_ITEM_INDEX, context);
+                "run1", "core:split1", "{{null}}", 0, null, WORKFLOW_ITEM_INDEX, context);
 
             assertThat(result.status()).isEqualTo(NodeStatus.FAILED);
             assertThat(result.errorMessage()).isPresent();

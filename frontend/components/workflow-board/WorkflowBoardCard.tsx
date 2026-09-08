@@ -2,6 +2,8 @@
 
 import React, { useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { budgetChipHasContent } from '@/components/budget/budgetPeriod';
+import { BudgetChip } from '@/components/budget/BudgetChip';
 // Locale-aware router (next-intl) - card navigation must preserve the active locale.
 import { useRouter } from '@/i18n/navigation';
 import { AlertTriangle, Calendar, Clock, Coins, Globe, MessageSquareQuote, Workflow as WorkflowIcon } from 'lucide-react';
@@ -182,28 +184,46 @@ export function WorkflowBoardCard({ card, isDragging, onDragStart }: WorkflowBoa
               <span>{t('card.epochs', { count: card.productionRunEpochCount })}</span>
             </>
           )}
-          {/* Production-run cost (all epochs). Over budget turns red. */}
-          {card.costCredits != null && card.costCredits > 0 && (
+          {/* Production-run cost (all epochs), then the period gauge when a cap
+              is set. The red state tracks the PERIOD spend, not the run total:
+              a pinned workflow keeps one run for months, so its lifetime cost
+              crosses the cap long before the period does, and colouring off the
+              total would announce a stop that has not happened. */}
+          {/* Gated on the BUDGET having something to say, not on the run
+              having cost something. Re-pinning a workflow mints a fresh
+              production run whose costCredits is 0, so keying the block on the
+              run total hid the gauge on exactly the workflow that was sitting
+              blocked at its cap - and disagreed with the list page, which gates
+              on this same predicate. */}
+          {(budgetChipHasContent(card.budgetPeriodSpent, card.budgetCredits)
+            || (card.costCredits != null && card.costCredits > 0)) && (() => {
+            const cap = card.budgetCredits != null && card.budgetCredits > 0 ? card.budgetCredits : null;
+            const periodSpent = card.budgetPeriodSpent ?? null;
+            const showGauge = cap != null && periodSpent != null;
+            const overBudget = showGauge && periodSpent >= cap;
+            const overClass = overBudget ? 'text-red-500 dark:text-red-400' : '';
+            return (
             <>
               <span className="text-slate-300 dark:text-slate-600">&middot;</span>
-              <Coins className={`h-2.5 w-2.5 ${
-                card.budgetCredits != null && card.budgetCredits > 0 && card.costCredits >= card.budgetCredits
-                  ? 'text-red-500 dark:text-red-400' : ''
-              }`} />
-              <span
-                className={
-                  card.budgetCredits != null && card.budgetCredits > 0 && card.costCredits >= card.budgetCredits
-                    ? 'text-red-500 dark:text-red-400' : ''
-                }
-                title={t('card.costTitle')}
-              >
-                {formatCostCompact(card.costCredits)}
-                {card.budgetCredits != null && card.budgetCredits > 0 && (
-                  <span className="text-theme-muted"> / {formatCostCompact(card.budgetCredits)}</span>
-                )}
-              </span>
+              <Coins className={`h-2.5 w-2.5 ${overClass}`} />
+              {card.costCredits != null && card.costCredits > 0 && (
+                <span title={t('card.costTitle')}>
+                  {formatCostCompact(card.costCredits)}
+                </span>
+              )}
+              {showGauge && (
+                <BudgetChip
+                  spent={periodSpent as number}
+                  cap={cap as number}
+                  periodMode={card.budgetPeriodMode}
+                  resetsAt={card.budgetPeriodResetsAt}
+                  // The row's own Coins, beside the run cost, covers both.
+                  showIcon={false}
+                />
+              )}
             </>
-          )}
+            );
+          })()}
           {card.productionRunStatus && (
             <>
               <span className="text-slate-300 dark:text-slate-600">&middot;</span>

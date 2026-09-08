@@ -23,13 +23,22 @@ export function ShimmerOverlay({ color }: { color: string }) {
   );
 }
 
-interface BottomButton {
+export interface BottomButton {
   key: string;
   icon: React.ReactNode;
   title: string;
   onClick: (e: React.MouseEvent) => void;
   shimmer?: boolean;
   shimmerColor?: string;
+  /**
+   * This button IS a run affordance, so the whole bar shows without waiting for hover -
+   * the same reveal `runnableNow` gives a ready play button below, and honoured in RUN MODE
+   * only for the same reason. Set it on a button that REPLACES the play (the focus-epoch
+   * trigger play), never on a contextual one: the reveal is the cue that says "you can run
+   * this now", and spending it on anything else makes the bar permanent and the cue
+   * meaningless.
+   */
+  revealsBar?: boolean;
 }
 
 interface PlayButtonConfig {
@@ -146,7 +155,17 @@ export function NodeBottomBar({ borderColor, isRunning, buttons, playButton, ext
   // case.
   const runnableNow = isRunMode && playStatus === 'ready' && !!playButton?.stepByStepStatus.canExecute;
 
-  const isRevealed = runnableNow || (hover ? hover.isVisible : true);
+  // Same reveal for a button that stands IN for the play. While one epoch is focused the
+  // normal play is gone (the run is read-only there) and FlowNode puts back a launcher as a
+  // plain button; without this it would only appear on hover, so the affordance the
+  // all-epochs view shows on its own would be hidden on exactly the view that needs it - and
+  // the pin/unpin sharing the bar would hide with it.
+  // Run mode only, exactly like `runnableNow`: the flag stands in for a RUN affordance, and
+  // the bar also carries the edit-only delete/duplicate. Without this gate a flagged
+  // edit-mode button would pin Trash and Copy permanently visible under every node.
+  const revealedByButton = isRunMode && !!buttons?.some(b => b.revealsBar);
+
+  const isRevealed = runnableNow || revealedByButton || (hover ? hover.isVisible : true);
   // Children re-enable pointer events only while revealed: a child with an
   // unconditional pointer-events-auto would stay clickable through the
   // invisible (opacity-0) bar.
@@ -179,6 +198,9 @@ export function NodeBottomBar({ borderColor, isRunning, buttons, playButton, ext
           className={`${canvasNodeButtonClass} ${interactiveCls}`}
           style={borderStyle}
           title={title}
+          // Keyed, not titled: the title is translated, so a test that matched on it would
+          // pass in English and fail in every other locale.
+          data-testid={`node-bar-${key}`}
         >
           {(shimmer ?? isRunning) && <ShimmerOverlay color={shimmerColor ?? 'rgba(59, 130, 246, 0.3)'} />}
           <span className="relative z-10">{icon}</span>

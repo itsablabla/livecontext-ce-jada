@@ -507,7 +507,12 @@ public class AgentPublicationService {
             agentData.put("scheduleConfig", scheduleSnapshot);
         }
 
-        // Skills
+        // Skills. Long-term memory is deliberately absent from this snapshot and
+        // must stay absent: a marketplace listing is the agent's configuration,
+        // published to strangers, whereas memory holds facts about the publisher's
+        // own workspace and the people in it. Shipping it would leak private
+        // context into a public artifact - which is also why nothing here should
+        // ever "helpfully" start including it.
         List<AgentSkillDto> skills = agentClient.getSkillsForAgent(agentConfigId, tenantId, organizationId);
         if (!skills.isEmpty()) {
             List<Map<String, Object>> skillSnapshots = new ArrayList<>();
@@ -1175,7 +1180,7 @@ public class AgentPublicationService {
         // legacy no-helper branch below is covered by the same rule, matching
         // WorkflowPublicationService and ResourcePublicationService.
         if (ceExclusiveGuard != null) {
-            ceExclusiveGuard.check(publication);
+            ceExclusiveGuard.check(publication, tenantId);
         }
 
         if (acquisitionHelper != null) {

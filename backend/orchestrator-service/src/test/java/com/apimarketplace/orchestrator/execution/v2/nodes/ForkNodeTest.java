@@ -685,6 +685,48 @@ class ForkNodeTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // resolved_params - what the inspector's Params column reads back
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("resolved_params reporting")
+    class ResolvedParamsTests {
+
+        @Test
+        @DisplayName("Should report the branch count as forkOutputs, the plan's key name")
+        void shouldReportBranchCountAsForkOutputs() {
+            ForkNode node = ForkNode.builder()
+                .nodeId("core:fork")
+                .addBranch("branch_0", "Branch A")
+                .addBranch("branch_1", "Branch B")
+                .build();
+
+            NodeExecutionResult result = node.execute(context);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+            // A fork's only configuration is how many outputs it has, and the plan
+            // calls that `forkOutputs`. `branch_count` already exists in the output
+            // as an OUTPUT field; the Params column reads this map, not that one.
+            assertEquals(2, params.get("forkOutputs"));
+        }
+
+        @Test
+        @DisplayName("Should report forkOutputs even for a fork with no branch wired yet")
+        void shouldReportForkOutputsWithNoBranches() {
+            ForkNode node = ForkNode.builder().nodeId("core:fork").build();
+
+            NodeExecutionResult result = node.execute(context);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> params = (Map<String, Object>) result.output().get("resolved_params");
+            // Zero is a real answer here: "this fork activates nothing" is exactly
+            // what the reader needs, and an absent key would read as "not reported".
+            assertEquals(0, params.get("forkOutputs"));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Helper methods
     // ═══════════════════════════════════════════════════════════════════════════
 

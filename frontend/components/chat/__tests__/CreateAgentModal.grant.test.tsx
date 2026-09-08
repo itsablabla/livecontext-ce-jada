@@ -58,7 +58,7 @@ vi.mock('@/lib/api/storage-api', () => ({
 // Hoisted so the (hoisted) vi.mock factory below can reference it safely.
 // `createAgent` is captured here so the state→payload SEAM test can read back the
 // exact toolsConfig the modal built and submitted.
-const { WORKFLOWS, getWorkflowsPageMock, createAgentMock } = vi.hoisted(() => {
+const { WORKFLOWS, getWorkflowsPageMock, createAgentMock, updateAgentMock } = vi.hoisted(() => {
   const WORKFLOWS = [{ id: 'wf-1', name: 'Daily Report' }];
   return {
     WORKFLOWS,
@@ -72,6 +72,7 @@ const { WORKFLOWS, getWorkflowsPageMock, createAgentMock } = vi.hoisted(() => {
       size: 100,
     }),
     createAgentMock: vi.fn().mockResolvedValue({ id: 'created-agent-1' }),
+    updateAgentMock: vi.fn().mockResolvedValue({ id: 'created-agent-1' }),
   };
 });
 
@@ -89,7 +90,7 @@ vi.mock('@/lib/api/orchestrator', () => ({
     getWidgetConfig: vi.fn().mockResolvedValue(null),
     // Submit path (CREATE): handleSave → createAgent(payload) → setAgentSkills(id, []).
     createAgent: createAgentMock,
-    updateAgent: vi.fn().mockResolvedValue({ id: 'created-agent-1' }),
+    updateAgent: updateAgentMock,
     setAgentSkills: vi.fn().mockResolvedValue(undefined),
   },
 }));
@@ -357,5 +358,73 @@ describe('CreateAgentModal - per-family grant selector + decoupled R/W pill', ()
     expect(payload.toolsConfig.workflows).toEqual([]);
     // Untouched families stay denied - proves the switch was scoped to workflows only.
     expect(payload.toolsConfig.tablesGrant).toBe('none');
+  });
+});
+
+/**
+ * The long-term memory read/write axis.
+ *
+ * It sits outside the resource-access popover on purpose: memory has no id list
+ * to scope, only this axis. Hydrating it matters more than for the families
+ * above, because `buildToolsConfigPayload` rebuilds the whole tools_config from
+ * the form's state: a mode the form fails to read back is not merely displayed
+ * wrong, it is OVERWRITTEN on the next save, so a recall-only agent regains write
+ * access because somebody opened it and pressed Update. And a memory write is not
+ * scoped to the agent that made it - what one agent saves is injected into every
+ * agent in the workspace.
+ */
+describe('CreateAgentModal - long-term memory read/write axis', () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanup());
+
+  const submit = async () => {
+    // The control lives on step 2; the save button is on step 3.
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Update Agent|Create Agent/ }));
+  };
+
+  const emittedToolsConfig = () =>
+    (updateAgentMock.mock.calls[0][1] as { toolsConfig?: Record<string, unknown> }).toolsConfig ?? {};
+
+  it('hydrates the control from a stored recall-only mode instead of the write default', async () => {
+    renderModal({ id: 'a-mem-r', name: 'A', toolsConfig: { mode: 'all', memoryAccessMode: 'read' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('modals.createAgent.memoryAccessRead')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('modals.createAgent.memoryAccessWrite')).not.toBeInTheDocument();
+  });
+
+  it('shows full write for an agent saved before the mode existed, matching the backend default', async () => {
+    // Absent is not "restricted": the backend allows the write when no mode is set,
+    // so showing recall-only here would report a restriction nothing is enforcing.
+    renderModal({ id: 'a-mem-w', name: 'A', toolsConfig: { mode: 'all' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('modals.createAgent.memoryAccessWrite')).toBeInTheDocument();
+    });
+  });
+
+  it('carries the hydrated mode back into the update payload, rather than resetting it', async () => {
+    renderModal({ id: 'a-mem-rt', name: 'A', toolsConfig: { mode: 'all', memoryAccessMode: 'read' } });
+    await screen.findByText('modals.createAgent.memoryAccessRead');
+
+    await submit();
+
+    // The round trip is the point: opening an agent and saving it without touching
+    // this control has to leave it exactly as it was.
+    await waitFor(() => expect(updateAgentMock).toHaveBeenCalledTimes(1));
+    expect(emittedToolsConfig().memoryAccessMode).toBe('read');
+  });
+
+  it('emits the flipped mode once the control is toggled', async () => {
+    renderModal({ id: 'a-mem-t', name: 'A', toolsConfig: { mode: 'all', memoryAccessMode: 'read' } });
+    fireEvent.click(await screen.findByText('modals.createAgent.memoryAccessRead'));
+    await screen.findByText('modals.createAgent.memoryAccessWrite');
+
+    await submit();
+
+    await waitFor(() => expect(updateAgentMock).toHaveBeenCalledTimes(1));
+    expect(emittedToolsConfig().memoryAccessMode).toBe('write');
   });
 });

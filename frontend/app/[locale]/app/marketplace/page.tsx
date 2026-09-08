@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { useOrgScopedReset } from '@/lib/hooks/useOrgScopedReset';
-import { Search, Package, ShoppingBag, Bot, Zap, Monitor, Table, AppWindow, Eye, Cloud, ArrowUpDown, Star, CalendarDays, Coins } from 'lucide-react';
+import { Search, Package, ShoppingBag, Bot, Zap, Monitor, Table, AppWindow, Eye, Cloud, ArrowUpDown, Star, CalendarDays, Coins, Clapperboard, X } from 'lucide-react';
 import { useTranslations, useLocale } from 'next-intl';
 import { orchestratorApi, WorkflowPublication } from '@/lib/api';
 import { publicationService } from '@/lib/api/orchestrator/publication.service';
@@ -27,6 +27,7 @@ import { clearModelsCache } from '@/hooks/useModels';
 import { PublicationCard, PublicationCardSkeleton } from '@/components/marketplace/PublicationCard';
 import type { MarketplaceRefinements } from '@/lib/api/orchestrator/publication.service';
 import { samePageUrl, showSamePageUrl } from '@/lib/navigation/showSamePageUrl';
+import { track } from '@/lib/analytics/analytics';
 
 // Card + preview helpers extracted to a shared component so the onboarding
 // "suggested apps" modal reuses the exact same markup (no style fork).
@@ -245,6 +246,11 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>();
+  // The studio shelf, a SECOND AXIS read straight off the URL rather than held in state: it is how
+  // the studio surface links here, and it composes with whatever category is also selected. Kept out
+  // of state so a shared link opens the same shelf the sender was looking at.
+  const marketplaceSearchParams = useSearchParams();
+  const studioOnly = marketplaceSearchParams.get('studio') === 'true';
   const [error, setError] = useState<string | null>(null);
   const [acquireTarget, setAcquireTarget] = useState<WorkflowPublication | null>(null);
   const [acquiredIds, setAcquiredIds] = useState<Set<string>>(new Set());
@@ -423,18 +429,38 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
     try {
       if (query) {
         const results = remote
-          ? await publicationService.searchRemotePublications(query, selectedCategory, refinements)
-          : await orchestratorApi.searchPublications(query, selectedCategory, refinements);
+          // The axis travels with the query: searching inside the Studio shelf must narrow it, not
+          // reset it to the whole marketplace.
+          ? await publicationService.searchRemotePublications(query, selectedCategory, refinements, studioOnly)
+          : await orchestratorApi.searchPublications(query, selectedCategory, refinements, studioOnly);
         if (requestId !== latestRequestRef.current) return;
         const found = results?.publications || [];
         setPublications(found);
         setTotalCount(found.length);
         setPage(0);
+        // A search is one unpaginated call, so this is one event per query
+        // (never per scroll page). Length only, never the text.
+        track('marketplace_searched', {
+          query_length: query.length,
+          result_count: found.length,
+          category_slug: selectedCategory ?? null,
+          display_filter: displayFilter,
+        });
         return;
       }
       const response = remote
-        ? await publicationService.getRemoteMarketplacePublications(targetPage, PAGE_SIZE, selectedCategory, refinements)
-        : await orchestratorApi.getMarketplacePublications(targetPage, PAGE_SIZE, selectedCategory, refinements);
+        // The axis is passed ONLY on the studio shelf. Passing `undefined` explicitly would still be
+        // a fifth argument, and the ordinary marketplace call is meant to be the call it always was.
+        ? (studioOnly
+            ? await publicationService.getRemoteMarketplacePublications(
+                targetPage, PAGE_SIZE, selectedCategory, refinements, true)
+            : await publicationService.getRemoteMarketplacePublications(
+                targetPage, PAGE_SIZE, selectedCategory, refinements))
+        : (studioOnly
+            ? await orchestratorApi.getMarketplacePublications(
+                targetPage, PAGE_SIZE, selectedCategory, refinements, true)
+            : await orchestratorApi.getMarketplacePublications(
+                targetPage, PAGE_SIZE, selectedCategory, refinements));
       if (requestId !== latestRequestRef.current) return;
       const batch = response.publications || [];
       // Functional update: a "Load more" resolving after another state change
@@ -453,12 +479,42 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
         setIsLoadingMore(false);
       }
     }
-  }, [remote, searchQuery, selectedCategory, refinements, t]);
+  }, [remote, searchQuery, selectedCategory, refinements, t, displayFilter, studioOnly]);
 
   const handleCategoryChange = useCallback((categorySlug?: string) => {
     setSelectedCategory(categorySlug);
     setSearchQuery('');
+    track('marketplace_filtered', { filter: 'category', value: categorySlug ?? null });
   }, []);
+
+  // One tracked setter per refinement control: the value is a bounded option key.
+  const trackFilter = useCallback((filter: string, value: string | null) => {
+    track('marketplace_filtered', { filter, value });
+  }, []);
+  const handleDisplayFilterChange = useCallback((next: DisplayFilter) => {
+    setDisplayFilter(next);
+    trackFilter('type', next);
+  }, [setDisplayFilter, trackFilter]);
+  const handleSortChange = useCallback((next: SortOption) => {
+    setSortOption(next);
+    trackFilter('sort', next);
+  }, [setSortOption, trackFilter]);
+  const handleRatingChange = useCallback((next: RatingFilter) => {
+    setRatingFilter(next);
+    trackFilter('rating', next);
+  }, [setRatingFilter, trackFilter]);
+  const handleDateChange = useCallback((next: DateFilter) => {
+    setDateFilter(next);
+    trackFilter('date', next);
+  }, [setDateFilter, trackFilter]);
+  const handlePriceChange = useCallback((next: PriceFilter) => {
+    setPriceFilter(next);
+    trackFilter('price', next);
+  }, [setPriceFilter, trackFilter]);
+  const handleResetRefinements = useCallback(() => {
+    resetRefinements();
+    trackFilter('reset', null);
+  }, [resetRefinements, trackFilter]);
 
   const initialLoadDone = useRef(false);
   // Sequence number of the most recent grid request (see loadPage).
@@ -467,6 +523,19 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
   useEffect(() => {
     if (!isAuthLoading) fetchAcquiredIds();
   }, [isAuthLoading, fetchAcquiredIds]);
+
+  // One view event per mount, once auth has resolved so is_authenticated is real.
+  const viewTrackedRef = useRef(false);
+  useEffect(() => {
+    if (isAuthLoading || viewTrackedRef.current) return;
+    viewTrackedRef.current = true;
+    track('marketplace_viewed', {
+      display_filter: displayFilter,
+      sort: sortOption,
+      is_authenticated: isAuthenticated,
+      remote,
+    });
+  }, [isAuthLoading, displayFilter, sortOption, isAuthenticated, remote]);
 
   // Any change to what is being asked for - query, category, or a refinement -
   // reloads from page 0, since `loadPage` closes over all three.
@@ -569,7 +638,7 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
         {/* Resource type - the grid is always scoped to a single type. A select
             rather than chips so it reads as the sibling filter of the category
             one it sits next to (icons mirror the left sidebar). */}
-        <Select value={displayFilter} onValueChange={(v) => setDisplayFilter(v as DisplayFilter)}>
+        <Select value={displayFilter} onValueChange={(v) => handleDisplayFilterChange(v as DisplayFilter)}>
           <SelectTrigger
             className="h-9 w-40 rounded-xl bg-theme-primary border-theme"
             aria-label={t('filterByType')}
@@ -600,7 +669,7 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
             how to rank, then how good, then how fresh, then how much. */}
         <RefinementSelect
           value={sortOption}
-          onChange={setSortOption}
+          onChange={handleSortChange}
           options={SORT_OPTIONS}
           optionLabel={sortLabel}
           ariaLabel={t('sortBy')}
@@ -609,7 +678,7 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
         />
         <RefinementSelect
           value={ratingFilter}
-          onChange={setRatingFilter}
+          onChange={handleRatingChange}
           options={RATING_FILTERS}
           optionLabel={ratingLabel}
           ariaLabel={t('filterByRating')}
@@ -618,7 +687,7 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
         />
         <RefinementSelect
           value={dateFilter}
-          onChange={setDateFilter}
+          onChange={handleDateChange}
           options={DATE_FILTERS}
           optionLabel={dateLabel}
           ariaLabel={t('filterByDate')}
@@ -627,7 +696,7 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
         />
         <RefinementSelect
           value={priceFilter}
-          onChange={setPriceFilter}
+          onChange={handlePriceChange}
           options={PRICE_FILTERS}
           optionLabel={priceLabel}
           ariaLabel={t('filterByPrice')}
@@ -637,7 +706,7 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
         {hasActiveRefinement && (
           <button
             type="button"
-            onClick={resetRefinements}
+            onClick={handleResetRefinements}
             data-testid="marketplace-reset-filters"
             className="h-9 px-3 rounded-xl text-sm text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary transition-colors"
           >
@@ -697,7 +766,7 @@ function ExploreTab({ remote = false }: { remote?: boolean }) {
               <p className="text-sm text-theme-secondary max-w-sm mb-4">{t('noFilterResultsHint')}</p>
               <button
                 type="button"
-                onClick={resetRefinements}
+                onClick={handleResetRefinements}
                 data-testid="marketplace-reset-filters-empty"
                 className="h-9 px-4 rounded-xl text-sm font-medium bg-theme-tertiary text-theme-primary hover:bg-theme-secondary transition-colors"
               >
@@ -1204,6 +1273,13 @@ type MarketplaceTab = (typeof MARKETPLACE_TABS)[number];
 function MarketplacePageContent({ remote = false }: { remote?: boolean }) {
   const t = useTranslations('marketplace');
   const { isAuthenticated } = useAuth();
+  // Read here as well as in ExploreTab: the grid needs the axis to FETCH with it, and the header
+  // needs it to SAY so. Both read the URL rather than sharing state, so a shared link opens the
+  // same shelf the sender was looking at.
+  const marketplaceSearchParams = useSearchParams();
+  const studioOnly = marketplaceSearchParams.get('studio') === 'true';
+  const marketplacePathname = usePathname();
+  const router = useRouter();
   const [requestedTab, setActiveTab] = useQueryParamState<MarketplaceTab>('tab', MARKETPLACE_TABS, 'explore');
 
   // Defensive: if the user signs out while on a private tab, or deep-links to
@@ -1229,8 +1305,29 @@ function MarketplacePageContent({ remote = false }: { remote?: boolean }) {
                 {t('title')}
               </h1>
               <p className="text-sm text-theme-secondary mt-0.5">
-                {t('subtitle')}
+                {studioOnly ? t('studioSubtitle') : t('subtitle')}
               </p>
+              {/* The narrowing, said out loud. Without this the grid is a marketplace missing most
+                  of itself: the category chips still read "All", nothing names the axis, and a
+                  visitor who arrived on a shared link has no way to know what they are not seeing,
+                  nor how to see it. The chip is therefore also the way OUT of the shelf. */}
+              {studioOnly && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = new URLSearchParams(marketplaceSearchParams.toString());
+                    next.delete('studio');
+                    const qs = next.toString();
+                    router.replace(qs ? `${marketplacePathname}?${qs}` : marketplacePathname);
+                  }}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[var(--accent-primary)] bg-[var(--accent-primary)]/10 px-3 py-1 text-sm text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20 transition-colors"
+                >
+                  <Clapperboard className="h-3.5 w-3.5" />
+                  {t('studioFilterChip')}
+                  <X className="h-3.5 w-3.5" />
+                  <span className="sr-only">{t('studioFilterClear')}</span>
+                </button>
+              )}
             </div>
 
             {/* Tab bar - My Publications / My Purchases are hidden for anonymous

@@ -24,15 +24,21 @@ import {
   Mail
 } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import {
+  buildFirstBuildPrompt,
+  clearFirstBuildPrompt,
+  storeFirstBuildPrompt,
+} from '@/lib/onboarding/firstBuildPrompt';
 
 // Types
 interface OnboardingData {
   displayName: string;
   profession: string;
   companySize: string;
-  interests: string[];
-  useCases: string[];
-  experienceLevel: string;
+  primaryGoal: string;
+  toolsUsed: string[];
+  previousTool: string;
+  referralSource: string;
   currentStep: number;
 }
 
@@ -45,9 +51,10 @@ interface OnboardingResponse {
   displayName?: string;
   profession?: string;
   companySize?: string;
-  interests?: string[];
-  useCases?: string[];
-  experienceLevel?: string;
+  primaryGoal?: string | null;
+  toolsUsed?: string[];
+  previousTool?: string | null;
+  referralSource?: string | null;
 }
 
 // Constants
@@ -95,47 +102,20 @@ const CE_ROLES = [
   { value: 'other', labelKey: 'ce.roles.other' },
 ];
 
-// Interests - broader categories
-const INTERESTS = [
-  { value: 'automation', labelKey: 'interests.automation' },
-  { value: 'ai-ml', labelKey: 'interests.aiMl' },
-  { value: 'data-analytics', labelKey: 'interests.dataAnalytics' },
-  { value: 'integrations', labelKey: 'interests.integrations' },
-  { value: 'productivity', labelKey: 'interests.productivity' },
-  { value: 'business-intelligence', labelKey: 'interests.businessIntelligence' },
-  { value: 'customer-experience', labelKey: 'interests.customerExperience' },
-  { value: 'sales-crm', labelKey: 'interests.salesCrm' },
-  { value: 'marketing-automation', labelKey: 'interests.marketingAutomation' },
-  { value: 'ecommerce-tools', labelKey: 'interests.ecommerceTools' },
-  { value: 'other', labelKey: 'interests.other' },
+// Primary goal - the ONE thing the user wants to automate first (single choice)
+const PRIMARY_GOALS = [
+  { value: 'email-follow-ups', labelKey: 'primaryGoals.emailFollowUps' },
+  { value: 'content-publishing', labelKey: 'primaryGoals.contentPublishing' },
+  { value: 'lead-generation', labelKey: 'primaryGoals.leadGeneration' },
+  { value: 'customer-support', labelKey: 'primaryGoals.customerSupport' },
+  { value: 'reporting', labelKey: 'primaryGoals.reporting' },
+  { value: 'data-sync', labelKey: 'primaryGoals.dataSync' },
+  { value: 'monitoring-alerts', labelKey: 'primaryGoals.monitoringAlerts' },
+  { value: 'ai-assistant', labelKey: 'primaryGoals.aiAssistant' },
+  { value: 'other', labelKey: 'primaryGoals.other' },
 ];
 
-const CE_INTERESTS = [
-  { value: 'self-hosted-agents', labelKey: 'ce.interests.selfHostedAgents' },
-  { value: 'local-automation', labelKey: 'ce.interests.localAutomation' },
-  { value: 'private-data', labelKey: 'ce.interests.privateData' },
-  { value: 'integrations', labelKey: 'ce.interests.integrations' },
-  { value: 'team-workflows', labelKey: 'ce.interests.teamWorkflows' },
-  { value: 'local-marketplace', labelKey: 'ce.interests.localMarketplace' },
-  { value: 'governance', labelKey: 'ce.interests.governance' },
-  { value: 'other', labelKey: 'ce.interests.other' },
-];
-
-// Use cases - broader applications
-const USE_CASES = [
-  { value: 'workflow-automation', labelKey: 'useCases.workflowAutomation' },
-  { value: 'chatbots-assistants', labelKey: 'useCases.chatbotsAssistants' },
-  { value: 'data-integration', labelKey: 'useCases.dataIntegration' },
-  { value: 'content-generation', labelKey: 'useCases.contentGeneration' },
-  { value: 'lead-generation', labelKey: 'useCases.leadGeneration' },
-  { value: 'customer-support', labelKey: 'useCases.customerSupport' },
-  { value: 'reporting-dashboards', labelKey: 'useCases.reportingDashboards' },
-  { value: 'ecommerce-automation', labelKey: 'useCases.ecommerceAutomation' },
-  { value: 'team-collaboration', labelKey: 'useCases.teamCollaboration' },
-  { value: 'monitoring-alerts', labelKey: 'useCases.monitoringAlerts' },
-  { value: 'other', labelKey: 'useCases.other' },
-];
-
+// CE primary goals reuse the self-hosted use-case vocabulary (single choice)
 const CE_USE_CASES = [
   { value: 'internal-automation', labelKey: 'ce.useCases.internalAutomation' },
   { value: 'private-assistants', labelKey: 'ce.useCases.privateAssistants' },
@@ -147,59 +127,61 @@ const CE_USE_CASES = [
   { value: 'other', labelKey: 'ce.useCases.other' },
 ];
 
-// Experience levels - more universal
-const EXPERIENCE_LEVELS = [
-  { value: 'beginner', labelKey: 'experience.beginner', descKey: 'experience.beginnerDesc' },
-  { value: 'intermediate', labelKey: 'experience.intermediate', descKey: 'experience.intermediateDesc' },
-  { value: 'advanced', labelKey: 'experience.advanced', descKey: 'experience.advancedDesc' },
+// Tools the user already works with (multi choice, both editions)
+const TOOLS = [
+  { value: 'gmail', labelKey: 'tools.gmail' },
+  { value: 'outlook', labelKey: 'tools.outlook' },
+  { value: 'google-sheets', labelKey: 'tools.googleSheets' },
+  { value: 'slack', labelKey: 'tools.slack' },
+  { value: 'notion', labelKey: 'tools.notion' },
+  { value: 'hubspot', labelKey: 'tools.hubspot' },
+  { value: 'salesforce', labelKey: 'tools.salesforce' },
+  { value: 'shopify', labelKey: 'tools.shopify' },
+  { value: 'stripe', labelKey: 'tools.stripe' },
+  { value: 'github', labelKey: 'tools.github' },
+  { value: 'discord', labelKey: 'tools.discord' },
+  { value: 'telegram', labelKey: 'tools.telegram' },
+  { value: 'linkedin', labelKey: 'tools.linkedin' },
+  { value: 'airtable', labelKey: 'tools.airtable' },
+  { value: 'other', labelKey: 'tools.other' },
 ];
 
-const CE_EXPERIENCE_LEVELS = [
-  { value: 'first-install', labelKey: 'ce.experience.firstInstall', descKey: 'ce.experience.firstInstallDesc' },
-  { value: 'operator', labelKey: 'ce.experience.operator', descKey: 'ce.experience.operatorDesc' },
-  { value: 'power-user', labelKey: 'ce.experience.powerUser', descKey: 'ce.experience.powerUserDesc' },
+// What the user automates with today (single choice, both editions)
+const PREVIOUS_TOOLS = [
+  { value: 'none', labelKey: 'previousTools.none' },
+  { value: 'zapier-make', labelKey: 'previousTools.zapierMake' },
+  { value: 'n8n', labelKey: 'previousTools.n8n' },
+  { value: 'custom-code', labelKey: 'previousTools.customCode' },
+  { value: 'other-platform', labelKey: 'previousTools.otherPlatform' },
+];
+
+// How the user heard about LiveContext (single choice, both editions)
+const REFERRAL_SOURCES = [
+  { value: 'search', labelKey: 'referralSources.search' },
+  { value: 'social', labelKey: 'referralSources.social' },
+  { value: 'word-of-mouth', labelKey: 'referralSources.wordOfMouth' },
+  { value: 'github', labelKey: 'referralSources.github' },
+  { value: 'article', labelKey: 'referralSources.article' },
+  { value: 'ai-assistant', labelKey: 'referralSources.aiAssistant' },
+  { value: 'other', labelKey: 'referralSources.other' },
 ];
 
 const valuesOf = (options: Array<{ value: string }>) => new Set(options.map(option => option.value));
 
-const normalizeSelection = (value: string | undefined, allowedValues: Set<string>): string => {
+const normalizeSelection = (value: string | null | undefined, allowedValues: Set<string>): string => {
   if (!value) return '';
   return allowedValues.has(value) ? value : '';
 };
 
-const normalizeSelectionsWithCustomValue = (
-  values: string[] | undefined,
-  allowedValues: Set<string>,
-  knownValues: Set<string>,
-): { values: string[]; customValue: string } => {
-  if (!values) {
-    return { values: [], customValue: '' };
-  }
-
-  const normalizedValues: string[] = [];
-  let customValue = '';
-
+const normalizeSelections = (values: string[] | undefined, allowedValues: Set<string>): string[] => {
+  if (!values) return [];
+  const normalized: string[] = [];
   for (const value of values) {
-    if (allowedValues.has(value)) {
-      if (!normalizedValues.includes(value)) {
-        normalizedValues.push(value);
-      }
-      continue;
-    }
-
-    if (knownValues.has(value)) {
-      continue;
-    }
-
-    if (!customValue) {
-      customValue = value;
-    }
-    if (!normalizedValues.includes('other')) {
-      normalizedValues.push('other');
+    if (allowedValues.has(value) && !normalized.includes(value)) {
+      normalized.push(value);
     }
   }
-
-  return { values: normalizedValues, customValue };
+  return normalized;
 };
 
 const ROLE_VALUES = valuesOf(ROLES);
@@ -207,16 +189,13 @@ const CE_ROLE_VALUES = valuesOf(CE_ROLES);
 const ALL_ROLE_VALUES = new Set([...ROLE_VALUES, ...CE_ROLE_VALUES]);
 const COMPANY_SIZE_VALUES = valuesOf(COMPANY_SIZES);
 const CE_TEAM_SIZE_VALUES = valuesOf(CE_TEAM_SIZES);
-const INTEREST_VALUES = valuesOf(INTERESTS);
-const CE_INTEREST_VALUES = valuesOf(CE_INTERESTS);
-const ALL_INTEREST_VALUES = new Set([...INTEREST_VALUES, ...CE_INTEREST_VALUES]);
-const GOAL_VALUES = valuesOf(USE_CASES);
+const GOAL_VALUES = valuesOf(PRIMARY_GOALS);
 const CE_GOAL_VALUES = valuesOf(CE_USE_CASES);
-const ALL_GOAL_VALUES = new Set([...GOAL_VALUES, ...CE_GOAL_VALUES]);
-const EXPERIENCE_VALUES = valuesOf(EXPERIENCE_LEVELS);
-const CE_EXPERIENCE_VALUES = valuesOf(CE_EXPERIENCE_LEVELS);
+const TOOL_VALUES = valuesOf(TOOLS);
+const PREVIOUS_TOOL_VALUES = valuesOf(PREVIOUS_TOOLS);
+const REFERRAL_SOURCE_VALUES = valuesOf(REFERRAL_SOURCES);
 
-const ONBOARDING_STEPS = 3; // Steps 1-3 (profile, interests, goals)
+const ONBOARDING_STEPS = 3; // Steps 1-3 (profile, first goal + tools, previous tool + referral)
 const RESEND_COOLDOWN_SECONDS = 60;
 
 type PageState = 'loading' | 'needs_auth' | 'ready' | 'completed' | 'error';
@@ -248,8 +227,6 @@ export default function OnboardingPage() {
   const [checkingDisplayName, setCheckingDisplayName] = useState(false);
   const [displayNameAvailable, setDisplayNameAvailable] = useState(false);
   const [customRole, setCustomRole] = useState('');
-  const [customInterest, setCustomInterest] = useState('');
-  const [customUseCase, setCustomUseCase] = useState('');
   const initRef = useRef(false);
 
   // Email verification state
@@ -266,31 +243,25 @@ export default function OnboardingPage() {
     displayName: '',
     profession: '',
     companySize: '',
-    interests: [],
-    useCases: [],
-    experienceLevel: '',
+    primaryGoal: '',
+    toolsUsed: [],
+    previousTool: '',
+    referralSource: '',
     currentStep: 0,
   });
 
   const emailCodeFlowEnabled = !IS_CE;
   const roles = IS_CE ? CE_ROLES : ROLES;
-  const interests = IS_CE ? CE_INTERESTS : INTERESTS;
-  const goalOptions = IS_CE ? CE_USE_CASES : USE_CASES;
-  const experienceLevels = IS_CE ? CE_EXPERIENCE_LEVELS : EXPERIENCE_LEVELS;
+  const goalOptions = IS_CE ? CE_USE_CASES : PRIMARY_GOALS;
   const companySizes = IS_CE ? CE_TEAM_SIZES : COMPANY_SIZES;
   const roleValues = IS_CE ? CE_ROLE_VALUES : ROLE_VALUES;
   const companySizeValues = IS_CE ? CE_TEAM_SIZE_VALUES : COMPANY_SIZE_VALUES;
-  const interestValues = IS_CE ? CE_INTEREST_VALUES : INTEREST_VALUES;
   const goalValues = IS_CE ? CE_GOAL_VALUES : GOAL_VALUES;
-  const experienceValues = IS_CE ? CE_EXPERIENCE_VALUES : EXPERIENCE_VALUES;
-  const selectedGoalValues = data.useCases;
-  let shouldShowCustomGoal = false;
-  for (const value of selectedGoalValues) {
-    if (value === 'other') {
-      shouldShowCustomGoal = true;
-      break;
-    }
-  }
+
+  // Per-step completion rules (skip stays possible at any step)
+  const step1Valid = Boolean(data.displayName.trim()) && displayNameAvailable;
+  const step2Valid = Boolean(data.primaryGoal);
+  const step3Valid = Boolean(data.previousTool) && Boolean(data.referralSource);
 
   // Determine the first step and total steps based on email verification
   const firstStep = emailCodeFlowEnabled && emailVerified === false ? 0 : 1;
@@ -376,32 +347,22 @@ export default function OnboardingPage() {
           const profession = response!.profession || '';
           const professionIsOption = roleValues.has(profession);
           const professionIsCustom = Boolean(profession) && !ALL_ROLE_VALUES.has(profession);
-          const restoredInterests = normalizeSelectionsWithCustomValue(
-            response!.interests,
-            interestValues,
-            ALL_INTEREST_VALUES,
-          );
-          const restoredUseCases = normalizeSelectionsWithCustomValue(
-            response!.useCases,
-            goalValues,
-            ALL_GOAL_VALUES,
-          );
 
           setData(prev => ({
             ...prev,
             displayName: sanitizeDisplayName(response!.displayName || ''),
             profession: professionIsOption ? profession : professionIsCustom ? 'other' : '',
             companySize: normalizeSelection(response!.companySize, companySizeValues),
-            interests: restoredInterests.values,
-            useCases: restoredUseCases.values,
-            experienceLevel: normalizeSelection(response!.experienceLevel, experienceValues),
+            // A goal saved under the other edition is dropped (its option is not shown here)
+            primaryGoal: normalizeSelection(response!.primaryGoal, goalValues),
+            toolsUsed: normalizeSelections(response!.toolsUsed, TOOL_VALUES),
+            previousTool: normalizeSelection(response!.previousTool, PREVIOUS_TOOL_VALUES),
+            referralSource: normalizeSelection(response!.referralSource, REFERRAL_SOURCE_VALUES),
           }));
           // Restore custom role if profession was custom
           if (professionIsCustom) {
             setCustomRole(profession);
           }
-          setCustomInterest(restoredInterests.customValue);
-          setCustomUseCase(restoredUseCases.customValue);
           const restoredStep = response.currentStep > 0 ? response.currentStep : 1;
           setCurrentStep(emailCodeFlowEnabled && !isVerified ? 0 : restoredStep);
         } else {
@@ -432,9 +393,7 @@ export default function OnboardingPage() {
     roles,
     roleValues,
     companySizeValues,
-    interestValues,
     goalValues,
-    experienceValues,
   ]);
 
   // Auto-send code on mount when step 0 is shown (respects cooldown across page refreshes)
@@ -625,17 +584,17 @@ export default function OnboardingPage() {
         ? customRole.trim()
         : data.profession;
 
-      // Replace "other" in interests with custom interest text
-      const interestsToSave = data.interests.map(interest =>
-        interest === 'other' && customInterest.trim() ? customInterest.trim() : interest
-      );
-
-      // Replace "other" in useCases with custom use case text
-      const useCasesToSave = data.useCases.map(useCase =>
-        useCase === 'other' && customUseCase.trim() ? customUseCase.trim() : useCase
-      );
-
-      await apiClient.post(endpoint, { ...data, profession: professionToSave, interests: interestsToSave, useCases: useCasesToSave, currentStep });
+      // Persona answers are bounded option values only (no free text besides the role).
+      await apiClient.post(endpoint, {
+        displayName: data.displayName,
+        profession: professionToSave,
+        companySize: data.companySize,
+        primaryGoal: data.primaryGoal || null,
+        toolsUsed: data.toolsUsed,
+        previousTool: data.previousTool || null,
+        referralSource: data.referralSource || null,
+        currentStep,
+      });
 
       if (complete) {
         // Invalidate cache so FirstLoginGuard knows onboarding is complete
@@ -655,14 +614,45 @@ export default function OnboardingPage() {
         // Also invalidate to trigger a background refetch with complete server data
         queryClient.invalidateQueries({ queryKey: ['user', 'profile'] });
         setPageState('completed');
+        // Propose the first build in the chat composer. Null (and nothing
+        // written) when the answers were too generic to write a useful
+        // sentence, e.g. the "Something else" goal.
+        //
+        // Wrapped on its own because the completion has ALREADY succeeded, both
+        // server-side and on screen: `setPageState('completed')` ran a line
+        // above, which swaps the form for a spinner, and a separate effect
+        // redirects to chat on that state. So a throw here strands nobody and
+        // shows no error - it silently skips every statement below it, losing
+        // the `onboarding_completed` event, the proposal, and the
+        // suggested-apps hand-off on an account that finished correctly. A
+        // missing nicety must not take the rest of the hand-off with it.
+        let firstBuildPrompt: string | null = null;
+        try {
+          firstBuildPrompt = buildFirstBuildPrompt({
+            primaryGoal: data.primaryGoal,
+            toolsUsed: data.toolsUsed,
+            locale,
+            t,
+          });
+        } catch {
+          firstBuildPrompt = null;
+        }
         track('onboarding_completed', {
-          // Bounded category only ('other' when custom) - never the free-text
-          // role the user typed.
+          // Whether this account lands on a proposed first message or an empty
+          // composer - the one number that says whether the proposal reaches
+          // anybody, and the denominator for whatever they do with it.
+          // Same predicate `storeFirstBuildPrompt` applies, so the event and
+          // the slot cannot disagree about what counts as a proposal.
+          first_build_prompt_proposed: Boolean(firstBuildPrompt?.trim()),
+          // Bounded option values only ('other' when the role is custom) - never
+          // the free-text role the user typed.
           profession: data.profession || null,
-          use_case_count: useCasesToSave.length,
-          interest_count: interestsToSave.length,
+          primary_goal: data.primaryGoal || null,
+          tools_count: data.toolsUsed.length,
+          previous_tool: data.previousTool || null,
+          referral_source: data.referralSource || null,
         });
-        sessionStorage.setItem('lc_show_welcome_gift', '1');
+        storeFirstBuildPrompt(firstBuildPrompt);
         sessionStorage.setItem('lc_show_app_suggestions', '1');
         navigateToChat();
       }
@@ -703,7 +693,11 @@ export default function OnboardingPage() {
       queryClient.invalidateQueries({ queryKey: ['user', 'profile'] });
       setPageState('completed');
       track('onboarding_skipped', { skipped_at_step: currentStep });
-      sessionStorage.setItem('lc_show_welcome_gift', '1');
+      // No prompt on the skip path on purpose: the user told us nothing beyond
+      // a display name, so there is nothing to propose. Actively CLEAR instead
+      // of merely not writing: a proposal parked by an earlier completion in
+      // this tab would otherwise greet a user who just declined to answer.
+      clearFirstBuildPrompt();
       sessionStorage.setItem('lc_show_app_suggestions', '1');
       navigateToChat();
     } catch (err: any) {
@@ -718,8 +712,16 @@ export default function OnboardingPage() {
     // Step 0 is handled by OTP auto-submit, no manual next
     if (currentStep === 0) return;
 
-    if (currentStep === 1 && (!data.displayName.trim() || !displayNameAvailable)) {
+    if (currentStep === 1 && !step1Valid) {
       setError(t('displayNameRequired'));
+      return;
+    }
+    if (currentStep === 2 && !step2Valid) {
+      setError(t('primaryGoalRequired'));
+      return;
+    }
+    if (currentStep === 3 && !step3Valid) {
+      setError(t('step3Required'));
       return;
     }
 
@@ -727,6 +729,8 @@ export default function OnboardingPage() {
     if (currentStep < lastStep) {
       await saveProgress();
       setCurrentStep(prev => prev + 1);
+      // onboarding_step_completed is emitted server-side by the save endpoint
+      // (single producer, so the funnel is not double-counted).
     } else {
       await saveProgress(true);
     }
@@ -737,16 +741,22 @@ export default function OnboardingPage() {
     if (currentStep > minStep) setCurrentStep(prev => prev - 1);
   };
 
-  // Toggle selection
-  const toggleSelection = (field: 'interests' | 'useCases', value: string) => {
+  // Toggle a multi-choice value
+  const toggleTool = (value: string) => {
     setData(prev => {
-      const current = prev[field];
-      const updated = current.includes(value)
-        ? current.filter(v => v !== value)
-        : [...current, value];
-      return { ...prev, [field]: updated };
+      const updated = prev.toolsUsed.includes(value)
+        ? prev.toolsUsed.filter(v => v !== value)
+        : [...prev.toolsUsed, value];
+      return { ...prev, toolsUsed: updated };
     });
   };
+
+  const chipClass = (selected: boolean) =>
+    `px-3 py-1.5 text-sm rounded-md border transition-colors ${
+      selected
+        ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)] border-transparent'
+        : 'border-theme hover:bg-theme-secondary text-theme-primary'
+    }`;
 
   // Login
   const handleLogin = () => {
@@ -1055,13 +1065,13 @@ export default function OnboardingPage() {
           </Card>
         )}
 
-        {/* Step 2: Interests */}
+        {/* Step 2: First goal + tools already in use */}
         {currentStep === 2 && (
           <Card className="border-theme animate-fade-in">
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center">
-                  <Sparkles className="h-5 w-5 text-theme-secondary" />
+                  <Target className="h-5 w-5 text-theme-secondary" />
                 </div>
                 <div>
                   <CardTitle className="text-lg">{IS_CE ? t('ce.step2.title') : t('step2.title')}</CardTitle>
@@ -1069,54 +1079,58 @@ export default function OnboardingPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {interests.map((interest) => (
-                  <button
-                    key={interest.value}
-                    type="button"
-                    onClick={() => {
-                      toggleSelection('interests', interest.value);
-                      // Clear custom interest if deselecting "other"
-                      if (interest.value === 'other' && data.interests.includes('other')) {
-                        setCustomInterest('');
-                      }
-                    }}
-                    className={`px-4 py-2 text-sm rounded-md border transition-colors ${
-                      data.interests.includes(interest.value)
-                        ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)] border-transparent'
-                        : 'border-theme hover:bg-theme-secondary text-theme-primary'
-                    }`}
-                  >
-                    {t(interest.labelKey)}
-                  </button>
-                ))}
-              </div>
-              {/* Custom interest input when "Other" is selected */}
-              {data.interests.includes('other') && (
-                <div className="mt-3">
-                  <Input
-                    type="text"
-                    value={customInterest}
-                    onChange={(e) => setCustomInterest(e.target.value)}
-                    placeholder={t('customInterestPlaceholder')}
-                    className="max-w-xs"
-                    maxLength={50}
-                    autoFocus
-                  />
+            <CardContent className="space-y-5">
+              {/* Primary goal (single choice) */}
+              <div className="space-y-2" role="group" aria-labelledby="onboarding-primary-goal-label">
+                <label id="onboarding-primary-goal-label" className="text-sm font-medium text-theme-primary">
+                  {IS_CE ? t('ce.primaryGoalLabel') : t('primaryGoalLabel')} <span className="text-red-500">*</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {goalOptions.map((goal) => (
+                    <button
+                      key={goal.value}
+                      type="button"
+                      aria-pressed={data.primaryGoal === goal.value}
+                      onClick={() => setData(prev => ({ ...prev, primaryGoal: goal.value }))}
+                      className={chipClass(data.primaryGoal === goal.value)}
+                    >
+                      {t(goal.labelKey)}
+                    </button>
+                  ))}
                 </div>
-              )}
+              </div>
+
+              {/* Tools already in use (multi choice, optional) */}
+              <div className="space-y-2" role="group" aria-labelledby="onboarding-tools-label">
+                <label id="onboarding-tools-label" className="text-sm font-medium text-theme-primary">
+                  {t('toolsUsedLabel')}
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {TOOLS.map((tool) => (
+                    <button
+                      key={tool.value}
+                      type="button"
+                      aria-pressed={data.toolsUsed.includes(tool.value)}
+                      onClick={() => toggleTool(tool.value)}
+                      className={chipClass(data.toolsUsed.includes(tool.value))}
+                    >
+                      {t(tool.labelKey)}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-theme-muted">{t('toolsUsedHint')}</p>
+              </div>
             </CardContent>
           </Card>
         )}
 
-        {/* Step 3: Goals */}
+        {/* Step 3: Previous tool + referral source */}
         {currentStep === 3 && (
           <Card className="border-theme animate-fade-in">
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-theme-secondary flex items-center justify-center">
-                  <Target className="h-5 w-5 text-theme-secondary" />
+                  <Sparkles className="h-5 w-5 text-theme-secondary" />
                 </div>
                 <div>
                   <CardTitle className="text-lg">{IS_CE ? t('ce.step3.title') : t('step3.title')}</CardTitle>
@@ -1125,74 +1139,41 @@ export default function OnboardingPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-5">
-              {/* Use Cases */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-theme-primary">
-                  {IS_CE ? t('ce.useCasesLabel') : t('useCasesLabel')}
+              {/* Previous automation tool (single choice) */}
+              <div className="space-y-2" role="group" aria-labelledby="onboarding-previous-tool-label">
+                <label id="onboarding-previous-tool-label" className="text-sm font-medium text-theme-primary">
+                  {t('previousToolLabel')} <span className="text-red-500">*</span>
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {goalOptions.map((useCase) => (
+                  {PREVIOUS_TOOLS.map((option) => (
                     <button
-                      key={useCase.value}
+                      key={option.value}
                       type="button"
-                      onClick={() => {
-                        toggleSelection('useCases', useCase.value);
-                        // Clear custom use case if deselecting "other"
-                        if (useCase.value === 'other' && selectedGoalValues.includes('other')) {
-                          setCustomUseCase('');
-                        }
-                      }}
-                      className={`px-4 py-2 text-sm rounded-md border transition-colors ${
-                        selectedGoalValues.includes(useCase.value)
-                          ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)] border-transparent'
-                          : 'border-theme hover:bg-theme-secondary text-theme-primary'
-                      }`}
+                      aria-pressed={data.previousTool === option.value}
+                      onClick={() => setData(prev => ({ ...prev, previousTool: option.value }))}
+                      className={chipClass(data.previousTool === option.value)}
                     >
-                      {t(useCase.labelKey)}
+                      {t(option.labelKey)}
                     </button>
                   ))}
                 </div>
-                {/* Custom use case input when "Other" is selected */}
-                {shouldShowCustomGoal && (
-                  <div className="mt-3">
-                    <Input
-                      type="text"
-                      value={customUseCase}
-                      onChange={(e) => setCustomUseCase(e.target.value)}
-                      placeholder={t('customUseCasePlaceholder')}
-                      className="max-w-xs"
-                      maxLength={50}
-                      autoFocus
-                    />
-                  </div>
-                )}
               </div>
 
-              {/* Experience Level */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-theme-primary">
-                  {IS_CE ? t('ce.experienceLevel') : t('experienceLevel')}
+              {/* Referral source (single choice) */}
+              <div className="space-y-2" role="group" aria-labelledby="onboarding-referral-source-label">
+                <label id="onboarding-referral-source-label" className="text-sm font-medium text-theme-primary">
+                  {t('referralSourceLabel')} <span className="text-red-500">*</span>
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {experienceLevels.map((level) => (
+                <div className="flex flex-wrap gap-2">
+                  {REFERRAL_SOURCES.map((option) => (
                     <button
-                      key={level.value}
+                      key={option.value}
                       type="button"
-                      onClick={() => setData(prev => ({ ...prev, experienceLevel: level.value }))}
-                      className={`p-3 text-center rounded-xl border transition-colors ${
-                        data.experienceLevel === level.value
-                          ? 'bg-[var(--accent-primary)] text-[var(--accent-foreground)] border-transparent'
-                          : 'border-theme hover:bg-theme-secondary'
-                      }`}
+                      aria-pressed={data.referralSource === option.value}
+                      onClick={() => setData(prev => ({ ...prev, referralSource: option.value }))}
+                      className={chipClass(data.referralSource === option.value)}
                     >
-                      <div className="text-sm font-medium">{t(level.labelKey)}</div>
-                      <div className={`text-xs mt-0.5 ${
-                        data.experienceLevel === level.value
-                          ? 'opacity-80'
-                          : 'text-theme-muted'
-                      }`}>
-                        {t(level.descKey)}
-                      </div>
+                      {t(option.labelKey)}
                     </button>
                   ))}
                 </div>
@@ -1225,7 +1206,12 @@ export default function OnboardingPage() {
 
             <Button
               onClick={nextStep}
-              disabled={saving || (currentStep === 1 && (!data.displayName.trim() || !displayNameAvailable))}
+              disabled={
+                saving
+                || (currentStep === 1 && !step1Valid)
+                || (currentStep === 2 && !step2Valid)
+                || (currentStep === 3 && !step3Valid)
+              }
             >
               {saving ? (
                 <>

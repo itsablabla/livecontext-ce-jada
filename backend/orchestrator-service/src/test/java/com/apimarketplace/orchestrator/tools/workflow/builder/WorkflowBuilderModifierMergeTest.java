@@ -1233,7 +1233,6 @@ class WorkflowBuilderModifierMergeTest {
                     Arguments.of("download_file", "url", "download", "https://a.example/x"),
                     Arguments.of("public_link", "file", "params", "{{core:dl.output.file}}"),
                     Arguments.of("media", "operation", "params", "mux_audio"),
-                    Arguments.of("generate", "model", "params", "seedance-2.0-fast"),
                     Arguments.of("http_request", "url", "httpRequest", "https://a.example/y"),
                     Arguments.of("response", "message", "response", "ok"),
                     Arguments.of("aggregate", "strategy", "aggregate", "concat"),
@@ -1268,6 +1267,46 @@ class WorkflowBuilderModifierMergeTest {
                     Arguments.of("sftp", "operation", "sftp", "upload"),
                     Arguments.of("database", "operation", "database", "select")
             );
+        }
+
+        /**
+         * Generate is the one nested-config node that is NOT a core.
+         *
+         * <p>It belongs to the AI family, so it is held with the agents and keyed
+         * {@code agent:<label>}. The routing that puts a flat field inside the
+         * node's nested slot used to be gated on the key being a {@code core:}
+         * one, which made this the single node type where a modify landed at the
+         * TOP level, where the executor never looks: the call answered success,
+         * the node kept its old model, and nothing said otherwise.
+         */
+        @Test
+        @DisplayName("generate node: a flat field routes into params even though its key is agent:")
+        void generateNodeUnderAgentKeyRoutesIntoNestedSlot() {
+            WorkflowBuilderSession session = createSession();
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("id", "agent:make_clip");
+            node.put("type", "generate");
+            node.put("label", "Make Clip");
+            node.put("isAgent", true);
+            node.put("isGenerate", true);
+            node.put("params", new LinkedHashMap<>(Map.of("model", "INITIAL")));
+            session.getMcps().add(node);
+
+            Map<String, Object> args = new LinkedHashMap<>();
+            args.put("node", "Make Clip");
+            args.put("params", Map.of("model", "seedance-2.0-fast"));
+
+            modifier.executeModifyNode(session, args);
+
+            Map<String, Object> modified = session.getMcps().stream()
+                    .filter(n -> "agent:make_clip".equals(n.get("id")))
+                    .findFirst().orElseThrow();
+            assertThat(modified)
+                    .as("the executor reads params.model only, so a top-level model is lost in silence")
+                    .doesNotContainKey("model");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> params = (Map<String, Object>) modified.get("params");
+            assertThat(params).containsEntry("model", "seedance-2.0-fast");
         }
 
         @Test

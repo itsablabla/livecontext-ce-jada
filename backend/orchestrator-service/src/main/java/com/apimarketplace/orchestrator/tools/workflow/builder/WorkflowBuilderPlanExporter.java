@@ -1,6 +1,7 @@
 package com.apimarketplace.orchestrator.tools.workflow.builder;
 
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
+import com.apimarketplace.orchestrator.execution.v2.nodes.MediaNode;
 import com.apimarketplace.orchestrator.tools.workflow.builder.creators.DecisionNodeCreator;
 import com.apimarketplace.orchestrator.utils.EdgeRefParser;
 import com.apimarketplace.orchestrator.utils.LabelNormalizer;
@@ -101,6 +102,8 @@ public class WorkflowBuilderPlanExporter {
                     agent.put("isClassify", true);
                 } else if ("guardrail".equals(agentType)) {
                     agent.put("isGuardrail", true);
+                } else if ("generate".equals(agentType)) {
+                    agent.put("isGenerate", true);
                 }
                 session.getMcps().add(agent);
             }
@@ -270,7 +273,13 @@ public class WorkflowBuilderPlanExporter {
                 }
                 agents.add(mcp);
             } else if (Boolean.TRUE.equals(mcp.get("isAgent"))) {
-                // Ensure type field is set for agent nodes
+                // Every AI node, generate included. It needs no branch of its own:
+                // it carries no renamed field (its whole configuration is the params
+                // map, which the generation catalog owns), every producer stamps
+                // isAgent alongside isGenerate, and its type is already set. A
+                // separate isGenerate arm above this one did exactly what this line
+                // does and could be deleted without changing a byte of output, which
+                // is the kind of code a reader trusts to be doing something.
                 if (!mcp.containsKey("type")) {
                     mcp.put("type", "agent");
                 }
@@ -544,9 +553,10 @@ public class WorkflowBuilderPlanExporter {
                 registerLabelForms(label, "agents", allLabels);
             }
 
-            // Type is required (agent, classify, guardrail)
+            // Type is required (agent, browser_agent, classify, guardrail, generate)
             if (type == null || type.isBlank()) {
-                errors.add("agents[" + i + "]: 'type' is required (agent, classify, guardrail)");
+                errors.add("agents[" + i + "]: 'type' is required "
+                    + "(agent, browser_agent, classify, guardrail, generate)");
             } else {
                 // Validate type-specific fields
                 switch (type) {
@@ -568,10 +578,91 @@ public class WorkflowBuilderPlanExporter {
                             errors.add("agents[" + i + "]: 'guardrailRules' is required for guardrail type");
                         }
                         break;
+                    case "browser_agent":
+                        // Nothing is required of it here. Its task, its session
+                        // and its LLM config are all optional and are checked
+                        // by the node itself at run time; the type was simply
+                        // missing from this switch, so every plan carrying one
+                        // was refused as an unknown agent type.
+                        break;
+                    case "generate":
+                        validateGenerateAgent(a, i, errors);
+                        break;
                     default:
-                        errors.add("agents[" + i + "]: Unknown type '" + type + "' (expected: agent, classify, guardrail)");
+                        errors.add("agents[" + i + "]: Unknown type '" + type + "' (expected: agent, "
+                            + "browser_agent, classify, guardrail, generate)");
                 }
             }
+        }
+    }
+
+
+    /**
+     * The one thing a generate node must state: WHICH model runs.
+     *
+     * <p>It lives among the agents because generate is an AI node, addressed as
+     * {@code agent:<label>} like every other one. Nothing else about it is
+     * checked here on purpose: which parameters a model accepts, and their
+     * limits, are decided by the generation catalog and checked there before
+     * the provider is called, so a bad value costs nothing and one question has
+     * one answer.
+     */
+    private void validateGenerateAgent(Map<String, Object> a, int i, List<String> errors) {
+        // Only 'model' is checked here. Which parameters the chosen model
+        // accepts, and their limits, live in the generation catalog and are
+        // checked there before the provider is called (so a bad value costs
+        // nothing); duplicating them would give two answers to one question.
+        Object genParams = a.get("params");
+        if (!(genParams instanceof Map<?, ?> genMap)) {
+            errors.add("agents[" + i + "]: 'params' with a 'model' is required for generate. " +
+                "Format: params: {model: 'seedance-2.0-fast', prompt: '...', duration_seconds: 5}");
+            return;
+        }
+        Object genModel = genMap.get("model");
+        if (!(genModel instanceof String genModelStr) || genModelStr.isBlank()) {
+            errors.add("agents[" + i + "]: 'params.model' is required for generate. The model decides "
+                + "the format produced, the parameters accepted and the price; call "
+                + "workflow(action='help', topics=['generate']) to list the available model ids.");
+        }
+        Object genSource = genMap.get("credential_source");
+        boolean sourceIsUsable = genSource == null
+                || "user".equals(genSource) || "platform".equals(genSource);
+        if (!sourceIsUsable) {
+            errors.add("agents[" + i + "]: 'params.credential_source' must be 'platform' or 'user' "
+                + "(got '" + genSource + "')");
+        }
+        // The owner's pinned key. Nothing here can choose one, so the
+        // only thing that can go wrong is a value that is not an id at
+        // all - a template that resolved to nothing, or a number
+        // somebody invented. Refusing it at build time is what stops a
+        // run silently using a different key from the one the plan
+        // appears to name: the executor reads an unusable id as "no
+        // pin" and falls back to the account default, without saying so.
+        Object genCredentialId = genMap.get("credential_id");
+        // ... and only beside the branch that reads it. On 'platform' the
+        // platform's own key answers the call, so an id of the owner's names a
+        // key no run can use: the executor discards it and the plan is left
+        // stating a choice nothing honours. add_node refuses this pairing, so
+        // accepting it here would make the same node writable by one tool and
+        // refusable by another.
+        // Unstated counts as platform: that is what the executor substitutes, and
+        // what add_node already refuses. Testing for the literal 'platform' let a
+        // plan omit the field and keep a pin no run will ever read.
+        // Skipped entirely when the source is a value nobody can act on. Saying
+        // "the 'platform' pool never consults it" to an author who wrote 'foo'
+        // names a choice they did not make, and the fix it offers (set
+        // credential_source to 'user') is not the defect. The source error above
+        // already tells them the one thing to change.
+        if (sourceIsUsable && genCredentialId != null && !"user".equals(genSource)) {
+            errors.add("agents[" + i + "]: 'params.credential_id' names one of the owner's own "
+                + "keys, which the 'platform' pool never consults. Either drop credential_id, or "
+                + "set credential_source to 'user'.");
+        } else if (sourceIsUsable && genCredentialId != null
+                && !isPositiveWholeNumberId(genCredentialId)) {
+            errors.add("agents[" + i + "]: 'params.credential_id' must be a positive whole number "
+                + "identifying one of the workflow owner's own provider keys (got '"
+                + genCredentialId + "'). You cannot choose one: keep the value a node already has, "
+                + "or leave it out entirely so the node runs on the owner's default key.");
         }
     }
 
@@ -779,7 +870,7 @@ public class WorkflowBuilderPlanExporter {
                 Object mediaOpValue = mediaMap.get("operation");
                 String mediaOp = mediaOpValue instanceof String mediaOpStr ? mediaOpStr.trim().toLowerCase() : null;
                 if (mediaOp == null || mediaOp.isBlank()) {
-                    errors.add("cores[" + i + "]: 'params.operation' is required for media (one of: probe, mux_audio, mix, extract_audio, concat, frame, overlay)");
+                    errors.add("cores[" + i + "]: 'params.operation' is required for media (one of: probe, mux_audio, mix, extract_audio, concat, frame, overlay, subtitles)");
                     break;
                 }
                 switch (mediaOp) {
@@ -802,7 +893,7 @@ public class WorkflowBuilderPlanExporter {
                     case "mix" -> {
                         if (!(mediaMap.get("tracks") instanceof List<?> mediaTracks) || mediaTracks.isEmpty()) {
                             errors.add("cores[" + i + "]: 'params.tracks' is required for media mix - a non-empty array of 1-8 tracks, each with a 'source'. " +
-                                "Format: params: {operation: 'mix', tracks: [{source: '{{core:voice.output.file}}'}]}");
+                                "Format: params: {operation: 'mix', tracks: [{source: '{{agent:voice.output.file}}'}]}");
                         } else {
                             if (mediaTracks.size() > 8) {
                                 errors.add("cores[" + i + "]: 'params.tracks' accepts at most 8 tracks (got " + mediaTracks.size() + ")");
@@ -811,7 +902,7 @@ public class WorkflowBuilderPlanExporter {
                                 if (!(mediaTracks.get(ti) instanceof Map<?, ?> trackMap)
                                         || !isMediaFileParam(trackMap.get("source"))) {
                                     errors.add("cores[" + i + "]: 'params.tracks[" + ti + "].source' is required - " +
-                                        "the WHOLE FileRef expression of that track's audio, e.g. '{{core:voice.output.file}}'");
+                                        "the WHOLE FileRef expression of that track's audio, e.g. '{{agent:voice.output.file}}'");
                                 }
                             }
                         }
@@ -843,48 +934,46 @@ public class WorkflowBuilderPlanExporter {
                                 "Format: params: {operation: 'overlay', video: '{{core:clip.output.file}}', image: '{{core:logo.output.file}}'}");
                         }
                     }
-                    default -> errors.add("cores[" + i + "]: unknown media operation '" + mediaOp + "' (expected: probe, mux_audio, mix, extract_audio, concat, frame, overlay)");
-                }
-                break;
-            case "generate":
-                // Only 'model' is checked here. Which parameters the chosen model
-                // accepts, and their limits, live in the generation catalog and are
-                // checked there before the provider is called (so a bad value costs
-                // nothing); duplicating them would give two answers to one question.
-                Object genParams = cn.get("params");
-                if (!(genParams instanceof Map<?, ?> genMap)) {
-                    errors.add("cores[" + i + "]: 'params' with a 'model' is required for generate. " +
-                        "Format: params: {model: 'seedance-2.0-fast', prompt: '...', duration_seconds: 5}");
-                    break;
-                }
-                Object genModel = genMap.get("model");
-                if (!(genModel instanceof String genModelStr) || genModelStr.isBlank()) {
-                    errors.add("cores[" + i + "]: 'params.model' is required for generate. The model decides "
-                        + "the format produced, the parameters accepted and the price; call "
-                        + "workflow(action='help', topics=['generate']) to list the available model ids.");
-                }
-                Object genSource = genMap.get("credential_source");
-                if (genSource != null && !"user".equals(genSource) && !"platform".equals(genSource)) {
-                    errors.add("cores[" + i + "]: 'params.credential_source' must be 'platform' or 'user' "
-                        + "(got '" + genSource + "')");
-                }
-                // The owner's pinned key. Nothing here can choose one, so the
-                // only thing that can go wrong is a value that is not an id at
-                // all - a template that resolved to nothing, or a number
-                // somebody invented. Refusing it at build time is what stops a
-                // run silently using a different key from the one the plan
-                // appears to name: the executor reads an unusable id as "no
-                // pin" and falls back to the account default, without saying so.
-                Object genCredentialId = genMap.get("credential_id");
-                if (genCredentialId != null && !isPositiveWholeNumberId(genCredentialId)) {
-                    errors.add("cores[" + i + "]: 'params.credential_id' must be a positive whole number "
-                        + "identifying one of the workflow owner's own provider keys (got '"
-                        + genCredentialId + "'). You cannot choose one: keep the value a node already has, "
-                        + "or leave it out entirely so the node runs on the owner's default key.");
+                    case "subtitles" -> {
+                        if (!isMediaFileParam(mediaMap.get("video"))) {
+                            errors.add("cores[" + i + "]: 'params.video' is required for media subtitles - the video "
+                                + "the captions are burned into. "
+                                + "Format: params: {operation: 'subtitles', video: '{{core:clip.output.file}}', cues: [{start_seconds: 0, end_seconds: 2.4, text: 'It starts here'}]}");
+                        }
+                        // An expression is a first-class value for cues: a caption track is
+                        // DATA and is commonly computed upstream. Only a literal array can be
+                        // checked here.
+                        Object rawCues = mediaMap.get("cues");
+                        if (rawCues instanceof List<?> mediaCues) {
+                            if (mediaCues.isEmpty()) {
+                                errors.add("cores[" + i + "]: 'params.cues' is required for media subtitles - a non-empty "
+                                    + "array of {start_seconds, end_seconds, text} in ascending, non-overlapping order. "
+                                    + "Format: params: {operation: 'subtitles', video: '{{core:clip.output.file}}', cues: [{start_seconds: 0, end_seconds: 2.4, text: 'It starts here'}]}");
+                            } else if (mediaCues.size() > MediaNode.MAX_SUBTITLE_CUES) {
+                                errors.add("cores[" + i + "]: 'params.cues' accepts at most " + MediaNode.MAX_SUBTITLE_CUES
+                                    + " entries (got " + mediaCues.size() + ")");
+                            }
+                        } else if (!(rawCues instanceof String cuesExpr && !cuesExpr.isBlank())) {
+                            errors.add("cores[" + i + "]: 'params.cues' is required for media subtitles - a non-empty "
+                                + "array of {start_seconds, end_seconds, text} in ascending, non-overlapping order, or an "
+                                + "expression resolving to one. "
+                                + "Format: params: {operation: 'subtitles', video: '{{core:clip.output.file}}', cues: [{start_seconds: 0, end_seconds: 2.4, text: 'It starts here'}]}");
+                        }
+                    }
+                    default -> errors.add("cores[" + i + "]: unknown media operation '" + mediaOp + "' (expected: probe, mux_audio, mix, extract_audio, concat, frame, overlay, subtitles)");
                 }
                 break;
             default:
-                errors.add("cores[" + i + "]: Unknown type '" + type + "' (expected: decision, switch, loop, split, merge, fork, transform, wait, download_file, public_link, media, generate, aggregate, exit, response, option, http_request, filter, sort, limit, remove_duplicates, summarize, date_time, crypto_jwt, approval, data_input, xml, compression, rss, convert_to_file, extract_from_file, compare_datasets, sub_workflow, respond_to_webhook, send_email, email_inbox, code, set, html_extract, task, stop_on_error, ssh, sftp, database)");
+                if ("generate".equals(type)) {
+                    // Naming the fix, because the list below never mentions where the
+                    // node DOES belong: an agent that files it here reads forty type
+                    // names, none of them the answer.
+                    errors.add("cores[" + i + "]: 'generate' is an AI node, not a core. Move it to "
+                        + "the plan's 'agents' array (same object, same params); it is then keyed "
+                        + "agent:<label> and its output is read as {{agent:<label>.output.file}}.");
+                } else {
+                    errors.add("cores[" + i + "]: Unknown type '" + type + "' (expected: decision, switch, loop, split, merge, fork, transform, wait, download_file, public_link, media, aggregate, exit, response, option, http_request, filter, sort, limit, remove_duplicates, summarize, date_time, crypto_jwt, approval, data_input, xml, compression, rss, convert_to_file, extract_from_file, compare_datasets, sub_workflow, respond_to_webhook, send_email, email_inbox, code, set, html_extract, task, stop_on_error, ssh, sftp, database)");
+                }
         }
     }
 

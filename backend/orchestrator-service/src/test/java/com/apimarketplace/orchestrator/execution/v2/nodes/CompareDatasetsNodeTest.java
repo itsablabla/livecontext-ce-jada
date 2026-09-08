@@ -833,11 +833,14 @@ class CompareDatasetsNodeTest {
             @SuppressWarnings("unchecked")
             Map<String, Object> inputData = (Map<String, Object>) result.output().get("resolved_params");
             assertNotNull(inputData);
-            // Node stores actual datasets (lists), not config string names
-            assertEquals(List.of(), inputData.get("datasetA"));
-            assertEquals(List.of(), inputData.get("datasetB"));
-            assertEquals(0, inputData.get("datasetA_count"));
-            assertEquals(0, inputData.get("datasetB_count"));
+            // Node stores actual datasets (lists), not config string names, under
+            // the names the PLAN uses (inputA / inputB) so the inspector can label
+            // them. They were datasetA / datasetB, which no label covered.
+            assertEquals(List.of(), inputData.get("inputA"));
+            assertEquals(List.of(), inputData.get("inputB"));
+            assertEquals(0, inputData.get("inputACount"));
+            assertEquals(0, inputData.get("inputBCount"));
+            assertFalse(inputData.containsKey("datasetA"), "the old key must not come back");
             assertEquals(List.of("id"), inputData.get("matchFields"));
             assertEquals(false, inputData.get("returnMatched"));
             assertEquals(true, inputData.get("returnOnlyA"));

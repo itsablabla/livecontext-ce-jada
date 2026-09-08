@@ -19,13 +19,27 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
-vi.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
+// The panel now also asks which nodes this account's plan includes (usePlanFeatureGate).
+// An unresolved answer means "nothing is locked", which is the state these
+// structural assertions want anyway.
+vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQuery: () => ({ data: undefined, isPending: false }),
+}));
 vi.mock('@/contexts/WorkflowModeContext', () => ({ useWorkflowMode: () => ({ isRunMode: false }) }));
 vi.mock('@/lib/api', () => ({ orchestratorApi: {} }));
-vi.mock('@/components/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light', setTheme: vi.fn(), resolvedTheme: 'light' }) }));
+// `useOptionalTheme` too: the palette's icons render through `useThemeSafely`,
+// which reads the context OPTIONALLY because the same icons render on the public
+// marketplace outside any ThemeProvider. A mock missing it throws at render.
+vi.mock('@/components/ThemeProvider', () => ({
+  useTheme: () => ({ theme: 'light', setTheme: vi.fn(), resolvedTheme: 'light' }),
+  useOptionalTheme: () => ({ theme: 'light', setTheme: vi.fn(), resolvedTheme: 'light' }),
+}));
 vi.mock('../../hooks/useMcpData', () => ({
   useMcpApis: () => ({ data: undefined, fetchNextPage: vi.fn(), hasNextPage: false, isFetching: false, isLoading: false }),
   useMcpApiTools: () => ({ data: undefined, isLoading: false }),
+  usePopularApis: () => ({ data: undefined, fetchNextPage: vi.fn(), hasNextPage: false, isFetching: false, isLoading: false }),
+  POPULAR_APIS_PAGE_SIZE: 20,
 }));
 vi.mock('../../hooks/useDataSourceData', () => ({
   useDataSources: () => ({ data: [], isLoading: false }),

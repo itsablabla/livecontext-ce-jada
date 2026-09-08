@@ -131,7 +131,7 @@ public class UserService {
             // Slugify what the user typed, then accept it only if it's a well-formed handle and
             // free (or already theirs). A taken/invalid handle is ignored - the current one is
             // kept - so a bad value never 500s the whole profile save.
-            String h = usernameValidator.normalize(request.getHandle());
+            String h = slugifyHandle(request.getHandle());
             if (h != null && HANDLE_PATTERN.matcher(h).matches()) {
                 Optional<UserProfileEntity> taken = userProfileRepository.findByHandle(h);
                 if ((taken.isEmpty() || taken.get().getUserId().equals(user.getId()))
@@ -176,8 +176,17 @@ public class UserService {
     private static final int HANDLE_MAX = 32;
     /** Same 1-change-per-week rule as {@code DISPLAY_NAME_COOLDOWN_DAYS}. */
     private static final int HANDLE_COOLDOWN_DAYS = 7;
+    /**
+     * A handle is a URL SLUG, not a username: it is the whole path segment of
+     * {@code /app/u/{handle}}. A dot in that segment makes the page
+     * unreachable - the request is taken for a static asset, skips the locale
+     * rewrite and lands on the not-found page with a 200 - which is why this
+     * class is narrower than {@link UsernameValidator#normalize}'s, whose own
+     * {@code [a-z0-9._-]} is correct for an account username that may look like
+     * an email. Repaired in the existing rows by V463.
+     */
     private static final java.util.regex.Pattern HANDLE_PATTERN =
-            java.util.regex.Pattern.compile("^[a-z0-9._-]{2,32}$");
+            java.util.regex.Pattern.compile("^[a-z0-9_-]{2,32}$");
 
     /**
      * Returns the @handle change status (cooldown info), mirroring
@@ -217,13 +226,35 @@ public class UserService {
     }
 
     /**
-     * Slugify the base (display name) via {@link UsernameValidator#normalize} and append a
+     * Turn free text into a URL-safe handle slug: the shared username
+     * normalization (accent folding, lower-casing) followed by the one rule a
+     * PATH SEGMENT adds, folding the dots and dashes that normalization keeps
+     * into '_' and trimming the separators that leaves at either end.
+     *
+     * <p>Without that last step "theo p." became the handle "theo_p.", and
+     * {@code /app/u/theo_p.} answered the not-found page while
+     * {@code /app/u/theo_p} would have rendered - a live account with an
+     * unreachable profile and no error anywhere to say so.
+     *
+     * @return the slug, or {@code null} when nothing usable survives
+     */
+    private String slugifyHandle(String base) {
+        String normalized = usernameValidator.normalize(base);
+        if (normalized == null) {
+            return null;
+        }
+        normalized = normalized.replaceAll("[._-]+", "_").replaceAll("^_+|_+$", "");
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    /**
+     * Slugify the base (display name) via {@link #slugifyHandle} and append a
      * numeric suffix until the handle is unique among profiles. Never the raw OAuth account
      * username - only the chosen display name feeds this.
      */
     private String generateUniqueHandle(String base) {
-        String normalized = usernameValidator.normalize(base);
-        if (normalized == null || normalized.isBlank() || "_".equals(normalized)) {
+        String normalized = slugifyHandle(base);
+        if (normalized == null || normalized.isBlank()) {
             normalized = "user";
         }
         if (normalized.length() > HANDLE_MAX) {

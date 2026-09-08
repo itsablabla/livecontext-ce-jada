@@ -93,7 +93,9 @@
     "noResults": "Keine Ergebnisse für \"{query}\"",
     "searching": "Suche läuft...",
     "untitled": "Ohne Titel",
-    "clear": "Suche löschen"
+    "clear": "Suche löschen",
+    "shortcutKeys": "Strg K",
+    "shortcutKeysMac": "⌘K"
   },
   "reward": {
     "page": {
@@ -382,6 +384,16 @@
     "deleteRows": "Zeilen löschen",
     "deleteColumnsButton": "Spalten löschen",
     "deleteRowsConfirm": "Are you sure you want to delete {count} selected row(s)? This action cannot be undone.",
+    "duplicateRows": "Duplizieren",
+    "duplicateRowsSuccessTitle": "Zeilen dupliziert",
+    "duplicateRowsSuccessMessage": "{count} Zeile(n) wurden kopiert",
+    "duplicateRowsSuccessMessageVector": "{count} Zeile(n) wurden kopiert. Sie bleiben von der Ähnlichkeitssuche ausgeschlossen, bis sie neu eingebettet werden.",
+    "duplicateRowsPartialTitle": "Einige Zeilen wurden nicht dupliziert",
+    "duplicateRowsPartialMessage": "{done} von {total} Zeile(n) wurden kopiert: {reason}",
+    "duplicateRowsReasonNotLoaded": "auf einer anderen Seite ausgewählte Zeilen waren nicht geladen",
+    "duplicateRowsReasonUnknown": "kein Grund angegeben",
+    "duplicateRowsErrorTitle": "Fehler beim Duplizieren der Zeilen",
+    "duplicateRowsErrorMessage": "Die ausgewählten Zeilen konnten nicht dupliziert werden: {reason}",
     "cancel": "Cancel",
     "saveRow": "Save Row",
     "addRow": "Add Row",
@@ -436,6 +448,7 @@
     "assetUrl": "Link verwenden",
     "assetUrlPlaceholder": "URL eines Bildes oder einer Datei einfügen",
     "assetUrlConfirm": "Verwenden",
+    "assetUrlBack": "Zurück zu den Dateiquellen",
     "assetUrlInvalid": "Diese URL scheint nicht verwendbar zu sein",
     "assetExternal": "Externer Link",
     "assetUnresolvableHint": "Diese Datei ist nicht mehr verfügbar. Möglicherweise wurde sie aus Dateien gelöscht.",
@@ -494,6 +507,8 @@
     "openBottom": "Panel unten öffnen",
     "detach": "Panel ablösen",
     "attach": "Panel wieder andocken",
+    "maximize": "Vollbild",
+    "restoreSize": "Vollbild beenden",
     "moveWindow": "Panel verschieben",
     "moveWindowHint": "Panel verschieben: ziehen oder die Pfeiltasten benutzen (Umschalt zum Anpassen der Größe von unten rechts, Strg+Umschalt von oben links, Alt für 1px-Schritte)",
     "collapseWindow": "Panel einklappen",
@@ -508,6 +523,7 @@
     "errorLoading": "Elemente konnten nicht geladen werden",
     "aiChat": "KI-Chat",
     "runTab": "Ausführung",
+    "inspectorTab": "Inspektor",
     "welcomeTitle": "Wie kann ich Ihnen helfen?",
     "agent": "Agent",
     "workflowPanel": "Workflow-Bereich",
@@ -528,21 +544,35 @@
     "deleteDatasourceTitle": "Datenquelle löschen",
     "deleteDatasourceConfirm": "Möchten Sie \"{name}\" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden."
   },
+  "platformStatus": {
+    "headline": {
+      "operational": "Alle Systeme betriebsbereit",
+      "maintenance": "Wartung läuft",
+      "degraded": "Eingeschränkte Leistung",
+      "major_outage": "Größere Störung",
+      "unknown": "Status nicht verfügbar"
+    },
+    "strip": {
+      "incident": "Laufende Störung",
+      "maintenance": "Wartung läuft",
+      "view": "Status ansehen",
+      "dismiss": "Schließen"
+    },
+    "card": {
+      "title": "Plattformstatus",
+      "subtitle": "Aktueller Zustand der LiveContext-Cloud",
+      "state": "Zustand",
+      "incidents": "Laufende Störungen",
+      "lastChecked": "Zuletzt geprüft",
+      "loadError": "Der Status konnte nicht geladen werden."
+    }
+  },
   "sidebar": {
-    "board": "Board",
     "expandSidebar": "Seitenleiste ausklappen",
     "collapseSidebar": "Seitenleiste einklappen",
     "closeSidebar": "Seitenleiste schließen",
-    "newChat": "Neuer Chat",
     "searchChats": "Chats durchsuchen",
-    "home": "Startseite",
-    "applications": "Anwendungen",
-    "marketplace": "Marktplatz",
-    "workflows": "Workflows",
-    "tables": "Tabellen",
-    "interfaces": "Schnittstellen",
     "projects": "Projekte",
-    "agents": "Agenten",
     "chats": "Chats",
     "noConversations": "Keine Unterhaltungen",
     "generatingTitle": "Titel wird generiert...",
@@ -556,24 +586,22 @@
     "allChats": "Alle",
     "filterChats": "Unterhaltungen filtern",
     "shareConversation": "Unterhaltung teilen",
-    "credits": "Credits",
     "viewQuota": "Nutzung & Kontingent anzeigen",
     "noProjects": "Noch keine Projekte",
     "newProject": "Neues Projekt",
     "nav": {
       "board": "Board",
-      "home": "Startseite",
-      "marketplace": "Marketplace",
-      "agents": "Agents",
-      "applications": "Applications",
+      "marketplace": "Marktplatz",
+      "agents": "Agenten",
+      "applications": "Anwendungen",
       "workflows": "Workflows",
-      "interfaces": "Interfaces",
-      "tables": "Tables",
+      "interfaces": "Schnittstellen",
+      "tables": "Tabellen",
       "files": "Dateien",
-      "newChat": "New Chat"
+      "newChat": "Neuer Chat",
+      "agenda": "Kalender"
     },
     "settings": "Settings",
-    "pricing": "Pricing",
     "about": "About",
     "information": "Information",
     "workspace": "Workspace",
@@ -599,7 +627,7 @@
     "darkMode": "Dunkler Modus",
     "autoMode": "Automatisch",
     "signOut": "Sign out",
-    "upgrade": "Upgrade",
+    "upgrade": "Upgrade durchführen",
     "signIn": "Sign In",
     "clearMessages": "Nachrichten löschen",
     "cost": "Kosten",
@@ -611,7 +639,25 @@
       "messageCount": "{count, plural, one {# Nachricht} other {# Nachrichten}}"
     },
     "scheduledAgent": "Geplanter Agent",
-    "webhookAgent": "Webhook-Agent"
+    "webhookAgent": "Webhook-Agent",
+    "more": {
+      "title": "Mehr",
+      "back": "Zurück"
+    },
+    "customize": {
+      "title": "Anpassen",
+      "pagesTitle": "Seiten in der Seitenleiste",
+      "pagesHint": "Wählen Sie die Seiten für die Seitenleiste. Mindestens {count} bleiben immer erhalten.",
+      "minimumReached": "Die Seitenleiste behält mindestens {count} Seiten. Fügen Sie eine weitere hinzu, um diese zu entfernen.",
+      "quickOpenTitle": "Schnellzugriff",
+      "quickOpenHint": "Wohin die Verknüpfung der Startseite und die Tasten unten führen.",
+      "reset": "Auf Standard zurücksetzen",
+      "shortcutKeys": "Strg Umschalt O",
+      "shortcutKeysMac": "⇧⌘O",
+      "shortcutAria": "Tastenkürzel",
+      "shortcutTitle": "{label} ({keys})"
+    },
+    "studioChats": "Studio"
   },
   "dashboard": {
     "title": "Einstellungen",
@@ -693,6 +739,17 @@
           "datasource": "Datentabelle",
           "workflow": "Workflow",
           "error": "Fehler"
+        },
+        "triggerActions": {
+          "label": "Zeitplan-Aktionen",
+          "runNow": "Jetzt ausführen",
+          "runNowHint": "Die geplante Ausführung findet trotzdem statt.",
+          "runInstead": "Statt der geplanten Ausführung starten",
+          "runInsteadHint": "Verbraucht die anstehende Ausführung.",
+          "openAgenda": "Im Kalender öffnen",
+          "ranKeeping": "Gestartet. Die geplante Ausführung findet weiterhin statt.",
+          "ranReplacing": "Gestartet, anstelle der geplanten Ausführung.",
+          "runFailed": "Start nicht möglich."
         }
       },
       "recent": {
@@ -731,7 +788,9 @@
           "ORG_INVITATION_PENDING": "{count, plural, one {# Organisationseinladung} other {# Organisationseinladungen}}",
           "AGENT_TASK_ASSIGNED": "{count, plural, one {# zugewiesene Aufgabe} other {# zugewiesene Aufgaben}}",
           "AGENT_TASK_AWAITING_REVIEW": "{count, plural, one {# Aufgabe wartet auf deine Prüfung} other {# Aufgaben warten auf deine Prüfung}}",
-          "BRIDGE_LOW_CREDIT": "{count, plural, one {# Bridge mit wenig Guthaben} other {# Bridges mit wenig Guthaben}}"
+          "BRIDGE_LOW_CREDIT": "{count, plural, one {# Bridge mit wenig Guthaben} other {# Bridges mit wenig Guthaben}}",
+          "BADGE_UNLOCKED": "{count, plural, one {# neue Trophäe} other {# neue Trophäen}}",
+          "BUDGET_REACHED": "{count, plural, one {# Workflow durch sein Ausgabenlimit gestoppt} other {# Workflows durch ihr Ausgabenlimit gestoppt}}"
         },
         "approvalOpen": "Öffnen",
         "approvalReview": "Prüfen",
@@ -1077,6 +1136,9 @@
     "reactivateRun": {
       "title": "Diese Ausführung reaktivieren"
     },
+    "runAction": {
+      "failed": "Das hat nicht funktioniert. Bitte erneut versuchen."
+    },
     "applicationMode": "Anwendungsmodus",
     "application": "Anwendung",
     "templates": {
@@ -1147,14 +1209,15 @@
       "budgetReached": "Budget erreicht, es wird keine neue Ausführung gestartet",
       "epochCost": "Epoche {epoch}",
       "budgetBlockedTitle": "Budget erreicht",
-      "budgetBlockedMessage": "{spent} von {budget} ausgegeben. Es wurde keine neue Ausführung gestartet.",
+      "budgetBlockedMessage": "{spent} von {budget} {period} ausgegeben. Es wurde kein neuer Lauf gestartet; er läuft in der nächsten Periode von selbst weiter.",
       "openInPanel": "Ausführungsdetails im Panel öffnen",
       "backToWorkflow": "Zurück zum Workflow",
       "scrollLeft": "Vorherige Details anzeigen",
       "scrollRight": "Weitere Details anzeigen",
       "cost": "Kosten",
       "scopeAll": "alle Epochen",
-      "scopeEpoch": "Epoche {epoch}"
+      "scopeEpoch": "Epoche {epoch}",
+      "budgetBlockedMessageCumulative": "{spent} von {budget} ausgegeben, und dieses Limit wird nie zurückgesetzt. Es wurde kein neuer Lauf gestartet; erhöhen Sie das Limit oder ändern Sie die Zurücksetzung, um fortzufahren."
     }
   },
   "workflowRelations": {
@@ -1444,7 +1507,11 @@
     "publishing": "Wird veröffentlicht...",
     "publishingMessage": "Ihr Workflow und seine Ressourcen werden verpackt, bitte warten",
     "retry": "Erneut versuchen",
-    "updateResubmittedForReview": "Update zur Überprüfung eingereicht - es ist wieder verfügbar, sobald ein Administrator es genehmigt."
+    "updateResubmittedForReview": "Update zur Überprüfung eingereicht - es ist wieder verfügbar, sobald ein Administrator es genehmigt.",
+    "studioLabel": "Studio-Regal",
+    "studioHint": "Das Studio-Regal versammelt die Anwendungen, die Medien erzeugen. Die Anwendung behält auch ihre Kategorie: Das ist eine eigene Achse, kein Ersatz.",
+    "studioToggle": "Im Studio-Regal anzeigen",
+    "studioToggleHint": "Für Anwendungen, die ein Bild, ein Video oder einen Ton erzeugen."
   },
   "showcase": {
     "preview": "Vorschau-Demo",
@@ -1603,6 +1670,9 @@
     "ceExclusiveTooltip": "Läuft nur auf einer selbst gehosteten Installation (Community Edition)",
     "ceExclusiveTitle": "Selbst gehostete Installation erforderlich",
     "ceExclusiveDescription": "Diese App nutzt Funktionen, die nur auf einer selbst gehosteten Installation laufen, und kann daher hier nicht installiert werden. Installieren Sie sie von einer selbst gehosteten Bereitstellung aus.",
+    "planUpgradeTitle": "Ein höherer Tarif ist erforderlich",
+    "planUpgradeDescription": "Diese App nutzt eine Funktion, die Ihr Workspace-Tarif noch nicht enthält. Ein Upgrade schaltet die Installation frei.",
+    "planUpgradeCta": "Tarife ansehen",
     "ceExclusiveFeatureCliAgent": "Lokale CLI-Agenten (Claude Code, Codex, Gemini CLI, Mistral Vibe)",
     "ceExclusiveFeatureVectorSearch": "Vektorsuche (Embeddings)",
     "acquiring": "Wird installiert...",
@@ -1708,7 +1778,10 @@
     "viewRejectionReason": "Ablehnungsgrund anzeigen",
     "settingsMenu": {
       "label": "Anwendungseinstellungen"
-    }
+    },
+    "studioFilterChip": "Nur Studio",
+    "studioFilterClear": "Den gesamten Marktplatz anzeigen",
+    "studioSubtitle": "Anwendungen, die ein Bild, ein Video oder einen Ton erzeugen."
   },
   "reviews": {
     "title": "Bewertungen",
@@ -2009,13 +2082,6 @@
       "pricing": "Preise",
       "safeToClose": "Sie können diese Seite sicher schließen."
     },
-    "welcomeGift": {
-      "title": "Willkommensgeschenk!",
-      "subtitle": "Zum Einstieg",
-      "credits": "Credits",
-      "description": "Wir haben Ihrem Konto {amount} kostenlose Credits hinzugefügt, damit Sie alle Funktionen sofort erkunden können.",
-      "cta": "Jetzt entdecken"
-    },
     "insufficientCredits": {
       "title": "Ihre Credits sind aufgebraucht",
       "description": "Ihr Guthaben reicht nicht aus, um diese Aktion auszuführen. Upgraden Sie Ihren Plan, um fortzufahren.",
@@ -2122,10 +2188,11 @@
       "cancel": "Abbrechen",
       "create": "Workflow erstellen",
       "creating": "Erstellen...",
-      "success": "Erfolgreich",
-      "successMessage": "Workflow \"{name}\" wurde erfolgreich erstellt",
       "error": "Fehler",
-      "errorMessage": "Workflow konnte nicht erstellt werden"
+      "errorMessage": "Workflow konnte nicht erstellt werden",
+      "budgetErrorTitle": "Limit nicht gespeichert",
+      "budgetErrorMessage": "Der Workflow wurde angelegt. Setze sein Limit im Builder erneut.",
+      "openAnyway": "Workflow öffnen"
     },
     "createInterface": {
       "title": "Neue Schnittstelle erstellen",
@@ -2291,8 +2358,7 @@
       },
       "configVectorDimension": "Embedding-Dimension",
       "configVectorMetric": "Distanzmetrik",
-      "ceOnlyBadge": "Nur CE",
-      "ceOnlyTooltip": "Nur in der selbst gehosteten Community Edition verfügbar",
+      "planOnlyTooltip": "Ab dem {plan}-Tarif verfügbar. Führen Sie ein Upgrade durch, um Embedding-Spalten zu nutzen.",
       "mediaRender": {
         "label": "Anzeigen als",
         "thumbnail": "Miniaturansicht",
@@ -2492,7 +2558,11 @@
       "scheduleWithMemoryHelp": "Der Agent kann auf den bisherigen Konversationsverlauf zugreifen, wenn aktiviert.",
       "backlogEnabled": "Teilnahme am gemeinsamen Backlog",
       "backlogEnabledHelp": "Wenn aktiviert, werden diesem Agenten beim Aufwachen nicht zugewiesene Aufgaben aus dem gemeinsamen Backlog angeboten, die er übernehmen kann. Für spezialisierte Agenten deaktiviert lassen, damit sie nur direkt zugewiesene Aufgaben bearbeiten.",
-      "duplicateName": "Ein Agent mit dem Namen „{name}\" existiert bereits. Wähle einen anderen Namen."
+      "duplicateName": "Ein Agent mit dem Namen „{name}\" existiert bereits. Wähle einen anderen Namen.",
+      "memoryAccessLabel": "Langzeitgedächtnis",
+      "memoryAccessInfo": "Was dieser Agent speichert, wird dem Kontext aller Agenten im Arbeitsbereich hinzugefügt. Wählen Sie Nur-Abrufen für einen Agenten, der die Fakten nutzen, aber nicht ändern soll.",
+      "memoryAccessWrite": "Darf speichern und löschen",
+      "memoryAccessRead": "Nur abrufen"
     },
     "createSkill": {
       "title": "Skill erstellen",
@@ -2824,12 +2894,7 @@
       "saving": "Wird gespeichert...",
       "successMessage": "\"{name}\" erfolgreich aktualisiert",
       "successTitle": "Aktualisiert",
-      "title": "Details bearbeiten",
-      "advancedSection": "Erweitert",
-      "budgetLabel": "Kostenbudget",
-      "budgetPlaceholder": "Kein Limit",
-      "budgetHelpCredits": "Maximale Credits, die dieser Workflow ausgeben kann. Bei Erreichen startet keine neue Ausführung.",
-      "budgetHelpDollars": "Maximale Ausgaben für diesen Workflow. Bei Erreichen startet keine neue Ausführung."
+      "title": "Details bearbeiten"
     },
     "suggestedApps": {
       "cta": "Marketplace durchsuchen",
@@ -2841,7 +2906,7 @@
   },
   "nodeTypeSettings": {
     "title": "Knotentypen",
-    "subtitle": "Workflow-Knotentypen für den KI-Agenten aktivieren oder deaktivieren",
+    "subtitle": "Aktivieren oder deaktivieren Sie Knotentypen und legen Sie den Mindesttarif für jeden Knoten und jede Integration fest",
     "searchPlaceholder": "Knotentypen suchen...",
     "enabled": "Aktiviert",
     "disabled": "Deaktiviert",
@@ -2864,9 +2929,35 @@
     },
     "errors": {
       "fetchFailed": "Fehler beim Laden der Knotentypen",
-      "toggleFailed": "Fehler beim Umschalten des Knotentyps"
+      "toggleFailed": "Fehler beim Umschalten des Knotentyps",
+      "planChangeFailed": "Mindesttarif konnte nicht geändert werden"
     },
-    "adminOnlyBadge": "Nur Admin"
+    "adminOnlyBadge": "Nur Admin",
+    "plan": {
+      "label": "Mindesttarif",
+      "everyone": "Alle"
+    },
+    "tabs": {
+      "nodes": "Knoten",
+      "integrations": "Integrationen",
+      "capabilities": "Funktionen"
+    },
+    "integrations": {
+      "searchPlaceholder": "Integrationen suchen...",
+      "hint": "Öffnen Sie eine Integration, um den Tarif für jeden ihrer Endpunkte festzulegen. Üblicherweise werden Veröffentlichungs-Endpunkte beschränkt, nicht die lesenden.",
+      "previous": "Zurück",
+      "next": "Weiter",
+      "back": "Alle Integrationen",
+      "apiLevelHint": "Gesamte Integration, Lesen eingeschlossen",
+      "wholeApiGated": "Gesamte Integration ab {plan}",
+      "gatedEndpoints": "{count} Endpunkt(e) in einem kostenpflichtigen Tarif"
+    },
+    "capabilities": {
+      "vectorSearch": {
+        "label": "Vektorspalten und Ähnlichkeitssuche",
+        "description": "Embedding-Spalten, Ähnlichkeitsabfragen (RAG) und die Installation von Marketplace-Apps, die sie nutzen. Embeddings teilen sich die verwaltete Datenbank, daher ein kostenpflichtiger Tarif statt freier Nutzung."
+      }
+    }
   },
   "myOAuthApps": {
     "title": "Ihre benutzerdefinierten OAuth-Verbindungen",
@@ -3400,7 +3491,7 @@
       "appliesTo": "Gilt für",
       "scopeAll": "Alle Bereiche",
       "scopeChat": "Allgemeiner Chat",
-      "scopeWorkflow": "Workflow-Agent",
+      "scopeWorkflow": "Workflow-Knoten",
       "scopeWebhook": "Webhook",
       "scopeWidget": "Widget",
       "scopeSchedule": "Zeitplan",
@@ -4833,12 +4924,16 @@
         "storage1tb": "1 TB Speicher",
         "logs7": "7 Tage Aufbewahrung der Ausführungsprotokolle",
         "logs30": "30 Tage Aufbewahrung der Ausführungsprotokolle",
-        "logs60": "60 Tage Aufbewahrung der Ausführungsprotokolle",
+        "logs90": "90 Tage Aufbewahrung der Ausführungsprotokolle",
         "logsCustom": "Individuelle Protokollaufbewahrung",
         "versioning": "Workflow-Versionierung",
         "apiAccess": "API-Zugriff",
         "cePlatformCreds": "Verwaltete Integrations-Zugangsdaten",
         "cePlatformCredsTooltip": "Eine mit der Cloud verknüpfte Self-Hosted-Installation kann Drittanbieter-Integrationen mit LiveContext-Plattform-Zugangsdaten ausführen, ohne eigene API-Schlüssel. Pro Aufruf fällt ein kleiner Aufschlag in Credits an.",
+        "vectorSearch": "Vektorsuche und RAG in der Cloud",
+        "vectorSearchTooltip": "Embedding-Spalten und Ähnlichkeitssuche auf Ihren Tabellen, für Retrieval-Augmented Generation. Embeddings teilen sich die verwaltete Datenbank, in der Cloud beginnen sie deshalb ab Pro. Eine selbst gehostete Installation hat sie in jedem Tarif, da sie ihre eigene Datenbank besitzt.",
+        "browserAgent": "Browser-Agent-Node",
+        "browserAgentTooltip": "Ein LLM, das einen echten Browser steuert: navigieren, Formulare ausfüllen, strukturierte Daten von Seiten ohne API extrahieren. Es belegt für die Dauer der Aufgabe eine Browser-Sitzung, eine knappe Ressource auf geteilter Infrastruktur, und beginnt deshalb ab Pro.",
         "priorityExecution": "Priorisierte Ausführung",
         "executionSearch": "Ausführungssuche",
         "analyticsBasic": "Basis-Analytik",
@@ -4859,7 +4954,85 @@
         "supportPriority": "Prioritäts-Support rund um die Uhr",
         "supportSla": "Prioritäts-Support mit SLA",
         "accountManager": "Dedizierter Kundenbetreuer",
-        "onboarding": "Individuelles Onboarding & Schulung"
+        "onboarding": "Individuelles Onboarding & Schulung",
+        "nodesCore": "Basis-Knotenbibliothek (Veröffentlichungs-Integrationen ausgenommen)",
+        "nodesPublishing": "Publishing-Integrationen enthalten",
+        "nodesAll": "Alle Knoten und Integrationen, ohne Einschränkung",
+        "nodesPublishingTooltip": "Veröffentliche direkt aus einem Workflow auf den Social- und Video-Plattformen im Katalog, darunter YouTube, Instagram, TikTok, X und LinkedIn, und es kommen laufend weitere dazu."
+      }
+    },
+    "compare": {
+      "open": "Tarife vergleichen",
+      "title": "Tarife vergleichen",
+      "subtitle": "Was jeder Tarif enthält, direkt nebeneinander. Preise mit dem Paket von {credits} Credits.",
+      "cycleLabel": "Abrechnungszeitraum",
+      "featureColumn": "Funktion",
+      "unlocksBadge": "Schaltet dies frei",
+      "included": "Enthalten",
+      "notIncluded": "Nicht enthalten",
+      "footnote": "Das Credit-Paket lässt sich in jedem kostenpflichtigen Tarif anpassen: Wählen Sie Ihres auf der Tarifseite. Preise zzgl. Steuern.",
+      "sections": {
+        "usage": "Nutzung und Limits",
+        "building": "Workflows erstellen",
+        "collaboration": "Team und Workspaces",
+        "security": "Sicherheit und Governance",
+        "support": "Auswertungen und Support"
+      },
+      "dimensions": {
+        "credits": "Credits pro Monat",
+        "nodes": "Nodes und Integrationen",
+        "nodesTooltip": "Zurückgehalten wird nur das Veröffentlichen: Posten auf YouTube, Instagram, TikTok, X, LinkedIn und 13 weiteren Plattformen erfordert einen kostenpflichtigen Tarif. Das Lesen von dort und jeder andere Node sind in jedem Tarif enthalten.",
+        "concurrent": "Parallele Ausführungen",
+        "storage": "Speicher",
+        "logs": "Aufbewahrung der Ausführungsprotokolle",
+        "variables": "Workflow-Variablen",
+        "users": "Nutzer",
+        "workspaces": "Workspaces",
+        "analytics": "Auswertungen",
+        "support": "Support",
+        "creditsTooltip": "Credits bezahlen das, was Modelle und Tools tatsächlich verarbeiten, also hängt es von der Arbeit ab, was ein Monat bringt. Gerechnet auf einem Spitzenmodell wie Claude Sonnet 5: etwa {simpleCredits} Credits für eine schlichte Frage mit Antwort ohne Tool-Aufruf, etwa {agentCredits} für eine Konversation, in der ein Agent dir einen Workflow baut (rund 5 Runden und 45 Tool-Aufrufe, und ein längerer Aufbau kostet mehr), und etwa {classifyCredits} für einen einzelnen Klassifizierungsschritt in einem laufenden Workflow. Leichtere Modelle kosten ein Vielfaches weniger."
+      },
+      "values": {
+        "creditsFree": "1.000 / Monat",
+        "creditsDynamic": "Ab {credits} / Monat",
+        "creditsCustom": "Individuell",
+        "nodesCore": "Alles außer Publishing",
+        "nodesPublishing": "Alles",
+        "nodesAll": "Alles",
+        "concurrent1": "1",
+        "concurrent5": "5",
+        "concurrent20": "20",
+        "concurrent50": "50",
+        "concurrentUnlimited": "Unbegrenzt",
+        "storage100mb": "100 MB",
+        "storage1gb": "1 GB",
+        "storage10gb": "10 GB",
+        "storage100gb": "100 GB geteilt",
+        "storage1tb": "1 TB",
+        "logs7": "7 Tage",
+        "logs30": "30 Tage",
+        "logs90": "90 Tage",
+        "logsCustom": "Individuell",
+        "variables3": "3",
+        "variables25": "25",
+        "variables100": "100",
+        "variables500": "500",
+        "variablesUnlimited": "Unbegrenzt",
+        "users1": "1",
+        "users25": "Bis zu 25",
+        "usersUnlimited": "Unbegrenzt",
+        "workspaces1": "1",
+        "workspaces3": "3",
+        "workspaces10": "10",
+        "workspacesUnlimited": "Unbegrenzt",
+        "analyticsBasic": "Basis",
+        "analyticsDetailed": "Detailliert",
+        "analyticsTeam": "Team + Reporting",
+        "analyticsAdvanced": "Erweitert + Reporting",
+        "supportCommunity": "Community",
+        "supportEmail": "E-Mail",
+        "supportPriority": "Priorität rund um die Uhr",
+        "supportSla": "Priorität + SLA"
       }
     },
     "businessPlans": {
@@ -4876,7 +5049,7 @@
       "title": "Wie funktionieren Credits?",
       "toolUsage": {
         "title": "Tool-Nutzung",
-        "description": "Jede Nutzung eines MCP-Tools verbraucht 1 Credit. Komplexe Tools können je nach Intensität mehr Credits verbrauchen."
+        "description": "Jeder Aufruf eines MCP-Tools kostet 1 Credit, ein schwereres Tool entsprechend mehr. Was ein Modell liest und schreibt, wird davon getrennt nach Tokens abgerechnet."
       },
       "dataStorage": {
         "title": "Datenspeicher",
@@ -4890,20 +5063,43 @@
     "faq": {
       "title": "Häufig gestellte Fragen",
       "exceedCredits": {
-        "question": "Was passiert, wenn ich meine Credits überschreite?",
-        "answer": "Sie können Ihr Abo upgraden, Ihrem bestehenden Plan über den Schieberegler ein Credit-Paket hinzufügen oder eine einmalige Pay-As-You-Go-Aufladung kaufen ($10 / $50 / $100). PAYG-Credits bleiben über Erneuerungszyklen hinweg erhalten und werden verbraucht, sobald Ihre Abo-Credits aufgebraucht sind."
+        "question": "Was passiert, wenn meine Credits aufgebraucht sind?",
+        "answer": "Neue Ausführungen und Konversationen warten, bis du auflädst. Ein außer Kontrolle geratener Job kann dir also nie unbemerkt Kosten verursachen. Du kannst das Credit-Paket deines Tarifs über den Regler erhöhen, den Tarif wechseln oder eine einmalige Pay-as-you-go-Aufladung kaufen ($10 / $50 / $100). PAYG-Credits bleiben über Abrechnungszyklen hinweg erhalten und werden nach den Tarif-Credits verbraucht."
       },
       "changePlans": {
-        "question": "Kann ich jederzeit den Plan wechseln?",
-        "answer": "Ja, Sie können jederzeit upgraden. Für ein Downgrade müssen Sie bis zum Ende Ihres aktuellen Abrechnungszeitraums warten."
+        "question": "Kann ich den Tarif jederzeit wechseln?",
+        "answer": "Upgrades gelten sofort und werden vom Zahlungsanbieter anteilig berechnet. Ein Downgrade oder ein kleineres Credit-Paket wird auf das Ende des bereits bezahlten Zeitraums geplant, du behältst also bis dahin, was du gekauft hast. Eine geplante Änderung lässt sich in der Regel abbrechen, bevor sie wirksam wird."
       },
       "payAsYouGo": {
-        "question": "Wie funktioniert der Pay-As-You-Go-Plan?",
-        "answer": "Pay As You Go ist eine einmalige Aufladung: Wählen Sie eine Stufe für $10 / $50 / $100 und Ihrem Guthaben werden 8.000 / 40.000 / 80.000 Credits gutgeschrieben (ca. $1,25 pro 1.000 Credits). Kein Abo erforderlich, die Credits bleiben über Erneuerungszyklen hinweg erhalten und werden erst verbraucht, wenn Ihre Abo-Credits aufgebraucht sind."
+        "question": "Wie funktioniert Pay as you go?",
+        "answer": "Pay as you go ist eine einmalige Aufladung: Wähle $10, $50 oder $100 und deine Wallet wird mit 8.000, 40.000 oder 80.000 Credits gutgeschrieben. Kein Abonnement nötig. Diese Credits bleiben über Abrechnungszyklen hinweg erhalten und werden erst verbraucht, wenn die Credits deines Tarifs aufgebraucht sind."
       },
       "sharedStorage": {
-        "question": "Wird Speicher zwischen Benutzern geteilt?",
-        "answer": "Nein, jedes Konto hat seinen eigenen Speicherplatz. Für Teams kann der Speicher je nach Ihrem Plan und Ihren Bedürfnissen unter Mitgliedern geteilt werden."
+        "question": "Wird Speicher zwischen Nutzern geteilt?",
+        "answer": "Jedes Konto hat seinen eigenen Speicher. Team-Tarife ergänzen einen gemeinsamen Pool: Die Dateien eines Workspace zählen gegen das Kontingent des Teams statt gegen das jedes einzelnen Mitglieds."
+      },
+      "conversationCost": {
+        "question": "Für wie viele Konversationen reichen meine Credits?",
+        "answer": "Das hängt davon ab, wie viel Arbeit du verlangst, deshalb hier beide Enden. Eine schlichte Frage mit Antwort, ganz ohne Tool, kostet rund {simpleCredits} Credits. Mit einem Agenten einen Workflow zu bauen ist das schwere Ende: Er durchsucht den Tool-Katalog, liest deine Tabellen, legt Nodes an und verdrahtet sie, führt den Workflow aus und liest die Ergebnisse zurück, und bei jedem einzelnen dieser Tool-Aufrufe geht der gesamte Verlauf erneut an das Modell. Gemessen an allen echten Konversationen, in denen ein Agent Tools aufgerufen hat, rund 5 Runden und 45 Tool-Aufrufe, kostet eine etwa {agentCredits} Credits, und ein Aufbau, der mehr Runden braucht, kostet entsprechend mehr. Ein einzelner Klassifizierungsschritt in einem laufenden Workflow liegt bei etwa {classifyCredits} Credits. Die Zahlen sind auf einem Spitzenmodell wie Claude Sonnet 5 gerechnet; leichtere Modelle kosten ein Vielfaches weniger. Abgerechnet werden die Tokens, die ein Modell liest und schreibt, nie einzelne Nachrichten.",
+        "examplesCaption": "Was die {credits} Credits kaufen, die in jedem bezahlten Tarif enthalten sind:",
+        "examples": {
+          "simpleChat": {
+            "count": "{count} Konversationen",
+            "detail": "Frage und Antwort, ganz ohne Tool. Etwa {credits} Credits pro Stück."
+          },
+          "agentChat": {
+            "count": "{count} Konversationen zum Workflow-Bau",
+            "detail": "Ein Agent, der mit dir Tools sucht, Nodes anlegt und verdrahtet und den Lauf testet. Gerechnet auf eine typische Konversation mit Tool-Aufrufen, rund 5 Runden und 45 Aufrufe; ein längerer Aufbau kostet mehr. Etwa {credits} Credits pro Stück."
+          },
+          "classifyStep": {
+            "count": "{count} Klassifizierungsschritte",
+            "detail": "Eine einzelne Weichen- oder Sortierentscheidung in einem laufenden Workflow. Etwa {credits} Credits pro Stück."
+          }
+        }
+      },
+      "rollover": {
+        "question": "Werden nicht genutzte Credits übertragen?",
+        "answer": "Tarif-Credits werden bei jeder Verlängerung zurückgesetzt: Das Paket eines Monats ist dafür gedacht, in diesem Monat verbraucht zu werden. Pay-as-you-go-Aufladungen verhalten sich anders. Sie bleiben über Verlängerungen hinweg in deiner Wallet und werden erst genutzt, wenn die Tarif-Credits des Monats aufgebraucht sind."
       }
     },
     "creditSlider": {
@@ -5325,6 +5521,10 @@
     "unauthorized": "Nicht autorisierter Zugriff",
     "mustBeLoggedIn": "Sie müssen angemeldet sein, um auf Einstellungen zuzugreifen.",
     "signIn": "Anmelden",
+    "agentDefaults": {
+      "title": "Standardeinstellungen für Agenten und Chat",
+      "subtitle": "Optionen, die standardmäßig für jede Agenten-Unterhaltung und jeden neuen allgemeinen Chat in diesem Workspace gelten."
+    },
     "bundles": {
       "title": "Katalog-Bundles",
       "subtitle": "Verteilen Sie signierte Modell- und API-Katalog-Bundles an Community Editions.",
@@ -5497,7 +5697,8 @@
       "security": "Sicherheit",
       "preferences": "Einstellungen",
       "notifications": "Benachrichtigungen",
-      "advanced": "Erweitert"
+      "advanced": "Erweitert",
+      "trophies": "Trophäen"
     },
     "common": {
       "loading": "Laden...",
@@ -5580,11 +5781,20 @@
       "creditLimitDescription": "Anzahl der Credits, die ohne Bestätigung verwendbar sind",
       "chatDefaultsTitle": "Chat-Standards",
       "chatDefaultsDescription": "Standardoptionen für neue Unterhaltungen in diesem Workspace.",
+      "chatDefaultsLink": "Agenten- und Chat-Einstellungen öffnen",
       "savePreferences": "Einstellungen speichern",
       "workflowLayoutDirection": "Workflow-Anordnung",
       "workflowLayoutDirectionDescription": "Leserichtung des Workflow-Editors: von links nach rechts oder von oben nach unten. Legt fest, wo Verbindungen und Schaltflächen der Knoten sitzen und wie das automatische Layout den Graphen anordnet.",
       "workflowLayoutDirectionHorizontal": "Von links nach rechts",
-      "workflowLayoutDirectionVertical": "Von oben nach unten"
+      "workflowLayoutDirectionVertical": "Von oben nach unten",
+      "inspectorDock": "Knoten-Inspektor",
+      "inspectorDockDescription": "Wo die Konfiguration eines Knotens geöffnet wird: schwebend über der Arbeitsfläche oder als Tab der Seitenleiste, damit sie den Graphen nicht verdeckt.",
+      "inspectorDockCanvas": "Schwebend auf der Arbeitsfläche",
+      "inspectorDockPanel": "In der Seitenleiste",
+      "inspectorOpenMode": "Klick auf einen Knoten öffnet",
+      "inspectorOpenModeDescription": "Wie viel sich beim Klick auf einen Knoten während des Bauens öffnet: nur seine Einstellungen oder die vollständige Ansicht mit dem, was den Knoten speist, und dem, was er erzeugt hat. Beim Öffnen eines Laufs erscheint immer die vollständige Ansicht.",
+      "inspectorOpenModeSimple": "Nur die Einstellungen",
+      "inspectorOpenModeAdvanced": "Einstellungen, Eingabe und Ausgabe"
     },
     "notifications": {
       "title": "Benachrichtigungseinstellungen",
@@ -5928,7 +6138,9 @@
       "workflowFailedTitle": "Workflow fehlgeschlagen",
       "workflowFailedMessage": "Die Workflow-Ausführung ist fehlgeschlagen. Überprüfen Sie die fehlgeschlagenen Schritte für Details.",
       "workflowTimeoutTitle": "Workflow-Zeitüberschreitung",
-      "workflowTimeoutMessage": "Die Workflow-Ausführung hat die maximal erlaubte Zeit überschritten."
+      "workflowTimeoutMessage": "Die Workflow-Ausführung hat die maximal erlaubte Zeit überschritten.",
+      "rerunRefusedTitle": "Neustart abgelehnt",
+      "rerunRefusedMessage": "Der Lauf konnte dort nicht neu starten. Möglicherweise läuft er noch, oder dieser Schritt hat kein Ergebnis, das sich wiederholen ließe. Falls er noch läuft, warten Sie, bis er zur Ruhe kommt, und versuchen Sie es erneut."
     },
     "inspector": {
       "manualTriggerTitle": "Manueller Trigger",
@@ -6181,6 +6393,46 @@
       "item": "Item",
       "noData": "No data",
       "noExecutionData": "Keine Ausführungsdaten",
+      "runData": {
+        "viewFile": "Datei ansehen",
+        "downloadFile": "Datei herunterladen",
+        "copyValue": "Wert kopieren",
+        "copyAll": "Alles kopieren",
+        "copied": "Kopiert",
+        "viewSwitcherLabel": "Datenansicht",
+        "viewTree": "Baum",
+        "viewJson": "Rohes JSON",
+        "viewTable": "Tabelle",
+        "tableUnavailable": "Diese Daten sind keine Liste von Zeilen und lassen sich daher nicht als Tabelle anzeigen.",
+        "tableColumnsTruncated": "Die ersten {shown} Spalten werden angezeigt, {hidden} weitere sind ausgeblendet.",
+        "jsonBadge": "JSON",
+        "expandJson": "Diesen JSON-Wert aufklappen",
+        "collapseJson": "Diesen JSON-Wert zuklappen",
+        "showMore": "Mehr anzeigen",
+        "showLess": "Weniger anzeigen",
+        "unresolvedBadge": "Nicht aufgelöst",
+        "unresolvedInvalidTemplate": "Die Engine konnte diesen Ausdruck nicht auswerten, der Wert blieb unverändert.",
+        "unresolvedVariable": "Eine Variablenvorlage erreichte diesen Wert, ohne ersetzt zu werden.",
+        "unresolvedStringifiedObject": "Ein Objekt wurde in Text umgewandelt, bevor es diesen Wert erreichte.",
+        "stateRunning": "Läuft",
+        "stateAwaiting": "Wartet",
+        "stateRunningParams": "Der Knoten wird ausgeführt. Dies sind die Werte, mit denen er gestartet wurde, vor der Auflösung.",
+        "stateRunningOutput": "Der Knoten wird ausgeführt. Seine Ausgabe erscheint hier, sobald er fertig ist.",
+        "stateAwaitingParams": "Der Knoten ist auf ein Signal pausiert. Dies sind die Werte, mit denen er gestartet wurde.",
+        "stateAwaitingOutput": "Der Knoten ist auf ein Signal pausiert. Seine Ausgabe erscheint hier, sobald das Signal aufgelöst ist.",
+        "signalWaitTimer": "Warte-Timer",
+        "signalUserApproval": "Benutzerfreigabe",
+        "signalWebhookWait": "Webhook-Rückruf",
+        "signalInterface": "Interface-Aktion",
+        "signalAgentExecution": "Agenten-Ausführung",
+        "signalBrowserTakeover": "Browser-Übernahme",
+        "signalExpiresAt": "läuft {date} ab",
+        "noResolvedParams": "Keine aufgelösten Parameter",
+        "configuredParamsTitle": "Gestartet mit",
+        "mismatchTitle": "{count, plural, one {# Parameter wurde von diesem Lauf nicht gemeldet} other {# Parameter wurden von diesem Lauf nicht gemeldet}}",
+        "mismatchRenamed": "Unter einem anderen Namen gemeldet: {runtimeKey}",
+        "mismatchNotReported": "Am Knoten konfiguriert, fehlt aber in dem, was der Lauf gemeldet hat."
+      },
       "fileTypeAudio": "Audio",
       "fileTypeDocument": "Dokument",
       "fileTypeFile": "Datei",
@@ -6836,7 +7088,9 @@
     "rerunConfirm": {
       "title": "Ab diesem Schritt neu starten?",
       "message": "Dieser Lauf ist automatisch. Ein Neustart hier führt diesen Schritt erneut aus und lässt danach den Rest des Workflows von selbst weiterlaufen, was kostenpflichtige Tools aufrufen und echte Nachrichten senden kann.",
-      "confirm": "Neu starten"
+      "confirm": "Neu starten",
+      "scopeEpoch": "Epoche {epoch}",
+      "scopeLatestEpoch": "Neueste Epoche dieses Schritts"
     },
     "canvas": {
       "portSingleTargetHint": "Dieser Ausgang ist bereits verbunden. Ein Port führt zu genau einem Knoten - füge einen Fork-Knoten hinzu, um mehrere parallel auszuführen.",
@@ -6875,6 +7129,9 @@
       "backToHome": "Zurück zur Startseite",
       "searchPlaceholder": "{context} suchen...",
       "frequentlyUsed": "Häufig verwendet",
+      "paletteCategories": "Kategorien",
+      "paletteNodes": "Knoten",
+      "paletteIntegrations": "Integrationen",
       "mcp": "MCP",
       "noApiFound": "Keine API gefunden",
       "noToolFound": "Kein Tool gefunden",
@@ -7007,7 +7264,24 @@
       "close": "Schließen",
       "layoutDirection": "Anordnung",
       "layoutHorizontal": "Von links nach rechts",
-      "layoutVertical": "Von oben nach unten"
+      "layoutVertical": "Von oben nach unten",
+      "inspectorDock": "Inspektor",
+      "inspectorDockCanvas": "Schwebend",
+      "inspectorDockPanel": "Seitenleiste",
+      "inspectorOpenMode": "Klick auf einen Knoten öffnet",
+      "inspectorOpenModeSimple": "Nur die Einstellungen",
+      "inspectorOpenModeAdvanced": "Einstellungen, Eingabe und Ausgabe",
+      "paletteTooltip": {
+        "badgeTrigger": "Auslöser",
+        "badgeIntegration": "Integration",
+        "badgeCategory": "Kategorie",
+        "badgeNode": "Knoten",
+        "details": "Details",
+        "requiresPlan": "Erfordert {plan}",
+        "hintClickAdd": "Zum Hinzufügen klicken",
+        "hintClickBrowse": "Zum Durchsuchen klicken",
+        "hintDrag": "oder auf die Arbeitsfläche ziehen"
+      }
     },
     "nodes": {
       "filePreview": {
@@ -7159,11 +7433,17 @@
       "generate": {
         "title": "Generieren",
         "description": "Erzeugt aus einer Eingabe ein Element: Bild, Video, Audio, Stimme oder Musik. Das gewählte Modell bestimmt das erzeugte Format, die akzeptierten Parameter und die Kosten pro Lauf.",
+        "assetType": "Asset-Typ",
+        "provider": "Anbieter",
+        "credential": "Schlüssel und Abrechnung",
         "model": "Modell",
         "modelPlaceholder": "Modell auswählen",
         "modelsLoading": "Modelle werden geladen...",
         "modelHint": "Ein Modellwechsel entfernt Parameter, die das neue Modell nicht akzeptiert.",
         "noModels": "Auf dieser Installation sind keine Generierungsmodelle verfügbar.",
+        "modelsUnavailable": "Der Modellkatalog konnte gerade nicht gelesen werden. Das sagt nichts darüber aus, ob Generierung hier funktioniert: versuchen Sie es gleich noch einmal.",
+        "unknownModel": "Dieser Knoten verwendet das Modell „{model}“, das diese Installation nicht anbietet. Wählen Sie ein anderes Modell, sonst wird die Ausführung abgelehnt.",
+        "parameters": "Parameter",
         "selectValue": "Wert auswählen",
         "filePlaceholder": "z. B. {{core:download.output.file}}",
         "limitRange": "Zulässiger Bereich: {min} bis {max}",
@@ -7305,7 +7585,37 @@
         "opacityHint": "Zwischen {min} und {max}. Standard: 1.",
         "startSeconds": "Start (Sekunden)",
         "endSeconds": "Ende (Sekunden)",
-        "overlayTimingHint": "Start und Ende leer lassen, um das Overlay im ganzen Video anzuzeigen."
+        "overlayTimingHint": "Start und Ende leer lassen, um das Overlay im ganzen Video anzuzeigen.",
+        "opSubtitles": "Untertitel einbrennen",
+        "opSubtitlesDesc": "Brennt zeitgesteuerte Untertitel in das Bild eines Videos",
+        "subtitlesVideoHint": "Zuletzt untertiteln: Die Untertitel werden Teil des Bildes und lassen sich danach nicht mehr entfernen.",
+        "cues": "Untertitel",
+        "cue": "Untertitel {index}",
+        "cueText": "Text",
+        "cueTextPlaceholder": "Die auf dem Bildschirm gezeigte Zeile",
+        "cueStartSeconds": "Erscheint bei (Sekunden)",
+        "cueEndSeconds": "Verschwindet bei (Sekunden)",
+        "addCue": "Untertitel hinzufügen",
+        "removeCue": "Untertitel entfernen",
+        "moveCueUp": "Untertitel nach oben",
+        "moveCueDown": "Untertitel nach unten",
+        "cuesHint": "Bis zu {max} Untertitel, der Reihe nach und ohne Überschneidung. Richten Sie sie an dem Ton aus, der tatsächlich im Video ist.",
+        "cuesExpressionHint": "Diese Untertitelspur wird von einem vorgelagerten Knoten berechnet und kann hier nicht bearbeitet werden.",
+        "subtitleStyle": "Stil",
+        "subtitleStyleTiktok": "Kurzformat",
+        "subtitleStyleTiktokDesc": "Groß, fett, Großbuchstaben, oberhalb der Mitte",
+        "subtitleStyleClassic": "Klassisch",
+        "subtitleStyleClassicDesc": "Kleiner, gemischte Schreibung, nahe am unteren Rand",
+        "fontFamily": "Schriftart",
+        "fontFamilyPlaceholder": "Standardschriftart",
+        "fontFamilyHint": "Leer lassen, außer Sie brauchen eine bestimmte Schrift: Eine nicht gefundene Schrift lässt den Lauf scheitern, statt ersetzt zu werden.",
+        "fontSizePercent": "Schriftgröße (% der Höhe)",
+        "fontSizePercentHint": "Zwischen {min} und {max}. Leer behält die Größe des Stils.",
+        "positionPercent": "Position (% von oben)",
+        "positionPercentHint": "Zwischen {min} und {max}. Leer behält die Position des Stils.",
+        "textColor": "Textfarbe",
+        "outlineColor": "Konturfarbe",
+        "outlineColorHint": "Die Kontur hält die Untertitel auch vor hellen Aufnahmen lesbar."
       },
       "fork": {
         "outputBranches": "Ausgabezweige",
@@ -7672,7 +7982,8 @@
       "paste": "Einfügen",
       "selectAll": "Alle auswählen",
       "autoLayout": "Automatisches Layout",
-      "fitView": "Ansicht anpassen"
+      "fitView": "Ansicht anpassen",
+      "ctrlKeyName": "Strg"
     },
     "credentialSelector": {
       "accountLabel": "Konto für diesen Schritt",
@@ -7867,7 +8178,9 @@
       "tabFleet": "Flotte",
       "tabMetrics": "Metriken",
       "shared": "Geteilt",
-      "tabBoard": "Board"
+      "tabBoard": "Board",
+      "tabMemory": "Gedächtnis",
+      "tabSettings": "Einstellungen"
     },
     "skill": {
       "title": "Skills",
@@ -8215,8 +8528,13 @@
     "role": "Was ist Ihre Rolle?",
     "customRolePlaceholder": "Geben Sie Ihre Rolle ein...",
     "companySize": "Unternehmensgröße",
-    "useCasesLabel": "Wofür werden Sie LiveContext verwenden?",
-    "experienceLevel": "Erfahrungsstufe",
+    "primaryGoalLabel": "Ihr Hauptziel",
+    "primaryGoalRequired": "Wählen Sie ein Hauptziel, um fortzufahren",
+    "toolsUsedLabel": "Welche Tools nutzen Sie bereits?",
+    "toolsUsedHint": "Optional, wählen Sie alles Zutreffende aus",
+    "previousToolLabel": "Womit automatisieren Sie heute?",
+    "referralSourceLabel": "Wie haben Sie von LiveContext erfahren?",
+    "step3Required": "Beantworten Sie beide Fragen, um abzuschließen",
     "loginRequired": "Anmeldung erforderlich",
     "loginRequiredDescription": "Bitte melden Sie sich an, um Ihre Profileinrichtung abzuschließen",
     "signIn": "Anmelden",
@@ -8228,12 +8546,12 @@
       "description": "Erzählen Sie uns ein wenig über sich, um Ihre Erfahrung zu personalisieren"
     },
     "step2": {
-      "title": "Was interessiert Sie?",
-      "description": "Wählen Sie die Themen aus, die Sie am meisten interessieren"
+      "title": "Was möchten Sie zuerst automatisieren?",
+      "description": "Wählen Sie, was am wichtigsten ist, das prägt Ihre ersten Vorschläge"
     },
     "step3": {
-      "title": "Ihre Ziele",
-      "description": "Helfen Sie uns zu verstehen, wie wir Ihnen am besten helfen können"
+      "title": "Fast geschafft",
+      "description": "Noch zwei Fragen, dann kann es losgehen"
     },
     "roles": {
       "sales": "Vertrieb",
@@ -8251,62 +8569,51 @@
       "freelancer": "Freiberufler",
       "other": "Sonstiges"
     },
-    "interests": {
-      "automation": "Automatisierung",
-      "aiMl": "KI & Maschinelles Lernen",
-      "dataAnalytics": "Daten & Analytics",
-      "integrations": "Integrationen",
-      "productivity": "Produktivitätstools",
-      "businessIntelligence": "Business Intelligence",
-      "customerExperience": "Kundenerfahrung",
-      "salesCrm": "Vertrieb & CRM",
-      "marketingAutomation": "Marketing-Automatisierung",
-      "ecommerceTools": "E-Commerce-Tools",
-      "other": "Sonstiges"
-    },
-    "customInterestPlaceholder": "Geben Sie Ihr Interesse ein...",
-    "useCases": {
-      "workflowAutomation": "Workflow-Automatisierung",
-      "chatbotsAssistants": "Chatbots & Assistenten",
-      "dataIntegration": "Datenintegration",
-      "contentGeneration": "Inhaltsgenerierung",
-      "leadGeneration": "Lead-Generierung",
+    "primaryGoals": {
+      "emailFollowUps": "E-Mail-Nachfassen und Antworten",
+      "contentPublishing": "Inhalte erstellen und veröffentlichen",
+      "leadGeneration": "Leadgenerierung und CRM",
       "customerSupport": "Kundensupport",
-      "reportingDashboards": "Berichte & Dashboards",
-      "ecommerceAutomation": "E-Commerce-Automatisierung",
-      "teamCollaboration": "Teamzusammenarbeit",
-      "monitoringAlerts": "Überwachung & Benachrichtigungen",
-      "other": "Sonstiges"
+      "reporting": "Berichte und Dashboards",
+      "dataSync": "Daten zwischen Tools synchronisieren",
+      "monitoringAlerts": "Überwachung und Benachrichtigungen",
+      "aiAssistant": "Ein KI-Assistent für mein Team",
+      "other": "Etwas anderes"
     },
-    "customUseCasePlaceholder": "Geben Sie Ihren Anwendungsfall ein...",
-    "experience": {
-      "beginner": "Anfänger",
-      "beginnerDesc": "Gerade erst angefangen",
-      "intermediate": "Fortgeschritten",
-      "intermediateDesc": "Einige Erfahrung",
-      "advanced": "Experte",
-      "advancedDesc": "Power-User"
+    "tools": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "googleSheets": "Google Sheets",
+      "slack": "Slack",
+      "notion": "Notion",
+      "hubspot": "HubSpot",
+      "salesforce": "Salesforce",
+      "shopify": "Shopify",
+      "stripe": "Stripe",
+      "github": "GitHub",
+      "discord": "Discord",
+      "telegram": "Telegram",
+      "linkedin": "LinkedIn",
+      "airtable": "Airtable",
+      "other": "Andere"
+    },
+    "previousTools": {
+      "none": "Noch nichts",
+      "zapierMake": "Zapier oder Make",
+      "n8n": "n8n",
+      "customCode": "Eigener Code oder Skripte",
+      "otherPlatform": "Eine andere Plattform"
+    },
+    "referralSources": {
+      "search": "Suchmaschine",
+      "social": "Soziale Medien",
+      "wordOfMouth": "Ein Kollege oder Freund",
+      "github": "GitHub",
+      "article": "Ein Artikel oder Newsletter",
+      "aiAssistant": "Ein KI-Assistent hat es empfohlen",
+      "other": "Andere"
     },
     "ce": {
-      "experience": {
-        "firstInstall": "Erstinstallation",
-        "firstInstallDesc": "Einrichtung",
-        "operator": "Betreiber",
-        "operatorDesc": "Dienste betreiben",
-        "powerUser": "Power-User",
-        "powerUserDesc": "CE erweitern"
-      },
-      "experienceLevel": "Self-Hosting-Erfahrung",
-      "interests": {
-        "governance": "Governance",
-        "integrations": "Integrationen",
-        "localAutomation": "Lokale Automatisierung",
-        "localMarketplace": "Lokaler Marketplace",
-        "other": "Sonstiges",
-        "privateData": "Private Daten",
-        "selfHostedAgents": "Selbstgehostete Agenten",
-        "teamWorkflows": "Team-Workflows"
-      },
       "role": "Ihre CE-Rolle",
       "roles": {
         "community": "Community-Leiter",
@@ -8322,14 +8629,15 @@
         "title": "Richten Sie Ihren CE-Workspace ein"
       },
       "step2": {
-        "description": "Wählen Sie die lokalen Workflows und Integrationen, die Ihre Community pflegen wird",
-        "title": "Worauf soll sich diese Instanz konzentrieren?"
+        "description": "Wählen Sie die Arbeit, die dieser selbst gehostete Arbeitsbereich zuerst übernehmen soll",
+        "title": "Was soll diese Instanz zuerst automatisieren?"
       },
       "step3": {
-        "description": "Wählen Sie die Arbeit, die dieser selbstgehostete Workspace zuerst optimieren soll",
-        "title": "CE-Betriebsziele"
+        "description": "Noch zwei Fragen, dann ist Ihr Arbeitsbereich bereit",
+        "title": "Fast geschafft"
       },
       "teamSize": "Lokale Teamgröße",
+      "primaryGoalLabel": "Das Hauptziel dieser Instanz",
       "teamSizes": {
         "community": "Community",
         "department": "Abteilung",
@@ -8346,8 +8654,28 @@
         "privateAssistants": "Private Assistenten",
         "teamWorkspaces": "Team-Workspaces",
         "toolOrchestration": "Tool-Orchestrierung"
+      }
+    },
+    "firstBuild": {
+      "goalPrompts": {
+        "emailFollowUps": "Baue mir einen Workflow, der jeden Werktagmorgen meinen Posteingang durchgeht, die E-Mails findet, die noch auf eine Antwort von mir warten, und mir eine kurze, nach Dringlichkeit sortierte Zusammenfassung schickt.",
+        "contentPublishing": "Baue mir einen Workflow, der aus einer Idee eine Woche Content macht: die Beiträge entwerfen, mich freigeben lassen und sie dann nach Plan veröffentlichen.",
+        "leadGeneration": "Baue mir einen Workflow, der jeden neuen Lead erfasst, ihn mit Firmendaten anreichert, in mein CRM einträgt und innerhalb einer Minute eine personalisierte erste Antwort verschickt.",
+        "customerSupport": "Baue mir einen Agenten, der eingehende Supportanfragen liest, die üblichen selbst aus unserer Dokumentation beantwortet und den Rest mit einem Antwortvorschlag an mich weitergibt.",
+        "reporting": "Baue mir einen Workflow, der jeden Montagmorgen meine wichtigsten Zahlen sammelt, daraus ein Dashboard macht, das ich öffnen kann, und mir per E-Mail schickt, was sich seit letzter Woche geändert hat.",
+        "dataSync": "Baue mir einen Workflow, der meine Tools synchron hält: Ändert sich ein Datensatz auf der einen Seite, aktualisiere die andere und führe ein Protokoll über alles, was sich bewegt hat.",
+        "monitoringAlerts": "Baue mir einen Workflow, der regelmäßig prüft, was für mich wichtig ist, und mich nur benachrichtigt, wenn wirklich etwas meine Aufmerksamkeit braucht.",
+        "aiAssistant": "Baue mir einen Agenten, mit dem mein Team chatten kann, der unsere Dokumente kennt und in unseren Tools handeln kann, statt nur zu antworten.",
+        "internalAutomation": "Baue mir einen Workflow, der eine unserer wiederkehrenden internen Aufgaben von Anfang bis Ende übernimmt und mir jeden Lauf zeigt, damit ich ihm vertrauen kann.",
+        "privateAssistants": "Baue mir einen Assistenten, der auf dieser Installation läuft, aus unseren eigenen Dokumenten antwortet und sie nirgendwo sonst hinschickt.",
+        "dataPipelines": "Baue mir eine Pipeline, die regelmäßig Daten sammelt, sie bereinigt, in einer Tabelle ablegt und mir Bescheid gibt, wenn ein Lauf fehlschlägt.",
+        "toolOrchestration": "Baue mir einen Workflow, der mehrere unserer Tools zu einem Vorgang verkettet, mit einem Schritt, den ich vor dem letzten freigebe.",
+        "teamWorkspaces": "Baue mir einen gemeinsamen Arbeitsbereich für mein Team: eine Tabelle, in die wir alle schreiben, eine Seite zum Lesen und einen Workflow, der sie aktuell hält.",
+        "marketplacePublishing": "Baue mir eine kleine Anwendung, die ich veröffentlichen kann, mit einer Seite zur Nutzung und einem Workflow dahinter.",
+        "evaluationSandbox": "Baue mir ein kleines End-to-End-Beispiel, das zeigt, was diese Plattform kann: ein Trigger, ein paar Schritte und eine Seite, die das Ergebnis anzeigt."
       },
-      "useCasesLabel": "Was wird diese CE-Instanz ausführen?"
+      "toolsClause": "Ich arbeite hauptsächlich mit {tools}.",
+      "promptSeparator": " "
     }
   },
   "webhookSettings": {
@@ -8625,6 +8953,19 @@
     "manageSharedLinks": "Freigegebene Links verwalten"
   },
   "billing": {
+    "balance": {
+      "title": "Guthaben",
+      "upgrade": "Upgrade durchführen",
+      "total": "Monatliches Guthaben",
+      "remaining": "Verbleibend",
+      "remainingAmount": "{amount} Credits verbleibend",
+      "triggerLabel": "{amount}, {detail}",
+      "creditsAmount": "{amount} Credits",
+      "overAllowance": "+{percent}% über Ihrem Tarif",
+      "overAllowanceTiny": "Knapp über Ihrem Tarif",
+      "usedPercent": "{percent}% Ihres Tarifs verbraucht",
+      "viewUsage": "Verbrauch ansehen"
+    },
     "cancel": {
       "title": "Zahlung abgebrochen",
       "subtitle": "Ihre Zahlung wurde nicht verarbeitet",
@@ -8695,6 +9036,9 @@
       "title": "Ihr Guthaben kann dieses Modell nicht bezahlen",
       "explanation": "Ihre monatlichen Credits decken das Ausführen von Workflow-Knoten ab, aber nicht die Arbeit eines Modells (Chat, Agenten, Generierung). Diese wird aus dem Pay-as-you-go-Guthaben bezahlt, und davon haben Sie keines mehr.",
       "cta": "Pläne ansehen oder aufladen"
+    },
+    "planLocked": {
+      "nodeNotice": "Dieser Knoten ist ab dem Tarif {plan} verfügbar. Bis zum Upgrade schlägt er bei der Ausführung fehl."
     }
   },
   "localMcp": {
@@ -9423,7 +9767,15 @@
       "top": "Leistungsfähigstes, langsamer, am teuersten"
     },
     "tokens": "{count} Tokens",
-    "tpmLabel": "Tokens / Min."
+    "tpmLabel": "Tokens / Min.",
+    "creditEstimateShort": "~{credits} Credits",
+    "creditEstimateTooltip": {
+      "agentConversation": "Etwa {credits} Credits für eine typische Konversation, in der dieses Modell mit Tools arbeitet: rund 5 Runden und 45 Tool-Aufrufe. Eine Schätzung aus realer Nutzung, keine Obergrenze.",
+      "chatConversation": "Etwa {credits} Credits für einen typischen Austausch ohne Tool-Aufruf. Eine Schätzung aus realer Nutzung, keine Obergrenze.",
+      "guardrailCheck": "Etwa {credits} Credits pro Prüfung einer typischen Nachricht. Eine Schätzung aus realer Nutzung, keine Obergrenze.",
+      "classifyStep": "Etwa {credits} Credits pro Klassifizierung einer typischen Eingabe. Eine Schätzung aus realer Nutzung, keine Obergrenze."
+    },
+    "creditEstimateLabel": "Geschätzte Kosten"
   },
   "publicationReview": {
     "adminOnlyBadge": "Nur Admin",
@@ -9761,6 +10113,26 @@
     "runTitle": "Diese Aktion ausführen?",
     "toolLabel": "Tool"
   },
+  "askUser": {
+    "title": "Der Assistent hat eine Frage",
+    "subtitle": "Wählen Sie eine Antwort, damit er fortfahren kann",
+    "stepOf": "Frage {current} von {total}",
+    "next": "Weiter",
+    "back": "Zurück",
+    "waitingForYou": "Der Assistent wartet auf Ihre Antwort, um fortzufahren.",
+    "answerResumes": "Sein Zug ist beendet. Ihre Antwort startet ihn erneut.",
+    "selectOne": "Eine Option wählen",
+    "selectMultiple": "Eine oder mehrere Optionen wählen",
+    "otherOption": "Andere",
+    "otherPlaceholder": "Eigene Antwort eingeben",
+    "submit": "Antwort senden",
+    "submitting": "Wird gesendet",
+    "skip": "Überspringen",
+    "submitFailed": "Ihre Antwort konnte nicht gesendet werden. Bitte versuchen Sie es erneut.",
+    "submitFailedTitle": "Antwort nicht gesendet",
+    "resumeIntro": "Meine Antworten:",
+    "noAnswer": "Noch keine Antwort"
+  },
   "board": {
     "toggle": {
       "task": "Aufgaben",
@@ -9934,6 +10306,16 @@
     "copy": "Kopieren",
     "copied": "Kopiert",
     "anonymousCheckNotice": "Die tägliche Update-Prüfung sendet diese Version und eine zufällige Installations-ID, damit aktive selbst gehostete Installationen gezählt werden können. Der gespeicherte Eintrag enthält keine IP-Adresse, keinen Hostnamen und kein Konto. Setzen Sie CE_VERSIONCHECK_SENDINSTALLID=false, um die ID nicht mehr zu senden, oder CE_VERSIONCHECK_ENABLED=false, um die Prüfung zu deaktivieren."
+  },
+  "changelog": {
+    "whatsNew": "Neuigkeiten",
+    "dismiss": "Verstanden",
+    "learnMore": "Alle Updates ansehen",
+    "latest": {
+      "title": "Ihre Agenten fangen nicht mehr bei null an",
+      "body": "Agenten behalten jetzt, was sie lernen: eine Korrektur, eine Vorliebe, eine Regel des Hauses. Jede Notiz wird in jeden Lauf jedes Workflows dieses Arbeitsbereichs mitgenommen, sodass ein geplanter Agent am Montag anwendet, was Sie ihm am Freitag gesagt haben. Im Reiter Memory sehen Sie das Behaltene: korrigieren, Wichtiges anheften, Überflüssiges löschen.",
+      "mediaAlt": "Der Memory-Reiter mit dem, was die Agenten eines Arbeitsbereichs behalten haben, samt Typ, Geltungsbereich und Anheftung je Eintrag"
+    }
   },
   "optionalComponents": {
     "title": "Optionale Komponenten",
@@ -10435,5 +10817,567 @@
     "renameFailed": "Der Ordner konnte nicht umbenannt werden.",
     "deleteFailed": "Der Ordner konnte nicht gelöscht werden.",
     "moveFailed": "Das Verschieben konnte nicht abgeschlossen werden."
+  },
+  "agenda": {
+    "nav": {
+      "previous": "Vorheriger Zeitraum",
+      "next": "Nächster Zeitraum",
+      "today": "Heute"
+    },
+    "view": {
+      "month": "Monat",
+      "week": "Woche",
+      "day": "Tag",
+      "list": "Liste"
+    },
+    "weekRange": "{from} bis {to}",
+    "searchPlaceholder": "Suchen",
+    "clock": {
+      "tooltip": "Aktuelle Zeit in {zone}"
+    },
+    "datePicker": {
+      "open": "Zu einem Datum springen",
+      "month": "Monat",
+      "year": "Jahr",
+      "previousMonth": "Voriger Monat",
+      "nextMonth": "Nächster Monat",
+      "openWith": "{period}. Zu einem Datum springen"
+    },
+    "create": {
+      "title": "Neuer geplanter Workflow",
+      "description": "Vorgeschlagen ausgehend vom gewählten Zeitpunkt: {slot}.",
+      "slotWithTime": "{date} um {time}",
+      "nameLabel": "Name",
+      "namePlaceholder": "Wöchentlicher Umsatzbericht",
+      "confirm": "Erstellen und öffnen",
+      "createdTitle": "Workflow erstellt",
+      "createdMessage": "„{name}“ kann jetzt gebaut werden.",
+      "notLiveYet": "Der Zeitplan wird mit dem Workflow gespeichert. Er läuft erst, wenn der Workflow gebaut und als Produktion gesetzt ist.",
+      "slotActionAt": "Etwas für {date} um {time} planen",
+      "slotActionOn": "Etwas für {date} planen",
+      "monthlyDayGap": "Ein Zeitplan am {day}. läuft in kürzeren Monaten nicht."
+    },
+    "moreCount": "+{n} weitere",
+    "showLess": "Weniger anzeigen",
+    "movedBadge": "Vom Zeitplan verschoben",
+    "resource": {
+      "workflow": "Workflows",
+      "application": "Anwendungen",
+      "agent": "Agenten"
+    },
+    "kind": {
+      "schedule": "Zeitplan",
+      "webhook": "Webhook",
+      "manual": "Manuell",
+      "chat": "Chat",
+      "form": "Formular",
+      "datasource": "Tabelle",
+      "workflow": "Workflow",
+      "error": "Fehler"
+    },
+    "status": {
+      "planned": "Geplant",
+      "running": "Läuft",
+      "completed": "Abgeschlossen",
+      "failed": "Fehlgeschlagen",
+      "fired": "Ausgelöst",
+      "budgetBlocked": "Läuft nicht: Ausgabenlimit erreicht"
+    },
+    "filters": {
+      "resourceTypes": "Ressourcentypen",
+      "view": "Ansicht",
+      "settings": "Anzeigeeinstellungen",
+      "timezone": "Zeitzone",
+      "weekStart": "Woche beginnt am",
+      "monday": "Montag",
+      "sunday": "Sonntag",
+      "hourRange": "Angezeigte Stunden",
+      "showWeekends": "Wochenenden anzeigen",
+      "showPast": "Vergangene Ausführungen anzeigen",
+      "showPastHint": "Zeigt, was an vergangenen Tagen tatsächlich gelaufen ist.",
+      "showPaused": "Pausierte Zeitpläne anzeigen",
+      "compact": "Kompakte Zeilen",
+      "reset": "Anzeige zurücksetzen"
+    },
+    "menu": {
+      "runNow": "Jetzt ausführen",
+      "runNowHint": "Die geplante Ausführung findet trotzdem statt.",
+      "move": "Verschieben...",
+      "pause": "Zeitplan pausieren",
+      "resume": "Zeitplan fortsetzen",
+      "open": "Ressource öffnen",
+      "openRun": "Diesen Lauf öffnen"
+    },
+    "move": {
+      "title": "{name} verschieben",
+      "description": "Neues Datum: {date}",
+      "timeLabel": "Uhrzeit",
+      "scopeNext": "Nur dieser Termin",
+      "scopeNextHint": "Spätere Ausführungen kehren zu ihrem üblichen Zeitpunkt zurück.",
+      "scopeAll": "Alle Termine",
+      "scopeAllHint": "Der Zeitplan selbst wird auf diese Uhrzeit gelegt.",
+      "scopeAllUnavailable": "Nicht möglich: {cron} hat keine eindeutige Uhrzeit zum Verschieben.",
+      "pastWarning": "Dieser Zeitpunkt ist vorbei, die Ausführung startet bei der nächsten Prüfung.",
+      "confirm": "Verschieben",
+      "scopeNextUnavailable": "Nur die nächste Ausführung lässt sich einzeln verschieben; diese liegt weiter vorn."
+    },
+    "common": {
+      "cancel": "Abbrechen",
+      "working": "Wird ausgeführt..."
+    },
+    "truncated": {
+      "schedules": "{n, plural, one {# Zeitplan läuft} other {# Zeitpläne laufen}} zu häufig, um hier vollständig dargestellt zu werden. Wechseln Sie zur Tagesansicht.",
+      "past": "Einige ältere Ausführungen in diesem Zeitraum werden nicht angezeigt."
+    },
+    "empty": {
+      "title": "Hier ist nichts geplant",
+      "description": "Zeitpläne aus Ihren Workflows, Anwendungen und Agenten erscheinen in diesem Kalender.",
+      "allFilteredTitle": "Kein Ressourcentyp ausgewählt",
+      "allFilteredDescription": "Schalten Sie einen Ressourcentyp wieder ein, um zu sehen, was geplant ist.",
+      "searchTitle": "Kein Treffer",
+      "searchDescription": "Keine geplante Ressource entspricht Ihrer Suche in diesem Zeitraum.",
+      "filteredTitle": "Nichts entspricht Ihren Filtern",
+      "filteredDescription": "Ihre Anzeigeeinstellungen blenden in diesem Zeitraum alles aus."
+    },
+    "errors": {
+      "loadTitle": "Kalender konnte nicht geladen werden",
+      "loadMessage": "Bitte erneut versuchen.",
+      "patternNotShiftable": "Dieser Zeitplan hat keine eindeutige Uhrzeit und lässt sich nicht als Ganzes verschieben. Verschieben Sie nur diesen Termin.",
+      "weekdaySetNotMatched": "Dieser Zeitplan läuft an festen Wochentagen, das gewählte Datum gehört nicht dazu. Verschieben Sie nur diesen Termin.",
+      "dayOfMonthUnsafe": "Ein monatlicher Zeitplan kann nicht nach dem 28. liegen, weil dieser Tag nicht in jedem Monat existiert.",
+      "notArmed": "Dieser Zeitplan ist pausiert.",
+      "executionRefused": "Die Ausführung konnte nicht gestartet werden.",
+      "notFound": "Diesen Zeitplan gibt es nicht mehr.",
+      "generic": "Etwas ist schiefgelaufen.",
+      "notTheNextOccurrence": "Nur die nächste Ausführung lässt sich einzeln verschieben. Eine spätere zu verschieben würde alle Ausführungen davor streichen. Nutzen Sie stattdessen \"Alle Termine\", oder verschieben Sie die nächste.",
+      "viewerRole": "Ihre Rolle in diesem Arbeitsbereich erlaubt keine Änderung von Zeitplänen.",
+      "scheduleRejected": "Der Zeitplan konnte nicht geändert werden. Möglicherweise wurde er archiviert."
+    },
+    "toasts": {
+      "movedTitle": "Verschoben",
+      "movedAll": "Alle künftigen Ausführungen nutzen die neue Uhrzeit.",
+      "movedNext": "Die nächste Ausführung wurde verschoben. Die folgenden bleiben unverändert.",
+      "ranTitle": "Gestartet",
+      "ranMessage": "Die geplante Ausführung findet weiterhin wie vorgesehen statt.",
+      "runFailedTitle": "Ausführung nicht möglich",
+      "pausedTitle": "Pausiert",
+      "pausedMessage": "Er löst nicht aus, bis Sie ihn fortsetzen.",
+      "resumedTitle": "Fortgesetzt",
+      "resumedMessage": "Er ist wieder scharf.",
+      "toggleFailedTitle": "Zeitplan konnte nicht geändert werden"
+    },
+    "hiddenOnWeekends": "{n, plural, one {# Ausführung fällt} other {# Ausführungen fallen}} auf ein ausgeblendetes Wochenende. Wochenenden anzeigen."
+  },
+  "badges": {
+    "title": "Trophäen",
+    "subtitle": "Abzeichen schalten sich von selbst frei, während Sie auf LiveContext bauen, ausführen und teilen.",
+    "summary": "{unlocked} von {total} freigeschaltet",
+    "recent": "Kürzlich freigeschaltet",
+    "nextUp": "Kurz vor dem Ziel",
+    "locked": "Gesperrt",
+    "unlockedOn": "Freigeschaltet am {date}",
+    "progress": "{value} / {threshold}",
+    "loadError": "Trophäen konnten nicht geladen werden.",
+    "publicHeading": "Trophäen",
+    "publicEmpty": "Noch keine Trophäen.",
+    "showAll": "Alle anzeigen",
+    "showLess": "Weniger anzeigen",
+    "detail": {
+      "requirementLabel": "So verdienst du ihn",
+      "remaining": "noch {count}",
+      "ladder": "Diese Familie"
+    },
+    "family": {
+      "FOUNDER": "Ursprung",
+      "TENURE": "Treue",
+      "BUILDER": "Erbauer",
+      "APP_MAKER": "App-Macher",
+      "SHIPPER": "Auslieferung",
+      "OPERATOR": "Betrieb",
+      "RELIABILITY": "Zuverlässigkeit",
+      "CONSISTENCY": "Beständigkeit",
+      "NIGHT_OWL": "Nachtschicht",
+      "PUBLISHER": "Veröffentlichung",
+      "SHARER": "Teilen",
+      "POPULARITY": "Reichweite"
+    },
+    "tier": {
+      "BRONZE": "Bronze",
+      "SILVER": "Silber",
+      "GOLD": "Gold",
+      "PLATINUM": "Platin",
+      "DIAMOND": "Diamant"
+    },
+    "requirement": {
+      "MEMBER_DAYS": "{count} Tage lang Mitglied sein",
+      "WORKFLOWS_CREATED": "{count} Workflows erstellen",
+      "APPLICATIONS_CREATED": "{count} Anwendungen erstellen",
+      "RUNS_LAUNCHED": "{count} Ausführungen starten",
+      "RUNS_COMPLETED": "{count} Läufe erfolgreich abschließen",
+      "ACTIVE_DAYS": "An {count} verschiedenen Tagen etwas ausführen",
+      "NIGHT_LAUNCHES": "{count} Ausführungen zwischen Mitternacht und 5 Uhr UTC starten",
+      "WORKFLOWS_PINNED": "{count} Workflows in der Produktion anheften",
+      "PUBLICATIONS_PUBLISHED": "{count} Elemente im Marktplatz veröffentlichen",
+      "PUBLICATIONS_PUBLIC": "{count} Veröffentlichungen öffentlich machen",
+      "PUBLICATION_USES": "Ihre Veröffentlichungen {count} Mal installieren lassen",
+      "DAYS_UNTIL_JOIN_CUTOFF": "Früh zu LiveContext stoßen"
+    },
+    "item": {
+      "founder_2026": {
+        "name": "Gründungsmitglied",
+        "requirement": "Sich vor Ende 2026 registrieren"
+      },
+      "tenure_30": {
+        "name": "Erster Monat"
+      },
+      "tenure_100": {
+        "name": "Hundert Tage"
+      },
+      "tenure_730": {
+        "name": "Zwei Jahre dabei"
+      },
+      "tenure_1095": {
+        "name": "Drei Jahre dabei"
+      },
+      "tenure_1825": {
+        "name": "Fünf Jahre dabei"
+      },
+      "builder_1": {
+        "name": "Erster Bau"
+      },
+      "builder_5": {
+        "name": "Tüftler"
+      },
+      "builder_10": {
+        "name": "Workflow-Schmied"
+      },
+      "builder_50": {
+        "name": "Automatisierungsarchitekt"
+      },
+      "builder_100": {
+        "name": "Baumeister"
+      },
+      "builder_300": {
+        "name": "Workflow-Legende"
+      },
+      "appmaker_1": {
+        "name": "App-Handwerker"
+      },
+      "appmaker_3": {
+        "name": "App-Studio"
+      },
+      "appmaker_25": {
+        "name": "App-Fabrik"
+      },
+      "appmaker_60": {
+        "name": "App-Imperium"
+      },
+      "shipper_1": {
+        "name": "Ausgeliefert"
+      },
+      "shipper_5": {
+        "name": "Im Produktivbetrieb"
+      },
+      "shipper_50": {
+        "name": "Produktionsstraße"
+      },
+      "operator_1": {
+        "name": "Erster Start"
+      },
+      "operator_10": {
+        "name": "Aufwärmen"
+      },
+      "operator_100": {
+        "name": "Operator"
+      },
+      "operator_5000": {
+        "name": "Flugleiter"
+      },
+      "operator_50000": {
+        "name": "Missionskontrolle"
+      },
+      "operator_1000000": {
+        "name": "Orbitalkommando"
+      },
+      "reliability_25": {
+        "name": "Grünes Licht"
+      },
+      "reliability_250": {
+        "name": "Ruhige Hand"
+      },
+      "reliability_10000": {
+        "name": "Uhrwerk"
+      },
+      "reliability_50000": {
+        "name": "Fehlerfreier Motor"
+      },
+      "consistency_3": {
+        "name": "Reingekommen"
+      },
+      "consistency_10": {
+        "name": "Stammgast"
+      },
+      "consistency_90": {
+        "name": "Engagiert"
+      },
+      "consistency_250": {
+        "name": "Unermüdlich"
+      },
+      "consistency_750": {
+        "name": "Immer da"
+      },
+      "nightowl_1": {
+        "name": "Nachtschicht"
+      },
+      "nightowl_25": {
+        "name": "Nachteule"
+      },
+      "nightowl_500": {
+        "name": "Nachtmaschine"
+      },
+      "publisher_1": {
+        "name": "Erste Veröffentlichung"
+      },
+      "publisher_3": {
+        "name": "Herausgeber"
+      },
+      "publisher_25": {
+        "name": "Fleißiger Herausgeber"
+      },
+      "publisher_60": {
+        "name": "Verlagshaus"
+      },
+      "sharer_1": {
+        "name": "Mit der Welt geteilt"
+      },
+      "sharer_5": {
+        "name": "Offene Hand"
+      },
+      "sharer_40": {
+        "name": "Säule der Gemeinschaft"
+      },
+      "popularity_1": {
+        "name": "Erste Installation"
+      },
+      "popularity_10": {
+        "name": "Mundpropaganda"
+      },
+      "popularity_500": {
+        "name": "Publikumsliebling"
+      },
+      "popularity_5000": {
+        "name": "Viral"
+      },
+      "popularity_50000": {
+        "name": "In aller Munde"
+      }
+    }
+  },
+  "generation": {
+    "formats": {
+      "image": "Bild",
+      "video": "Video",
+      "audio": "Ton",
+      "voice": "Sprache",
+      "music": "Musik"
+    },
+    "params": {
+      "negative_prompt": "Zu vermeiden",
+      "voice": "Stimme",
+      "language": "Sprache",
+      "style": "Stil",
+      "aspect_ratio": "Seitenverhältnis",
+      "resolution": "Auflösung",
+      "quality": "Qualität",
+      "duration_seconds": "Dauer (Sekunden)",
+      "n": "Anzahl",
+      "seed": "Seed",
+      "input_image": "Referenzbild",
+      "input_audio": "Referenz-Audio",
+      "input_video": "Referenzvideo"
+    },
+    "price": {
+      "perUnit": "{rate} Credits pro {unit}",
+      "plusBase": "zuzüglich {base} zum Start",
+      "flat": "{credits} Credits",
+      "min": "mindestens {credits}",
+      "max": "begrenzt auf {credits}",
+      "total": "{credits} Credits für diese Anfrage",
+      "unpriced": "Über den Plattformschlüssel nicht erhältlich"
+    },
+    "fields": {
+      "providerPlaceholder": "Anbieter auswählen",
+      "optionsLoading": "Werte werden geladen...",
+      "optionsTruncated": "Es werden die ersten Werte von {count} angezeigt. Geben Sie einen Wert ein, wenn der gesuchte fehlt.",
+      "optionsEmpty": "Der Anbieter hat für dieses Feld keine Werte zurückgegeben. Geben Sie einen ein, wenn Sie ihn kennen."
+    },
+    "modelCount": "{count} Modelle",
+    "empty": "Es ist noch kein Generierungsmodell verfügbar.",
+    "billedOn": "Abgerechnet über {quantity} {unit}",
+    "assetRoles": {
+      "source": "Quellbild",
+      "first_frame": "Erstes Bild",
+      "reference": "Referenzbild",
+      "mask": "Maske"
+    }
+  },
+  "studio": {
+    "composer": {
+      "placeholder": "Beschreiben Sie, was mit {model} entstehen soll",
+      "placeholderNoModel": "Wählen Sie ein Modell, um zu beginnen",
+      "send": "Erstellen",
+      "missingRequired": "Füllen Sie zuerst die markierten Einstellungen aus",
+      "addFile": "Datei hinzufügen",
+      "allSlotsFull": "Dieses Modell nimmt keine weiteren Dateien an",
+      "uploading": "Wird hochgeladen",
+      "uploadFailed": "Hochladen fehlgeschlagen",
+      "retryUpload": "Diese Datei erneut versuchen",
+      "removeFile": "Diese Datei entfernen",
+      "parameters": "Parameter"
+    },
+    "modelPicker": {
+      "change": "Modell wechseln",
+      "none": "Modell wählen",
+      "empty": "Es ist noch kein Generierungsmodell verfügbar.",
+      "back": "Zurück",
+      "stepKind": "Was erstellen",
+      "stepProvider": "Anbieter"
+    },
+    "params": {
+      "required": "{label} ist erforderlich",
+      "loadingOptions": "Anbieter wird abgefragt",
+      "optionsUnavailable": "Die verfügbaren Werte konnten nicht gelesen werden. Sie können einen eingeben.",
+      "optionsTruncated": "Es wird eine Auswahl gezeigt. Sie können einen nicht gelisteten Wert eingeben.",
+      "freeTextPlaceholder": "Wert eingeben",
+      "clear": "Leeren"
+    },
+    "untitled": "Kreation ohne Titel",
+    "thread": {
+      "loading": "Dieser Studio-Verlauf wird geladen"
+    },
+    "welcome": {
+      "title1": "Erschaffen Sie etwas Großartiges",
+      "title2": "Was erstellen wir heute?",
+      "title3": "Beschreiben Sie es, und es entsteht.",
+      "title4": "Ein Clip, ein Bild, eine Stimme. Sie entscheiden.",
+      "title5": "Was möchten Sie sehen?"
+    },
+    "turn": {
+      "noPrompt": "Keine Eingabe, dieser Durchgang lief mit seinen Dateien und Einstellungen.",
+      "running": "Wird erstellt. Bei Video kann das einige Minuten dauern.",
+      "noAnswer": "Hierauf kam keine Antwort zurück. Möglicherweise wurde es dennoch fertig und berechnet: Prüfen Sie Ihre Dateien, bevor Sie es erneut starten.",
+      "failed": "Dabei ist nichts entstanden.",
+      "savedNoPreview": "Fertig, aber es kam nichts zurück, was diese Seite zeigen kann. Falls etwas erzeugt wurde, liegt es in Ihren Dateien.",
+      "reuse": "Erneut verwenden",
+      "openInFiles": "In Dateien ansehen",
+      "chargedNoAsset": "Diese Generierung wurde ausgeführt und berechnet, aber die Datei konnte nicht gespeichert werden. Sichern Sie sie über den Link unten: er läuft in wenigen Minuten ab.",
+      "recoverAsset": "Datei beim Anbieter sichern"
+    },
+    "notices": {
+      "conversation_create_failed": "Dieser Studio-Verlauf konnte nicht gestartet werden, es wurde nichts gesendet und nichts berechnet.",
+      "conversation_unreadable": "Diese Unterhaltung konnte nicht gelesen werden, deshalb kann darin nichts erstellt werden. Laden Sie die Seite neu, oder beginnen Sie ein neues Studio.",
+      "connection_lost": "Die Verbindung brach währenddessen ab. Es läuft möglicherweise weiter und wird berechnet: Prüfen Sie Ihre Dateien, bevor Sie es erneut senden.",
+      "refused": "Dies wurde abgelehnt, bevor es lief, es wurde also nichts berechnet. Ihre Eingabe und Ihre Dateien sind noch da.",
+      "unexpected": "Unterwegs ist etwas schiefgegangen.",
+      "catalogue_empty": "Es ist noch kein Generierungsmodell verfügbar. Eine Administratorin oder ein Administrator kann eines hinzufügen.",
+      "dismiss": "Ausblenden"
+    },
+    "modeSwitch": {
+      "label": "Was hier zu tun ist",
+      "chat": "Chat",
+      "studio": "Studio"
+    },
+    "apps": {
+      "title": "Studio-Anwendungen",
+      "favorites": "Meine Studio-Anwendungen"
+    },
+    "payer": {
+      "change": "Wer dies bezahlt",
+      "platform": "Plattform-Schlüssel",
+      "ownKey": "Mein Schlüssel"
+    }
+  },
+  "budget": {
+    "advancedSection": "Erweitert",
+    "amountWithUnit": "{amount} {unit}",
+    "capHelp": "Leer lassen für kein Limit. Gezählt werden die Agentenkosten aller Läufe außer Testläufen aus dem Editor. Kostenpflichtige Integrationen und Generierung werden separat abgerechnet und zählen nicht dagegen.",
+    "capHelpCredits": "Maximale Credits, die dieser Workflow ausgeben kann. Bei Erreichen startet keine neue Ausführung.",
+    "capHelpDollars": "Maximale Ausgaben für diesen Workflow. Bei Erreichen startet keine neue Ausführung.",
+    "capLabel": "Kostenbudget",
+    "capPlaceholder": "Kein Limit",
+    "chipTitleCapped": "Agentenkosten {period}: {values} ({unit}), gegen das Limit",
+    "chipTitleUncapped": "Agentenkosten {period}: {values}. Kein Limit gesetzt.",
+    "periodCumulative": "Nie (dauerhaft)",
+    "periodLabel": "Zurücksetzen",
+    "periodMonth": "diesen Monat",
+    "periodMonthly": "Jeden Monat",
+    "periodTotal": "insgesamt",
+    "periodWeek": "diese Woche",
+    "periodWeekly": "Jede Woche",
+    "popoverCap": "Limit",
+    "popoverNeverResets": "Dieses Limit wird nie zurückgesetzt, das Kontingent beginnt also nicht von selbst neu.",
+    "popoverNoCap": "Keins gesetzt",
+    "popoverResetsOn": "Das Kontingent beginnt am {date} von Neuem.",
+    "popoverScope": "Zählt Agentenkosten in {unit}. Kostenpflichtige Integrationen und Generierung werden separat abgerechnet.",
+    "popoverSpent": "Ausgegeben",
+    "popoverStopped": "Limit erreicht: es startet kein neuer Lauf, bis das Kontingent von Neuem beginnt.",
+    "popoverStoppedForGood": "Limit erreicht: es startet kein neuer Lauf, bis Sie es erhöhen oder die Zurücksetzung ändern.",
+    "popoverTitle": "Agentenkosten",
+    "runCostTitle": "Kosten dieses Laufs, über alle Epochen hinweg",
+    "unitCredits": "Credits",
+    "unitDollars": "Dollar"
+  },
+  "memory": {
+    "explainer": "Was die Agenten in diesem Arbeitsbereich gelernt haben. Jede Zusammenfassung unten liegt im Kontext jedes Agenten; die Details dahinter werden nur gelesen, wenn ein Agent sie braucht. Das Gedächtnis gehört zu diesem Arbeitsbereich: Wechseln Sie den Arbeitsbereich, sehen Sie dessen Gedächtnis.",
+    "searchPlaceholder": "Gedächtnis durchsuchen...",
+    "createButton": "Neuer Eintrag",
+    "filterAll": "Alle",
+    "emptyTitle": "Noch keine Einträge",
+    "emptySubtitle": "Agenten speichern hier dauerhafte Fakten während ihrer Arbeit, und Sie können jederzeit einen hinzufügen oder korrigieren.",
+    "noMatches": "Kein Eintrag passt",
+    "noMatchesSubtitle": "Versuchen Sie ein anderes Wort oder entfernen Sie die Filter.",
+    "createTitle": "Neuer Eintrag",
+    "editTitle": "Eintrag bearbeiten",
+    "fieldTitle": "Titel",
+    "fieldTitlePlaceholder": "Release-Rhythmus",
+    "fieldSummary": "Zusammenfassung",
+    "fieldSummaryPlaceholder": "Das Team liefert donnerstags aus und friert mittwochnachmittags ein.",
+    "fieldSummaryHint": "Diese eine Zeile wird bei jedem Lauf dem Kontext jedes Agenten in diesem Arbeitsbereich hinzugefügt. Nennen Sie den Fakt, statt darauf zu verweisen. {count}/{max}",
+    "fieldContent": "Details",
+    "fieldContentPlaceholder": "Ausnahmen, Begründungen, alles was ein Agent lesen soll, sobald er diesen Eintrag für relevant hält.",
+    "fieldContentHint": "Nicht im Kontext. Ein Agent öffnet die Details bei Bedarf, wenn die Zusammenfassung relevant wirkt.",
+    "fieldType": "Typ",
+    "fieldPinned": "Immer im Kontext",
+    "fieldPinnedHint": "Anheften fügt die vollständigen Details jedem Lauf jedes Agenten hier hinzu; nutzen Sie es nur für Regeln, die nie übersehen werden dürfen.",
+    "pinnedBadge": "Angeheftet",
+    "pinAction": "Immer im Kontext halten",
+    "unpinAction": "Nicht mehr im Kontext halten",
+    "editAction": "Bearbeiten",
+    "deleteAction": "Löschen",
+    "scopeWorkspace": "Arbeitsbereich",
+    "scopeAgent": "Ein Agent",
+    "sourceUser": "Von einer Person hinzugefügt",
+    "sourceAgent": "Von einem Agenten gespeichert",
+    "metaLine": "{slug} · {recalls} mal abgerufen · aktualisiert am {updated}",
+    "save": "Speichern",
+    "saving": "Wird gespeichert...",
+    "cancel": "Abbrechen",
+    "close": "Schließen",
+    "toastCreated": "Eintrag gespeichert.",
+    "toastUpdated": "Eintrag aktualisiert.",
+    "toastDeleted": "Eintrag gelöscht.",
+    "type": {
+      "user": "Über den Nutzer",
+      "feedback": "Rückmeldung",
+      "project": "Projekt",
+      "reference": "Referenz"
+    },
+    "deleteConfirm": "Den Eintrag \"{title}\" löschen? Das lässt sich nicht rückgängig machen. Damit die Agenten ihn nicht mehr verwenden, er aber erhalten bleibt, deaktivieren Sie ihn stattdessen.",
+    "deleteTitle": "Diesen Eintrag löschen?",
+    "inactiveBadge": "Inaktiv",
+    "activateAction": "Wieder aktivieren",
+    "deactivateAction": "Deaktivieren",
+    "loadFailedTitle": "Speicher konnte nicht geladen werden",
+    "loadFailedSubtitle": "Die Liste wurde nicht geladen, sie ist also nicht unbedingt leer. Erneut versuchen."
   }
 }

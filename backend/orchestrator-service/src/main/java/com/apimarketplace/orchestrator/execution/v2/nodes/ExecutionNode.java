@@ -459,6 +459,23 @@ public interface ExecutionNode {
     }
 
     /**
+     * Returns the failure strategy for split nodes ("stop-on-error" or
+     * "continue-anyway").
+     *
+     * <p>Read alongside the list expression and max items so the executor can
+     * report the split's FULL configuration back to the inspector. A configured
+     * field the run does not report is a field the user cannot see, which is the
+     * whole reason this accessor exists.
+     *
+     * <p>Default implementation returns null. Override in SplitNode.
+     *
+     * @return the split strategy, or null for non-split nodes
+     */
+    default String getSplitStrategy() {
+        return null;
+    }
+
+    /**
      * Returns the body nodes for container nodes (Split).
      * Body nodes are the nodes executed inside the container's iteration.
      *
@@ -597,6 +614,29 @@ public interface ExecutionNode {
      */
     default String schemaNodeType() {
         return getType() != null ? getType().name() : null;
+    }
+
+    /**
+     * Stable key under which this node's launches are counted in the platform-wide
+     * usage ledger, or {@code null} for a node that must not be counted.
+     *
+     * <p>Two shapes, and the prefix is what routes the count to its owner:
+     * <ul>
+     *   <li>{@code node:<type>} - a built-in node type, counted in
+     *       {@code orchestrator.node_usage_stats}.</li>
+     *   <li>{@code tool:<identifier>} - one catalog endpoint, pushed to
+     *       catalog-service, which alone can resolve the identifier to its API.
+     *       The identifier is passed through EXACTLY as the plan wrote it (UUID,
+     *       {@code apiSlug/toolSlug} or bare {@code toolSlug}); resolving it here
+     *       by splitting the string would be guesswork, because a tool slug is
+     *       derived at import and carries no recoverable API boundary.</li>
+     * </ul>
+     *
+     * <p>Default: {@code node:} + the lowercased {@link NodeType}. Overridden by
+     * {@code StepNode}, the only node that stands for something the catalog owns.
+     */
+    default String usageKey() {
+        return getType() != null ? "node:" + getType().name().toLowerCase(java.util.Locale.ROOT) : null;
     }
 
     /**

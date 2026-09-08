@@ -76,6 +76,12 @@ describe('who is allowed to record a pick', () => {
     expect(files.filter(isCaller).sort(), 'the only places allowed to record a pick').toEqual([
       // The epoch dropdown of the application tab.
       'components/chat/ApplicationTabContent.tsx',
+      // Clicking one PAST occurrence on the calendar: the user pointed at a single
+      // fire, so the run opens on that fire rather than on all of them. Reached only
+      // through the occurrence menu - never from an effect. (It used to be reachable
+      // from `handleSelect` too, which navigated straight there; every chip opens its
+      // menu now, because leaving the page is the one click here with no undo.)
+      'components/views/AgendaView.tsx',
       // The epoch selector of the Run panel.
       'components/workflow/run-panel/RunPanelContent.tsx',
       // `selectAllEpochs`, called from the three "fire from here" controls.

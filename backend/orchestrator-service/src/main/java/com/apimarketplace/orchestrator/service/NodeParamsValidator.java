@@ -46,6 +46,19 @@ public class NodeParamsValidator {
             "branches", "conditions", "rules", "conditions",
             "cases", "conditions"
         )),
+        // DecisionNodeCreator.executeAddApproval reads BOTH conventions for every approval param,
+        // but the node's documented schema stores only one spelling of each, so the other one
+        // used to be rejected with "Unknown parameter" for a value the creator would have
+        // honoured - and for timeoutMs, requiredApprovals and approverRoles the builder help
+        // recommended exactly the spelling that was rejected. Verified live 2026-09-05:
+        // add_node(type='approval', params={timeoutMs: 86400000}) failed while timeout_ms passed.
+        Map.entry("approval", Map.ofEntries(
+            Map.entry("timeoutMs", "timeout_ms"), Map.entry("timeout", "timeout_ms"),
+            Map.entry("approverRoles", "approver_roles"), Map.entry("roles", "approver_roles"),
+            Map.entry("requiredApprovals", "required_approvals"),
+            Map.entry("context_template", "contextTemplate"),
+            Map.entry("continuation_mode", "continuationMode")
+        )),
         Map.entry("split", Map.of(
             "list", "items", "input", "items", "array", "items",
             "data", "items", "collection", "items", "source", "items"
@@ -170,6 +183,19 @@ public class NodeParamsValidator {
     }
 
     /**
+     * Node types whose EXTRA parameters are decided by a live catalog, not by
+     * {@code node_type_documentation}.
+     *
+     * <p>Only {@code generate} so far. Which parameters a generation model
+     * accepts, and their bounds, are declared per model by the generation
+     * catalog and checked there before the provider is called - so a fixed
+     * vocabulary here can only be staler than the answer the platform will give,
+     * and refusing on it blocks a call the platform would have taken. The plan
+     * exporter accepts them for the same reason.
+     */
+    private static final java.util.Set<String> CATALOG_JUDGED_PARAMS = java.util.Set.of("generate");
+
+    /**
      * Validate parameters for a node type.
      *
      * @param nodeType The node type (e.g., "agent", "decision", "split")
@@ -259,11 +285,27 @@ public class NodeParamsValidator {
             // Skip 'label' as it's always valid
             if ("label".equals(paramName)) continue;
 
-            // Accept if it's a known alias
+            // Accept if it's a known alias.
+            //
+            // KNOWN GAP, pre-existing and deliberately left alone here: an alias skips the
+            // type/enum/range checks below, because those read the schema entry and an alias has
+            // none. So `timeout_ms: "abc"` is INVALID_TYPE while `timeoutMs: "abc"` passes and the
+            // creator falls back to the documented default - laxer on a malformed value, never a
+            // corrupt node. Closing it means validating against the canonical entry while still
+            // reporting under the caller's spelling; that is a behaviour change for EVERY aliased
+            // node type at once (a template string sent for an array-typed param would start
+            // failing where it passes today), so it belongs in its own change with its own
+            // evidence, not in a fix about which spellings are accepted.
             if (aliases.containsKey(paramName)) continue;
 
             // Accept-and-ignore a param this node type used to support (see the field's javadoc).
             if (deprecatedIgnored.contains(paramName)) continue;
+
+            // A node type whose extra parameters are judged by a live catalog
+            // rather than by this schema. Refusing them here would make the node
+            // less configurable through the tools than it is in the builder, for a
+            // model the platform itself accepts.
+            if (CATALOG_JUDGED_PARAMS.contains(nodeType) && !schemaParams.containsKey(paramName)) continue;
 
             if (!schemaParams.containsKey(paramName)) {
                 errors.add(new ValidationError(

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import {
   Bot,
+  CalendarClock,
   Workflow,
   Store,
   Sparkles,
@@ -24,6 +25,7 @@ import MarketplacePreview from './_landing/MarketplacePreview';
 import HeroPhotoStack from './_landing/HeroPhotoStack';
 import HeroFlowShowcase from './_landing/HeroFlowShowcase';
 import AgentsShowcase from './_landing/AgentsShowcase';
+import AgendaShowcase from './_landing/AgendaShowcase';
 import PersonaTabs, { type Persona } from './_landing/PersonaTabs';
 import {
   CUSTOMER_LOGOS,
@@ -33,8 +35,9 @@ import {
   testimonialsReady,
 } from './_landing/socialProof';
 import HashScroller from './_landing/HashScroller';
-import { isMonoDarkIconSlug } from '@/lib/credentials/monoIconSlugs';
-import { SELF_HOSTED_GITHUB_URL } from '@/lib/billing/pricing-constants';
+import LandingSectionObserver from './_landing/LandingSectionObserver';
+import SelfHostLink from './_landing/SelfHostLink';
+import FaqItem from './_landing/FaqItem';
 import { IS_CE as IS_CE_DEPLOY } from '@/lib/edition';
 import { NODE_ICON_REGISTRY } from '@/app/workflows/builder/data/nodeVisuals';
 import LandingThemeProvider from '@/components/landing/LandingThemeProvider';
@@ -42,6 +45,36 @@ import JsonLd from '@/components/seo/JsonLd';
 import Link from 'next/link';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://livecontext.ai';
+
+/**
+ * ISR, deliberately NOT `force-dynamic`.
+ *
+ * <p>The landing now reads the marketplace catalogue so the section can be in
+ * the server HTML, and the obvious way to guarantee a fresh read is
+ * `force-dynamic` - which is what `/marketplace` and the sitemap do. It is the
+ * wrong trade HERE: this is the most requested page on the domain and it is
+ * currently served straight from the CDN (`x-nextjs-cache: HIT`,
+ * `cf-cache-status: HIT`). A dynamic page emits `no-store`, so that would trade
+ * an hour of catalogue staleness for losing edge caching on the homepage.
+ *
+ * <p>The known cost of ISR here is the one documented on `/marketplace`: the CI
+ * builder cannot reach the gateway, so the BUILD-time render has no listings
+ * (verified locally: the prerendered landing carries the block's fallback, i.e.
+ * nothing) and each replica serves that until it first revalidates. That is
+ * survivable for this block and not for that page, because the catalogue block
+ * is a supplement: `/marketplace` (dynamic, linked from the header of every
+ * public page) is what actually guarantees every listing is crawlable, and the
+ * block renders NOTHING rather than an empty heading while the read is cold.
+ *
+ * <p>Ten minutes, not an hour, for exactly that reason: it is how long after a
+ * deploy the landing goes without its catalogue, and `stale-while-revalidate`
+ * means the visitor never waits for the refresh either way. The catalogue read
+ * is given the SAME window rather than a longer one, because Next only lowers
+ * a route's window from its fetches and never the Data Cache entry: a 3600 on
+ * the read would have made the real staleness an hour while this line claimed
+ * ten minutes.
+ */
+export const revalidate = 600;
 
 export const metadata = {
   title: { absolute: 'LiveContext: The AI automation platform. Chat, workflows, agents, apps.' },
@@ -198,11 +231,15 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
 
       <main>
         <HashScroller />
+        <LandingSectionObserver />
         <Hero />
         <SocialProofStrip />
-        <TrustStrip />
+        {/* The catalogue is a PAGE, /integrations, not a band on the landing. The footer
+            column and the header of that page are how it is reached; a 24-card grid here
+            pushed everything the landing exists to say further down. */}
         <MarketplaceSection />
         <AgentsSection />
+        <AgendaSection />
         <TestimonialsSection />
         <PricingBlock />
         <FinalCta />
@@ -217,7 +254,7 @@ function Hero() {
   return (
     // No .hero-glow halo here: the radial read as a stray shadow behind the
     // showcase (same reason it was dropped from the agents section).
-    <section className="relative overflow-visible">
+    <section id="hero" className="relative overflow-visible">
       <div className="max-w-7xl mx-auto px-6 pt-14 pb-12 md:pt-20 md:pb-16">
         <div className="max-w-3xl mx-auto text-center">
           <span className="eyebrow">The AI Automation platform</span>
@@ -232,19 +269,18 @@ function Hero() {
           <div className="mt-7 flex flex-wrap justify-center gap-3">
             <SignInButton
               variant="primary"
+              cta="hero_start_free"
               className="inline-flex items-center justify-center h-9 px-4 rounded-xl text-sm font-medium transition-colors hover:bg-[var(--accent-hover)] active:scale-[0.98] cursor-pointer"
             >
               Start free
             </SignInButton>
-            <a
-              href={SELF_HOSTED_GITHUB_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+            <SelfHostLink
+              section="hero"
               className="inline-flex items-center gap-2 h-9 px-4 rounded-xl text-sm font-medium border transition-colors hover:bg-[var(--bg-secondary)] cursor-pointer"
               style={{ borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
             >
               <GithubMark className="w-4 h-4" /> Self-host
-            </a>
+            </SelfHostLink>
           </div>
         </div>
         <div className="mt-8">
@@ -289,7 +325,7 @@ function SocialProofStrip() {
   if (!hasLogos && !hasMetrics) return null;
 
   return (
-    <section style={{ background: 'var(--bg-secondary)', borderTop: '1px solid var(--border-color)' }}>
+    <section id="social-proof" style={{ background: 'var(--bg-secondary)', borderTop: '1px solid var(--border-color)' }}>
       <div className="max-w-6xl mx-auto px-6 py-12">
         {hasLogos && (
           <>
@@ -563,14 +599,14 @@ function FaqSection() {
         <SectionH2>Frequently asked questions</SectionH2>
       </div>
       <div className="mt-12 max-w-3xl mx-auto space-y-4">
-        {LANDING_FAQ.map((item) => (
-          <details key={item.question} className="faq-item rounded-2xl p-6" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}>
+        {LANDING_FAQ.map((item, faqIndex) => (
+          <FaqItem key={item.question} faqIndex={faqIndex} className="faq-item rounded-2xl p-6" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}>
             <summary className="flex items-center justify-between gap-4 cursor-pointer text-base font-semibold list-none" style={{ color: 'var(--text-primary)' }}>
               <span>{item.question}</span>
               <ChevronDown className="faq-chevron h-5 w-5 shrink-0" style={{ color: 'var(--text-muted)' }} aria-hidden="true" />
             </summary>
             <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{item.answer}</p>
-          </details>
+          </FaqItem>
         ))}
       </div>
       <p className="mt-8 text-sm text-center" style={{ color: 'var(--text-muted)' }}>
@@ -580,38 +616,6 @@ function FaqSection() {
         <Link href="/compare" className="underline underline-offset-2 hover:opacity-80">comparison pages</Link>.
       </p>
     </Section>
-  );
-}
-
-function TrustStrip() {
-  const trustLogos = [
-    'gmail', 'slack', 'stripe', 'notion', 'github', 'salesforce', 'hubspot',
-    'shopify', 'googledrive', 'airtable', 'openai', 'anthropic',
-  ];
-  return (
-    <section style={{ borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
-      <div className="max-w-6xl mx-auto px-6 py-10">
-        <p className="text-center text-[11px] uppercase tracking-wider mb-6" style={{ color: 'var(--text-muted)' }}>
-          Connects to the tools your team already uses
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-6">
-          {trustLogos.map((slug) => (
-            <img
-              key={slug}
-              src={`/icons/services/${slug}.svg`}
-              alt={slug}
-              loading="lazy"
-              width={22}
-              height={22}
-              className={`logo-color ${isMonoDarkIconSlug(slug) ? 'logo-mono' : ''}`}
-            />
-          ))}
-          <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-            + 14,000 tools
-          </span>
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -708,8 +712,8 @@ function BuilderSection() {
 // as a stray shadow behind the floating window), with the section text on the
 // left and a live interactive replica of the real /app/agent window on the
 // right, both directly in the section (no wrapping card). The top border marks
-// the seam with the marketplace section (also bg-primary), the same border
-// idiom TrustStrip uses between same-color neighbors.
+// the seam with the marketplace section (also bg-primary), the border idiom this
+// page uses between same-color neighbours.
 function AgentsSection() {
   return (
     <section
@@ -730,6 +734,7 @@ function AgentsSection() {
             <div className="mt-7">
               <SignInButton
                 variant="primary"
+                cta="agents_create_first"
                 returnTo="/app/agent"
                 className="inline-flex items-center justify-center h-9 px-4 rounded-xl text-sm font-medium transition-colors hover:bg-[var(--accent-hover)] active:scale-[0.98] cursor-pointer"
               >
@@ -738,6 +743,58 @@ function AgentsSection() {
             </div>
           </div>
           <AgentsShowcase />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The marketplace on the landing page: the marquee of live applications, the
+ * exact same cards as the in-app marketplace. The crawlable text listing of
+ * every publication lives on /marketplace (and in the sitemap), not here: the
+ * long "everything published" list under the marquee was dropped on purpose,
+ * it read as a wall of links on a page meant to sell the product.
+ */
+// The agenda. Same section vocabulary as the agents one (eyebrow, H2, lead, a
+// live replica of the real page) on the same bg-primary with a top border for
+// the seam with its same-coloured neighbour, but the replica sits UNDER the text
+// at full width instead of beside it: a seven-column calendar squeezed into half
+// a section gives every chip 90px, which is under the width the app itself needs
+// before it will print a name.
+//
+// `nowIso` is the server's clock, handed to the client replica so the calendar
+// rendered on the server matches the one React hydrates; the replica then
+// corrects it to the visitor's own.
+function AgendaSection() {
+  return (
+    <section
+      id="agenda"
+      className="relative overflow-hidden"
+      style={{ background: 'var(--bg-primary)', borderTop: '1px solid var(--border-color)' }}
+    >
+      <div className="relative max-w-6xl mx-auto px-6 py-24 md:py-32">
+        <SectionEyebrow icon={CalendarClock}>The agenda</SectionEyebrow>
+        <SectionH2>Everything you automated, on one calendar.</SectionH2>
+        <SectionLead>
+          Every workflow, app and agent you put on a schedule lands here, beside what
+          already ran and how it went. Move a run to another day, make one run early, and
+          spot at a glance the one your spending cap will hold back. The calendar below is
+          the real one, live: page through the months and filter by kind, right here.
+        </SectionLead>
+        <div className="mt-7">
+          <SignInButton
+            variant="primary"
+            cta="agenda_open"
+            returnTo="/app/agenda"
+            className="inline-flex items-center justify-center h-9 px-4 rounded-xl text-sm font-medium transition-colors hover:bg-[var(--accent-hover)] active:scale-[0.98] cursor-pointer"
+          >
+            Put your work on a schedule
+          </SignInButton>
+        </div>
+
+        <div className="mt-12">
+          <AgendaShowcase nowIso={new Date().toISOString()} />
         </div>
       </div>
     </section>
@@ -787,7 +844,7 @@ function PricingBlock() {
 
 function FinalCta() {
   return (
-    <section className="relative overflow-hidden" style={{ background: 'var(--bg-primary)', borderTop: '1px solid var(--border-color)' }}>
+    <section id="final-cta" className="relative overflow-hidden" style={{ background: 'var(--bg-primary)', borderTop: '1px solid var(--border-color)' }}>
       <div className="cta-glow" aria-hidden="true" />
       <div className="relative max-w-4xl mx-auto px-6 py-24 text-center">
         <h2
@@ -802,19 +859,18 @@ function FinalCta() {
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <SignInButton
             variant="primary"
+            cta="final_start_free"
             className="inline-flex items-center justify-center h-9 px-4 rounded-xl text-sm font-medium transition-colors hover:bg-[var(--accent-hover)] active:scale-[0.98] cursor-pointer"
           >
             Start free
           </SignInButton>
-          <a
-            href={SELF_HOSTED_GITHUB_URL}
-            target="_blank"
-            rel="noopener noreferrer"
+          <SelfHostLink
+            section="final_cta"
             className="inline-flex items-center gap-2 h-9 px-4 rounded-xl text-sm font-medium border transition-colors hover:bg-[var(--bg-secondary)] cursor-pointer"
             style={{ borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
           >
             <GithubMark className="w-4 h-4" /> Self-host
-          </a>
+          </SelfHostLink>
         </div>
       </div>
     </section>

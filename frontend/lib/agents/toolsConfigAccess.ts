@@ -106,6 +106,10 @@ export interface ToolsConfigShape {
   // 'read' lets the agent list/get/view files but blocks the write actions
   // (create_folder/move_to_folder). Absent ⇒ 'write' (see getFileAccessMode).
   fileAccessMode?: 'read' | 'write';
+  // Long-term memory read/write axis. No grant family either: memory is
+  // workspace-wide rather than an id list. Absent ⇒ 'write' (see
+  // getMemoryAccessMode).
+  memoryAccessMode?: 'read' | 'write';
   [k: string]: unknown;
 }
 
@@ -173,6 +177,19 @@ export function getAccessMode(tc: unknown, family: GrantFamily): 'read' | 'write
 export function getFileAccessMode(tc: unknown): 'read' | 'write' {
   const obj = asObject(tc);
   return obj?.fileAccessMode === 'read' ? 'read' : 'write';
+}
+
+/**
+ * Long-term memory read/write access mode. Same shape as files: not a grant
+ * family, just the orthogonal read/write axis. Absent / null / unrecognized ⇒
+ * 'write' - the backend default (ToolAccessControl treats a missing
+ * memoryAccessMode as full read/write). 'read' leaves get/list/search working
+ * and blocks save/delete, which is what stops a narrowly-scoped agent from
+ * writing into every other agent's context in the workspace.
+ */
+export function getMemoryAccessMode(tc: unknown): 'read' | 'write' {
+  const obj = asObject(tc);
+  return obj?.memoryAccessMode === 'read' ? 'read' : 'write';
 }
 
 /**
@@ -271,6 +288,7 @@ export function buildToolsConfigPayload(input: {
   applicationAccessMode?: 'read' | 'write';
   skillAccessMode?: 'read' | 'write';
   fileAccessMode?: 'read' | 'write';
+  memoryAccessMode?: 'read' | 'write';
 }): ToolsConfigShape {
   // For a `custom` grant the id list IS the scope; for `all`/`none`/absent the
   // list is a placeholder the backend keeps but never reads - emit `[]` so the
@@ -321,5 +339,10 @@ export function buildToolsConfigPayload(input: {
   if (input.applicationAccessMode) payload.applicationAccessMode = input.applicationAccessMode;
   if (input.skillAccessMode) payload.skillAccessMode = input.skillAccessMode;
   if (input.fileAccessMode) payload.fileAccessMode = input.fileAccessMode;
+  // Echoed back for the same reason as the others: this builder rebuilds the WHOLE
+  // tools_config, so a mode it does not emit is dropped on every edit - silently
+  // returning a recall-only agent to full write access the next time anyone opens
+  // the agent and saves.
+  if (input.memoryAccessMode) payload.memoryAccessMode = input.memoryAccessMode;
   return payload;
 }

@@ -315,7 +315,7 @@ class AgentRemoteExecutionServiceTest {
                 org.mockito.ArgumentMatchers.eq("claude-opus-4-8"), org.mockito.ArgumentMatchers.any()))
             .thenReturn(java.util.Optional.of(
                 new com.apimarketplace.agent.service.ModelExecutionLinkService.ExecutionRoute("codex", "gpt-5.3-codex")));
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "executionLinkService", linkService);
+        wireExecutionLinks(linkService);
         when(bridgeDispatcher.isAvailable()).thenReturn(true);
         // Routing dispatches to the bridge because the EXECUTION provider (codex) is a CLI bridge.
         when(bridgeDispatcher.shouldDispatch("codex")).thenReturn(true);
@@ -365,7 +365,7 @@ class AgentRemoteExecutionServiceTest {
                 org.mockito.ArgumentMatchers.eq("deepseek-chat"), org.mockito.ArgumentMatchers.any()))
             .thenReturn(java.util.Optional.of(
                 new com.apimarketplace.agent.service.ModelExecutionLinkService.ExecutionRoute("codex", "gpt-5.3-codex")));
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "executionLinkService", linkService);
+        wireExecutionLinks(linkService);
         // ...but the bridge transport is not wired here.
         when(bridgeDispatcher.isAvailable()).thenReturn(false);
         ArgumentCaptor<AgentLoopContext> ctx = ArgumentCaptor.forClass(AgentLoopContext.class);
@@ -391,7 +391,7 @@ class AgentRemoteExecutionServiceTest {
             .thenReturn(java.util.Optional.of(
                 new com.apimarketplace.agent.service.ModelExecutionLinkService.ExecutionRoute(
                     "openrouter", "anthropic/claude-3.5-sonnet")));
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "executionLinkService", linkService);
+        wireExecutionLinks(linkService);
         // openrouter is NOT a bridge -> direct loop (shouldDispatch is false by default in setUp).
         ArgumentCaptor<AgentLoopContext> ctx = ArgumentCaptor.forClass(AgentLoopContext.class);
         when(agentLoopService.execute(ctx.capture(), any(StreamingCallback.class)))
@@ -422,7 +422,7 @@ class AgentRemoteExecutionServiceTest {
         when(linkService.resolve(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 sourceArg.capture()))
             .thenReturn(java.util.Optional.empty()); // no link: just observe the surface passed in
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "executionLinkService", linkService);
+        wireExecutionLinks(linkService);
         when(agentLoopService.execute(any(), any(StreamingCallback.class)))
             .thenReturn(successfulLoopResult());
 
@@ -441,7 +441,7 @@ class AgentRemoteExecutionServiceTest {
         when(linkService.resolve(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 sourceArg.capture()))
             .thenReturn(java.util.Optional.empty());
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "executionLinkService", linkService);
+        wireExecutionLinks(linkService);
         when(agentLoopService.execute(any(), any(StreamingCallback.class)))
             .thenReturn(successfulLoopResult());
 
@@ -460,7 +460,7 @@ class AgentRemoteExecutionServiceTest {
         when(linkService.resolve(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 sourceArg.capture()))
             .thenReturn(java.util.Optional.empty());
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "executionLinkService", linkService);
+        wireExecutionLinks(linkService);
         when(agentLoopService.execute(any(), any(StreamingCallback.class)))
             .thenReturn(successfulLoopResult());
 
@@ -479,7 +479,7 @@ class AgentRemoteExecutionServiceTest {
             .thenReturn(java.util.Optional.of(
                 new com.apimarketplace.agent.service.ModelExecutionLinkService.ExecutionRoute(
                     "openrouter", "or-model")));
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "executionLinkService", linkService);
+        wireExecutionLinks(linkService);
         when(agentLoopService.execute(any(), any(StreamingCallback.class)))
             .thenThrow(new RuntimeException("upstream 500"));
 
@@ -501,7 +501,7 @@ class AgentRemoteExecutionServiceTest {
                 org.mockito.ArgumentMatchers.eq("deepseek-chat"), org.mockito.ArgumentMatchers.any()))
             .thenReturn(java.util.Optional.of(
                 new com.apimarketplace.agent.service.ModelExecutionLinkService.ExecutionRoute("codex", "gpt-5.3-codex")));
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "executionLinkService", linkService);
+        wireExecutionLinks(linkService);
         when(bridgeDispatcher.isAvailable()).thenReturn(true);
         when(bridgeDispatcher.shouldDispatch("codex")).thenReturn(true);
         // The bridge fails the run and stamps its OWN identity on the FAILED response.
@@ -528,7 +528,7 @@ class AgentRemoteExecutionServiceTest {
                 org.mockito.ArgumentMatchers.eq("deepseek-chat"), org.mockito.ArgumentMatchers.any()))
             .thenReturn(java.util.Optional.of(
                 new com.apimarketplace.agent.service.ModelExecutionLinkService.ExecutionRoute("codex", "gpt-5.3-codex")));
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "executionLinkService", linkService);
+        wireExecutionLinks(linkService);
         when(bridgeDispatcher.isAvailable()).thenReturn(true);
         when(bridgeDispatcher.shouldDispatch("codex")).thenReturn(true);
         when(bridgeDispatcher.dispatchRaw(any(), any())).thenThrow(new RuntimeException("bridge unreachable"));
@@ -550,7 +550,7 @@ class AgentRemoteExecutionServiceTest {
             .thenReturn(java.util.Optional.of(
                 new com.apimarketplace.agent.service.ModelExecutionLinkService.ExecutionRoute(
                     "openrouter", "or-model")));
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "executionLinkService", linkService);
+        wireExecutionLinks(linkService);
         when(conversationRedisStreamingCallback.forExecution(any(), any(), any(), any(), any(), any(), any(), any()))
             .thenReturn(org.mockito.Mockito.mock(ConversationRedisStreamingCallback.ConversationCallback.class));
         ArgumentCaptor<AgentLoopContext> ctx = ArgumentCaptor.forClass(AgentLoopContext.class);
@@ -975,4 +975,16 @@ class AgentRemoteExecutionServiceTest {
             .stopReason(AgentStopReason.COMPLETED)
             .build();
     }
+
+    /**
+     * Wire the link store into the service the way production does: through
+     * {@link ExecutionLinkRouter}, which owns the "drop a bridge route when the bridge
+     * transport is not wired" rule shared by every LLM caller.
+     */
+    private void wireExecutionLinks(ModelExecutionLinkService linkService) {
+        ExecutionLinkRouter router = new ExecutionLinkRouter(bridgeDispatcher);
+        org.springframework.test.util.ReflectionTestUtils.setField(router, "executionLinkService", linkService);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "executionLinkRouter", router);
+    }
+
 }

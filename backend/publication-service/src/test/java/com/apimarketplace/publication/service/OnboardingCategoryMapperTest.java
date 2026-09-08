@@ -92,4 +92,18 @@ class OnboardingCategoryMapperTest {
         List<String> slugs = mapper.toCategorySlugs(interests, null, null);
         assertThat(slugs).containsExactly("automation");
     }
+
+    @org.junit.jupiter.api.Test
+    @org.junit.jupiter.api.DisplayName("primaryGoal (the new onboarding question) maps first and the older lists still count")
+    void primaryGoalMapsFirst() {
+        OnboardingCategoryMapper m = new OnboardingCategoryMapper();
+        java.util.List<String> slugs = m.toCategorySlugs(null, java.util.List.of("reporting-dashboards"), null, "email-follow-ups");
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of("sales-crm", "communication", "data-analytics"), slugs);
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of("ai-automation"),
+                m.toCategorySlugs(null, null, null, "private-assistants"), "self-hosted goals map too");
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of(),
+                m.toCategorySlugs(null, null, null, "not-a-goal"), "an unknown goal maps to nothing, never throws");
+        org.junit.jupiter.api.Assertions.assertEquals(m.toCategorySlugs(null, java.util.List.of("lead-generation"), "sales"),
+                m.toCategorySlugs(null, java.util.List.of("lead-generation"), "sales", null), "3-arg form is unchanged");
+    }
 }

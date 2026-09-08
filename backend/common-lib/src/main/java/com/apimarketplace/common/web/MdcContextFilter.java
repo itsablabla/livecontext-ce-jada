@@ -1,5 +1,7 @@
 package com.apimarketplace.common.web;
 
+import jakarta.servlet.AsyncEvent;
+import jakarta.servlet.AsyncListener;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -13,6 +15,7 @@ import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * PR25.2 - populates MDC with org/tenant/user context at request entry so every
@@ -77,7 +80,16 @@ public class MdcContextFilter implements Filter, Ordered {
             putIfPresent(MDC_REQUEST_PATH, requestPath);
             chain.doFilter(req, res);
         } finally {
-            logRequest(httpReq, res, requestPath, requestId, startedAt);
+            // On an async request (a StreamingResponseBody download, for one)
+            // doFilter returns as soon as the async phase starts, long before the
+            // body is written. Logging here would report the time to HAND OFF the
+            // response, not to deliver it - a 32 MB download that really takes
+            // 2.3s was being logged at 324ms, so the logs disagreed with the
+            // latency metrics and quietly under-reported the slow path. Defer to
+            // the async completion instead; the sync path is unchanged.
+            if (!deferredToAsyncCompletion(httpReq, res, requestPath, requestId, startedAt)) {
+                logRequest(httpReq, res, requestPath, requestId, startedAt);
+            }
             // ALWAYS clear in a finally block. Tomcat pools threads - a leaked
             // MDC tag would appear on every subsequent request handled by this
             // thread, including health checks and metrics scrapes.
@@ -87,6 +99,63 @@ public class MdcContextFilter implements Filter, Ordered {
             MDC.remove(MDC_ORG_ROLE);
             MDC.remove(MDC_REQUEST_ID);
             MDC.remove(MDC_REQUEST_PATH);
+        }
+    }
+
+    /**
+     * Hand the log line to the async completion when one is pending.
+     *
+     * @return true when logging was deferred, false when the caller should log now
+     */
+    private static boolean deferredToAsyncCompletion(HttpServletRequest req, ServletResponse res,
+                                                     String path, String requestId, long startedAt) {
+        if (!req.isAsyncStarted()) {
+            return false;
+        }
+        // The completion runs on a container thread, AFTER this filter's finally
+        // block cleared the MDC. Carry a snapshot so the deferred line keeps the
+        // org/tenant/user tags the synchronous line has - and so it cannot
+        // inherit the tags of whatever request last used that pooled thread.
+        Map<String, String> mdcSnapshot = MDC.getCopyOfContextMap();
+        try {
+            req.getAsyncContext().addListener(new AsyncListener() {
+                @Override public void onComplete(AsyncEvent event) {
+                    Map<String, String> previous = MDC.getCopyOfContextMap();
+                    if (mdcSnapshot != null) {
+                        MDC.setContextMap(mdcSnapshot);
+                    }
+                    try {
+                        logRequest(req, res, path, requestId, startedAt);
+                    } finally {
+                        if (previous != null) {
+                            MDC.setContextMap(previous);
+                        } else {
+                            MDC.clear();
+                        }
+                    }
+                }
+                @Override public void onTimeout(AsyncEvent event) {
+                    // onComplete still fires afterwards, so do not log twice here.
+                }
+                @Override public void onError(AsyncEvent event) {
+                    // Same: the container completes the request after an error.
+                }
+                @Override public void onStartAsync(AsyncEvent event) {
+                    // Per the Servlet spec a listener is NOT carried into a new
+                    // async cycle, so re-register or the line is lost when a
+                    // handler starts async again (a DeferredResult chain).
+                    try {
+                        event.getAsyncContext().addListener(this);
+                    } catch (IllegalStateException ignored) {
+                        // Nothing to re-arm; the line is simply not deferred again.
+                    }
+                }
+            });
+            return true;
+        } catch (IllegalStateException alreadyDone) {
+            // The async phase finished between doFilter returning and this call.
+            // Nothing to defer to, so log normally rather than lose the line.
+            return false;
         }
     }
 

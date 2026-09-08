@@ -3,9 +3,11 @@
 import React, { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Bell, Bot, AppWindow, Workflow, Clock, Webhook, MessageSquare, FormInput, Zap, Trash2, ChevronLeft, ChevronRight, UserPlus, Table, Sparkles, BookOpen, Monitor, Share2, Copy, Check, ExternalLink, MessageCircle, MessagesSquare, FileText } from 'lucide-react';
+import { Bell, Bot, AppWindow, Workflow, Clock, Webhook, MessageSquare, FormInput, Zap, Trash2, ChevronLeft, ChevronRight, UserPlus, Table, Sparkles, BookOpen, Monitor, Share2, Copy, Check, ExternalLink, MessageCircle, MessagesSquare, FileText, Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { EpochStatusIcon } from '@/components/workflow/EpochStatusIcon';
+import { getRunStatusLabel } from '@/lib/utils/runStatusUtils';
 import { ServiceIcon } from '@/components/ui/service-icon';
 import { AvatarDisplay } from '@/components/agents';
 import { NodeIcon } from '@/app/workflows/builder/components/nodes/shared';
@@ -22,6 +24,7 @@ import { RESOURCE_KIND_ORDER } from '@/lib/api/orchestrator/recent-activity.serv
 import { shareLinkUrl, type SharedLink } from '@/lib/api/sharing.service';
 import { formatUtcDate, parseUtcAware } from '@/lib/utils/dateFormatters';
 import { RunApprovalsDialog } from '@/components/approvals/RunApprovalsDialog';
+import { TriggerRowActions, TRIGGER_ROW_ACTIONS_YIELD, hasTriggerRowActions } from './TriggerRowActions';
 
 // 4-tab bell:
 //   - 'inbox'    - actionable signals (failed runs, expired creds, etc.)
@@ -92,12 +95,18 @@ export function NotificationBell() {
   const t = useTranslations('chat.home.notifications');
   const tLive = useTranslations('chat.home.live');
   const tShared = useTranslations('chat.home.shared');
+  // Trophy names live in the `badges` namespace: a BADGE bell row carries the
+  // badge code, and this is what turns it into the reader's language.
+  const tBadges = useTranslations('badges');
   const router = useRouter();
   // Activity tab + global mark-all-read still come from the home-status hook;
   // it returns automations + the cursor-based unreadCount AND the legacy
   // (non-paginated) items list which we ignore here.
   const { automations, markAllRead } = useHomeStatus();
   const tRecent = useTranslations('chat.home.recent');
+  // Root namespace: the run-status words (`status.completed`, ...) are shared with the
+  // run panel and are not scoped to the bell.
+  const tStatus = useTranslations();
   const tCommon = useTranslations('chat.home.live'); // reuse justNow/minutesAgo/...
   const { currentOrgId, clear: clearCurrentOrg } = useCurrentOrg();
   const [open, setOpen] = useState(false);
@@ -227,7 +236,16 @@ export function NotificationBell() {
         <Button
           variant="ghost"
           size="icon"
-          className={`w-8 h-8 relative text-black dark:text-white ${open ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+          // `ghost` hovers by INVERTING (near-black ground, light glyph). That is the app's
+          // legacy behaviour and dozens of call sites depend on it, so the variant is left
+          // alone and overridden here: a bell that turns into a black square under the
+          // pointer reads as a pressed state, not as "you are pointing at this". The same
+          // override is applied to every quiet icon button on this bar (QUIET_ICON_HOVER in
+          // ChatHeader) - fixing the bell alone left the controls either side of it doing
+          // exactly what was reported.
+          className={`w-8 h-8 relative text-black dark:text-white
+                      hover:bg-surface-hover hover:text-[var(--text-primary)]
+                      ${open ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
           aria-label={t('title')}
           title={t('title')}
         >
@@ -294,6 +312,7 @@ export function NotificationBell() {
               onDeleteRow={handleDeleteRow}
               onReviewApprovals={handleReviewApprovals}
               t={t}
+              tBadges={tBadges}
             />
             {/* Footer: "Mark all read" on the left + pagination chevrons on
                 the right. Renders whenever either control has something to
@@ -363,6 +382,8 @@ export function NotificationBell() {
               automations={automations}
               filter={kindFilter}
               onRowClick={handleAutomationClick}
+              tStatus={tStatus}
+              onNavigate={(href) => { setOpen(false); router.push(href); }}
               t={tLive}
             />
           </>
@@ -958,12 +979,14 @@ function InboxList({
   onDeleteRow,
   onReviewApprovals,
   t,
+  tBadges,
 }: {
   items: NotificationItem[];
   onRowClick: (item: NotificationItem) => void;
   onDeleteRow: (e: React.MouseEvent, item: NotificationItem) => void;
   onReviewApprovals: (item: NotificationItem) => void;
   t: InboxT;
+  tBadges: InboxT;
 }) {
   if (items.length === 0) {
     return (
@@ -992,7 +1015,7 @@ function InboxList({
             type="button"
             onClick={() => onRowClick(item)}
             className="absolute inset-0 z-0 rounded-xl cursor-pointer"
-            aria-label={`Open ${item.subjectName}`}
+            aria-label={`Open ${subjectLabel(item, tBadges)}`}
           />
           {/* Severity dot - only rendered while the row is unread, so
               mark-all-read clears the visual attention signal alongside the
@@ -1035,9 +1058,15 @@ function InboxList({
               aria-hidden="true"
             />
           )}
+          {item.subjectType === 'BADGE' && (
+            <Trophy
+              className="relative z-[1] mt-0.5 h-4 w-4 shrink-0 text-amber-500"
+              aria-hidden="true"
+            />
+          )}
           <span className="relative z-[1] flex-1 min-w-0 pointer-events-none">
             <span className="block text-sm text-theme-primary truncate">
-              {item.subjectName}
+              {subjectLabel(item, tBadges)}
             </span>
             <span className="block text-xs text-theme-muted truncate">
               {categoryLabel(item.category, item.count, t)} · {formatRelativePast(item.lastEventAt, t)}
@@ -1102,6 +1131,22 @@ function InboxList({
 }
 
 /**
+ * Row title.
+ *
+ * <p>BADGE rows carry the badge CODE in {@code subjectName}, not a label: the
+ * emitter cannot know the reader's language, so the translated trophy name is
+ * resolved here. Any other subject type already ships a human name, and an
+ * unknown badge code (one retired from the catalog) falls back to the raw
+ * value rather than rendering a namespaced key path.
+ */
+function subjectLabel(item: NotificationItem, tBadges: InboxT): string {
+  if (item.subjectType !== 'BADGE') return item.subjectName;
+  const key = `item.${item.subjectName}.name`;
+  if (typeof tBadges.has === 'function' && !tBadges.has(key)) return item.subjectName;
+  return tBadges(key);
+}
+
+/**
  * P2a multi-category label resolution. Reads from
  * {@code chat.home.notifications.category.{CATEGORY}}; falls back to the
  * legacy {@code failuresCount} key for unknown categories so an in-flight
@@ -1129,13 +1174,21 @@ function ActivityList({
   automations,
   filter,
   onRowClick,
+  onNavigate,
   t,
+  tStatus,
 }: {
   automations: ActiveAutomation[];
   filter: TriggerType | null;
   onRowClick: (a: ActiveAutomation) => void;
+  onNavigate: (href: string) => void;
   t: (key: string, values?: Record<string, string | number>) => string;
+  /** Root translator - the run-status vocabulary lives at `status.*`, outside this namespace. */
+  tStatus: (key: string) => string;
 }) {
+  // Row actions report here rather than through a toast: the bell mounts no toast
+  // container, and a result the user cannot see is the same as no result at all.
+  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
   const filtered = filter == null
     ? automations
     : automations.filter((a) => a.triggerType === filter);
@@ -1153,6 +1206,18 @@ function ActivityList({
   }
   return (
     <div className="p-1.5 space-y-0.5">
+      {feedback && (
+        <p
+          role="status"
+          className={`mb-1 rounded-lg px-2.5 py-1.5 text-xs ${
+            feedback.kind === 'success'
+              ? 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100'
+              : 'bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-100'
+          }`}
+        >
+          {feedback.message}
+        </p>
+      )}
       {filtered.map((a) => {
         const ResourceIcon = resourceIcon(a.resourceType);
         // Trigger icon = the NodeIcon for this kind, matching the workflow
@@ -1166,17 +1231,33 @@ function ActivityList({
         // signals together visually so the user can pick out the responsible
         // automation in a single glance.
         const isImminent = isImminentFire(a);
-        // Right-side label - 3-branch (was binary):
+        // Top-right label - what is AHEAD of this automation, never behind it:
         //   SCHEDULE → countdown to nextFireAt
         //   WEBHOOK  → liveBadge ("Live", indicating no schedule)
-        //   others   → relative time since last fire ("2m ago"), "-" if never
+        //   others   → nothing; the 6 declared kinds fire on demand, so the kind
+        //              icon alone is their forward-looking statement.
+        // What is behind it - when it last ran and how that ended - is the "Last:"
+        // line below, on every kind. It used to live here for the declared kinds,
+        // which is why they now read as icon-only.
         const fireLabel = a.triggerType === 'SCHEDULE'
           ? formatNextFire(a.schedule?.nextFireAt, t)
           : a.triggerType === 'WEBHOOK'
             ? t('liveBadge')
-            : a.lastRunAt
-              ? formatRelativePast(a.lastRunAt, t)
-              : '-';
+            : '';
+
+        // The "Last:" line, on every row that has something to say - and every row that said
+        // something before this change still does. A never-fired SCHEDULE keeps its "never"
+        // (it is waiting for a fire that is on the calendar), and so does a never-fired
+        // declared kind, which used to print that sentinel as its whole right-hand label. A
+        // WEBHOOK row is the one exception: its label is "live", it has never carried a
+        // last-run line, and a permanent "Last: -" on an endpoint nobody has called yet would
+        // be noise rather than news.
+        const showLastRun = a.lastRunAt != null || a.triggerType !== 'WEBHOOK';
+        // The verdict as a word, for the sr-only twin of the icon. Same helper the run panel
+        // uses, so the two surfaces name a status identically.
+        const statusLabel = a.lastRunAt && a.lastRunStatus
+          ? getRunStatusLabel(a.lastRunStatus, tStatus)
+          : null;
         // Subtitle under the workflow name - 3-branch:
         //   SCHEDULE → cron expression
         //   WEBHOOK  → endpoint hint
@@ -1187,15 +1268,22 @@ function ActivityList({
             ? t('webhookEndpoint')
             : t(`kindLabel.${a.triggerType.toLowerCase()}`);
         return (
-          <button
+          // A div, not a button: the row carries its own action menu, and a button
+          // inside a button is invalid HTML that browsers resolve by dropping one of
+          // them. The row-click target is an absolutely positioned overlay BEHIND the
+          // actions (z-0 vs z-10), the same pattern the Shared tab rows use.
+          <div
             key={`${a.resourceId}:${a.triggerType}`}
-            type="button"
-            onClick={() => onRowClick(a)}
-            className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-xl
+            className={`group relative w-full flex items-center gap-3 px-2.5 py-2 rounded-xl
                        hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors
-                       cursor-pointer text-left
                        ${isImminent ? 'bg-blue-50/60 dark:bg-blue-900/20' : ''}`}
           >
+            <button
+              type="button"
+              onClick={() => onRowClick(a)}
+              className="absolute inset-0 z-0 rounded-xl cursor-pointer"
+              aria-label={a.name}
+            />
             <span
               className={`relative inline-flex items-center justify-center
                           h-7 w-7 rounded-full bg-theme-secondary shrink-0 overflow-hidden
@@ -1227,7 +1315,19 @@ function ActivityList({
                 {subtitle}
               </span>
             </span>
-            <span className="flex flex-col items-end gap-0.5 shrink-0">
+            {/* The column the row menu is revealed ON TOP of, so it steps aside while the
+                menu is showing. The rule is the menu's own (TRIGGER_ROW_ACTIONS_YIELD),
+                imported rather than retyped: the three dots and this text have to agree
+                about when they are on screen, and they live in two different files.
+
+                Only on rows that HAVE a menu. A webhook, chat or form row has no schedule
+                to act on and renders no button, so yielding there blanked the column on
+                hover and put nothing in its place. */}
+            <span
+              className={`flex flex-col items-end gap-0.5 shrink-0 ${
+                hasTriggerRowActions(a) ? TRIGGER_ROW_ACTIONS_YIELD : ''
+              }`}
+            >
               <span
                 className={`inline-flex items-center gap-1 text-xs
                            ${isImminent ? 'text-blue-600 dark:text-blue-400 font-medium' : 'text-theme-muted'}`}
@@ -1237,19 +1337,34 @@ function ActivityList({
                   : <FallbackIcon className="h-3 w-3" />}
                 {fireLabel}
               </span>
-              {/* SCHEDULE rows show BOTH the next-fire countdown (top) and the
-                  last-fired relative time (bottom). DTO field `lastRunAt` is
-                  pre-populated for SCHEDULE rows by ActiveAutomationsService at
-                  src/main/java/.../ActiveAutomationsService.java:303 from
-                  ScheduledExecutionDto.lastExecutionAt || workflow.lastExecutedAt
-                  fallback. Other trigger kinds keep the single-line label. */}
-              {a.triggerType === 'SCHEDULE' && (
-                <span className="text-[10px] text-theme-muted opacity-70 leading-none whitespace-nowrap">
-                  {t('lastRan')} {a.lastRunAt ? formatRelativePast(a.lastRunAt, t) : t('neverRan')}
-                </span>
+              {/* "Last: <outcome> 2m ago" on EVERY kind - when the automation last ran
+                  and how that run ended, badged with the SAME icon the run panel draws
+                  on that epoch (EpochStatusIcon, fed by the DTO's `lastRunStatus`) so
+                  the bell cannot contradict the epoch row one click away. A row whose
+                  backend has no honest verdict sends no status and the icon slot renders
+                  empty, keeping its width so the times stay in one column.
+                  It costs no row height: the left column is already two lines. */}
+              {showLastRun && (
+              <span className="flex items-center gap-1 text-[10px] text-theme-muted opacity-70 leading-none whitespace-nowrap">
+                {t('lastRan')}
+                {a.lastRunAt && <EpochStatusIcon status={a.lastRunStatus} />}
+                {/* EpochStatusIcon is aria-hidden by construction: it is a colour and a shape.
+                    The WORD has to reach a screen reader (and anyone who cannot separate the
+                    red from the green), the same way EpochSelector supplies it for the very
+                    same icon. */}
+                {statusLabel && (
+                  <span className="sr-only" data-last-run-status={a.lastRunStatus}>{statusLabel}</span>
+                )}
+                {a.lastRunAt ? formatRelativePast(a.lastRunAt, t) : t('neverRan')}
+              </span>
               )}
             </span>
-          </button>
+            <TriggerRowActions
+              automation={a}
+              onNavigate={onNavigate}
+              onResult={(kind, message) => setFeedback({ kind, message })}
+            />
+          </div>
         );
       })}
     </div>
@@ -1409,6 +1524,10 @@ function notificationHref(item: NotificationItem): string {
     }
     case 'ORG_INVITATION':
       return `/app/invitations`;
+    case 'BADGE':
+      // The trophy wall is a tab of the settings overview page, which reads the
+      // active tab from `?tab=` on mount.
+      return `/app/settings/overview?tab=trophies`;
     default:
       // Forward-compat for unknown subject_types: land on the app root
       // which redirects to the user's chat home. Never `/app/dashboard`

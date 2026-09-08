@@ -25,6 +25,14 @@ vi.mock('@/lib/hooks/useMonthlyCreditsCannotPay', () => ({
 }));
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
 vi.mock('next/navigation', () => ({ usePathname: () => '/en/app/chat' }));
+// The panel composer now carries the chat/studio switch, which reaches next-intl's navigation
+// helpers - and those import a bare 'next/navigation' that vitest cannot resolve out of next-intl's
+// ESM build. Unmocked, the whole file fails to load rather than any assertion failing.
+vi.mock('@/i18n/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => '/en/app/chat',
+  Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+}));
 vi.mock('@/hooks/useModels', () => ({
   useVisibleModels: () => ({ models: [], defaultModel: undefined, isLoading: false, error: null }),
   EMPTY_SELECTED_MODEL: { provider: '', id: '' },

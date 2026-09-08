@@ -50,7 +50,8 @@ class InternalAuthControllerOrgMemberIdsTest {
                 modelPricingService, planLimitService,
                 memberRepository, ceLinkServiceProvider,
                 ceLinkEntitlementsServiceProvider,
-                org.mockito.Mockito.mock(com.apimarketplace.auth.repository.UserProfileRepository.class));
+                org.mockito.Mockito.mock(com.apimarketplace.auth.repository.UserProfileRepository.class),
+                org.mockito.Mockito.mock(com.apimarketplace.auth.repository.UserRepository.class));
     }
 
     @Test

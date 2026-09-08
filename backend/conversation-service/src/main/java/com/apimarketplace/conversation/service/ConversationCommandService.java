@@ -1,6 +1,7 @@
 package com.apimarketplace.conversation.service;
 
 import com.apimarketplace.common.web.TenantResolver;
+import com.apimarketplace.conversation.domain.ConversationKind;
 import com.apimarketplace.conversation.dto.ConversationDto;
 import com.apimarketplace.conversation.entity.Conversation;
 import com.apimarketplace.conversation.exception.ConversationNotFoundException;
@@ -61,6 +62,25 @@ public class ConversationCommandService {
         // /api/conversations endpoint cannot race around the V115 unique index. Sub-agent
         // (parentConversationId != null) and memory-off (memoryEnabled == FALSE) rows are
         // legitimate N:1 cases and stay on the direct persistence path.
+        // A studio conversation is never an agent conversation: the two are dispatched to different
+        // back ends, and the funnel below cannot carry a kind (it takes six scalars and builds its
+        // own DTO). Refused rather than silently funnelled, which returned 201 with a CHAT to a
+        // caller who asked for a studio one - the exact silent-default this enum exists to prevent.
+        //
+        // Gated on the AGENT ID ALONE, deliberately NOT on isPrimaryAgentShape: that shape is the
+        // narrower question "does this go through the V115 funnel?", and a sub-agent
+        // (parentConversationId set) or a memory-off row answers it FALSE while still being an agent
+        // conversation. Reusing it here let {kind: studio, agentId, memoryEnabled: false} through
+        // and persist a studio row bound to an agent - the state this refusal exists to forbid,
+        // reachable by adding one field.
+        String agentId = conversationDto.getAgentId();
+        if (agentId != null && !agentId.isBlank()
+                && ConversationKind.parse(conversationDto.getKind()) != ConversationKind.CHAT) {
+            throw new IllegalArgumentException(
+                    "A conversation cannot be both an agent conversation and a '"
+                            + conversationDto.getKind() + "' one. Create it without an agentId.");
+        }
+
         if (isPrimaryAgentShape(conversationDto)) {
             // PR21 R2 - thread organizationId into the funnel. Pre-R2 this called the
             // 5-arg back-compat shim which discards orgId and defaults to personal scope -
@@ -115,6 +135,11 @@ public class ConversationCommandService {
             conversation.setMemoryEnabled(conversationDto.getMemoryEnabled());
         }
         conversation.setChatConfig(conversationDto.getChatConfig());
+        // Parsed, not copied. An unknown kind throws here with a sentence naming what was sent,
+        // which the controller turns into a 400. Defaulting instead would hand back an ordinary
+        // chat to a caller that asked for a studio one, and the mistake would only surface much
+        // later, as a thread missing from the filter it was created for.
+        conversation.setKind(ConversationKind.parse(conversationDto.getKind()).wireValue());
         conversation.setUpdatedAt(LocalDateTime.now());
 
         Conversation savedConversation = conversationRepository.save(conversation);
@@ -314,6 +339,19 @@ public class ConversationCommandService {
 
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ConversationNotFoundException(conversationId));
+
+        // The kind is immutable. A full-object PUT that restates the kind it already has is
+        // ordinary and passes; one that names a DIFFERENT kind is refused with a sentence rather
+        // than ignored, because ignoring it is the expensive failure: the caller is told the write
+        // succeeded, reads back the old kind, and the disagreement surfaces somewhere else.
+        String requestedKind = conversationDto.getKind();
+        if (requestedKind != null && !requestedKind.isBlank()
+                && !ConversationKind.sameKind(requestedKind, conversation.getKind())) {
+            throw new IllegalArgumentException(
+                    "A conversation's kind cannot be changed (this one is '"
+                            + conversation.getKind() + "', the request asked for '"
+                            + requestedKind + "'). Create a new conversation instead.");
+        }
 
         conversationMapper.updateEntity(conversationDto, conversation);
         Conversation savedConversation = conversationRepository.save(conversation);

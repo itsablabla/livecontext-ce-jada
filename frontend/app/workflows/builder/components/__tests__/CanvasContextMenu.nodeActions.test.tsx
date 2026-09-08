@@ -20,7 +20,14 @@ let mockPinDisplay: { shouldRender: boolean; isAlreadyPinned: boolean; buttonTit
 const mockRequestTriggerPin = vi.fn();
 
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
-vi.mock('../../contexts/StepByStepContext', () => ({ useNodeExecutionStatus: () => mockExec }));
+/** Every (nodeId, nodeData) this menu asks the hook for - the epoch status has to be in it. */
+const execArgs: Array<[string, Record<string, unknown> | undefined]> = [];
+vi.mock('../../contexts/StepByStepContext', () => ({
+  useNodeExecutionStatus: (nodeId: string, nodeData?: Record<string, unknown>) => {
+    execArgs.push([nodeId, nodeData]);
+    return mockExec;
+  },
+}));
 vi.mock('../../hooks/useNodeContextualButtons', () => ({
   deriveNodeContextFlags: () => mockFlags,
   useNodeContextualButtons: () => [],
@@ -65,6 +72,7 @@ const captureEvent = (type: string): { detail: () => unknown } => {
 };
 
 beforeEach(() => {
+  execArgs.length = 0;
   mockExec = { canExecute: false, canRerun: false, pendingSignalCount: 0, executeStep: vi.fn(), rerunStep: vi.fn(), resolveApproval: vi.fn() };
   mockFlags = {};
   mockWorkflowId = 'wf1';
@@ -215,5 +223,30 @@ describe('NodeContextMenu - view interface', () => {
       />,
     );
     expect(screen.queryByText('viewInterface')).toBeNull();
+  });
+});
+
+/**
+ * The menu's Restart item is gated on `canRerun`, and on a focused epoch that flag is computed
+ * from the status the canvas painted on THIS node - which only reaches the hook if this call
+ * site passes it. `status` is optional on the hook, so dropping it here compiles, runs, and
+ * silently puts the menu back on the run-wide sets: it would offer a restart on a node the
+ * epoch on screen skipped, and the backend would refuse it.
+ */
+describe('NodeContextMenu - epoch status reaches the execution hook', () => {
+  it('passes the node painted status through', () => {
+    renderMenu({ node: makeNode({ status: 'completed' }) });
+
+    expect(execArgs.at(-1)?.[1]).toMatchObject({ status: 'completed' });
+  });
+
+  it('passes it through unchanged when the epoch painted nothing on the node', () => {
+    // undefined is the epoch's answer ("no result here"), not a missing argument: it is what
+    // stops a node the epoch never reached from borrowing another epoch's outcome.
+    renderMenu({ node: makeNode() });
+
+    const [, nodeData] = execArgs.at(-1)!;
+    expect(nodeData).toHaveProperty('status');
+    expect(nodeData!.status).toBeUndefined();
   });
 });

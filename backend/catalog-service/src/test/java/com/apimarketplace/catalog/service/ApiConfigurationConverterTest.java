@@ -66,7 +66,7 @@ class ApiConfigurationConverterTest {
         @DisplayName("the generation descriptor reaches the other side, or the whole feature is inert")
         void generationSpecSurvives() throws Exception {
             // Without this the descriptor never lands on api_tools.generation_spec:
-            // the generation surface lists nothing, core:generate cannot resolve a
+            // the generation surface lists nothing, agent:generate cannot resolve a
             // model, and isGeneration() is false forever, which silently switches
             // off the descriptor half of every fail-closed billing guard.
             JsonNode tool = convertToolJson("""
@@ -110,6 +110,49 @@ class ApiConfigurationConverterTest {
 
             assertTrue(tool.has("generationSpec"));
             assertEquals("image", tool.get("generationSpec").get("kind").asText());
+        }
+
+        /** Same two legs, for a block that lives on the API rather than on a tool. */
+        private JsonNode convertApiJson(String apiFieldsJson) throws Exception {
+            String body = """
+                {
+                  "apiName": "TikTok", "apiDescription": "d", "selectedCategory": "c",
+                  "apiConfig": { "baseUrl": "https://example.test",
+                                 "authorization": { "type": "none" } },
+                  "monetization": { "pricing": "free" },
+                  "mcpTools": [ { "name": "publish", "description": "d",
+                                  "endpoint": "/publish", "method": "POST" } ]%s
+                }
+                """.formatted(apiFieldsJson.isEmpty() ? "" : "," + apiFieldsJson);
+            ApiConfigurationRequest request = objectMapper.readValue(body, ApiConfigurationRequest.class);
+            return converter.toJsonNode(request);
+        }
+
+        @Test
+        @DisplayName("the error policy reaches the other side, or every declared rule is inert")
+        void errorPolicySurvives() throws Exception {
+            // Dropped here, catalog.apis.error_policy stays NULL, the cloud snapshot emits null,
+            // the signed bundle carries null, and self-hosted installs get null too: every rule
+            // an author wrote validates, imports green and never fires. Only the built-in
+            // 429/503 retry, which needs no data, would keep working.
+            JsonNode data = convertApiJson("""
+                "errorPolicy": [ { "match": { "bodyContains": "spam_risk_too_many_posts" },
+                                   "action": "user_error",
+                                   "message": "Daily posting limit reached." } ]""");
+
+            assertTrue(data.has("errorPolicy"), "errorPolicy must survive binding AND conversion");
+            assertEquals("user_error", data.get("errorPolicy").get(0).get("action").asText());
+            assertEquals("spam_risk_too_many_posts",
+                    data.get("errorPolicy").get(0).get("match").get("bodyContains").asText());
+        }
+
+        @Test
+        @DisplayName("an API that declares no policy sends no key, so the column stays NULL")
+        void absentErrorPolicyIsNotForwarded() throws Exception {
+            JsonNode data = convertApiJson("");
+
+            // An empty array would be stored and then skipped on every single failed call.
+            assertFalse(data.has("errorPolicy"));
         }
     }
 

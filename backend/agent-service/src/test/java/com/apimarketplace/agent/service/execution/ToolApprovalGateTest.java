@@ -488,12 +488,16 @@ class ToolApprovalGateTest {
         // Every other bridge test builds its clock FROM the constant, so all of them stay
         // green whatever it is set to. This is the one that reads it as a number.
         //
-        // 60 s is the shortest floor any of the four CLIs publishes (codex, per-call). The
-        // CLI's timer covers the wait AND the tool run that follows an approval, so the cap
-        // has to lose that race twice over: expire before the CLI gives up, and leave more
-        // of the floor to the tool than it took for itself. Raise it past 30 s and an
-        // approved call starts a tool with under half a minute to finish on a route where
-        // being abandoned means it runs anyway, for nobody.
+        // The constant covers a session that declares no CLI wait: an older bridge, or a
+        // CLI whose timeout the bridge cannot write. The shortest per-call wait any
+        // supported CLI documents for an UNCONFIGURED server is codex's 60 s, and an older
+        // bridge writes no tool_timeout_sec, so that is the case to survive. The CLI's timer
+        // covers the wait AND the tool run that follows an approval, so the cap has to lose
+        // that race twice over: expire before the CLI gives up, and leave more of the floor
+        // to the tool than it took for itself. Raise it past 30 s and an approved call
+        // starts a tool with under half a minute to finish on a route where being abandoned
+        // means it runs anyway, for nobody. (A session that DOES declare its wait is bounded
+        // by that instead - see declaredCliWaitRaisesTheBridgeCap.)
         long shortestPublishedCliFloorMs = 60_000;
 
         assertThat(ToolApprovalGate.BRIDGE_MAX_PARK_MS)
@@ -508,6 +512,26 @@ class ToolApprovalGateTest {
                 // outright by beginPark's "no budget left" guard.
                 .as("but must stay long enough for a present user to read a card and click")
                 .isGreaterThanOrEqualTo(10_000);
+    }
+
+    @Test
+    @DisplayName("The park ceiling leaves at least two thirds of the servlet pool to everything else")
+    void concurrentParkCeilingLeavesThePoolRoom() {
+        // A park holds a servlet thread for its whole wait, and a bridge park now runs to half
+        // the inactivity window (150 s by default) instead of 25 s. The ceiling protects the
+        // pool: with Spring's default 200 Tomcat threads (nothing in the repo sets
+        // server.tomcat.threads.max), a third is the most parks may ever hold.
+        int tomcatDefaultThreads = 200;
+
+        assertThat(ToolApprovalGate.DEFAULT_MAX_CONCURRENT_PARKS)
+                .as("parks must never hold more than a third of the default pool")
+                .isLessThanOrEqualTo(tomcatDefaultThreads / 3)
+                .as("and must cover more than a couple of people answering cards at once")
+                .isGreaterThanOrEqualTo(32)
+                // The number itself, so a quiet edit to the @Value default shows up here
+                // rather than as a pool that fills up under load.
+                .as("the shipped default is 64: change it here and in the javadoc together")
+                .isEqualTo(64);
     }
 
     @Test
@@ -529,6 +553,94 @@ class ToolApprovalGateTest {
                 startedAt - ToolApprovalGate.BRIDGE_MAX_PARK_MS, 0, true)))
                 .isEqualTo(ToolApprovalGate.Decision.EXPIRED);
         assertThat(System.currentTimeMillis() - startedAt).isLessThan(2_000);
+    }
+
+    @Test
+    @DisplayName("A bridge session that declares its CLI's wait is held up to THAT, past the shortest-CLI floor")
+    void declaredCliWaitRaisesTheBridgeCap() {
+        when(valueOps.get(KEY)).thenReturn(null, null, "approved");
+        gate.configureForTest(true, 240_000, 20);
+        // The bridge writes codex's per-call timeout and reads claude-code's idle window,
+        // so it knows a call may wait longer than the 25 s floor on those CLIs. It says so
+        // per session. This call is already PAST the floor: with the floor it would expire
+        // at once; with the declared 60 s it must still be held and read the verdict.
+        long declaredWaitMs = 60_000;
+        long pastTheFloor = System.currentTimeMillis() - (ToolApprovalGate.BRIDGE_MAX_PARK_MS + 5_000);
+
+        assertThat(gate.awaitDecision(new ToolApprovalGate.ParkRequest(
+                CONVERSATION, GATE_KEY, STREAM_ID, 0, 300_000, pastTheFloor, 0, true, declaredWaitMs)))
+                .as("the session's own wait must bound the park, not the fallback floor")
+                .isEqualTo(ToolApprovalGate.Decision.APPROVED);
+    }
+
+    @Test
+    @DisplayName("A declared CLI wait BELOW the floor is a ceiling of its own: held inside it, expired past it")
+    void declaredCliWaitBelowTheFloorIsHonoured() {
+        gate.configureForTest(true, 240_000, 20);
+        long declaredWaitMs = 10_000;
+
+        // Inside the declared 10 s: still held, reads the verdict.
+        when(valueOps.get(KEY)).thenReturn(null, null, "approved");
+        assertThat(gate.awaitDecision(new ToolApprovalGate.ParkRequest(
+                CONVERSATION, GATE_KEY, STREAM_ID, 0, 300_000,
+                System.currentTimeMillis() - 5_000, 0, true, declaredWaitMs)))
+                .isEqualTo(ToolApprovalGate.Decision.APPROVED);
+
+        // Past 10 s but still under the 25 s floor: the floor must NOT rescue it, because
+        // the bridge said this CLI stops waiting sooner than the floor assumes.
+        when(valueOps.get(KEY)).thenReturn(null);
+        long startedAt = System.currentTimeMillis();
+        assertThat(gate.awaitDecision(new ToolApprovalGate.ParkRequest(
+                CONVERSATION, GATE_KEY, STREAM_ID, 0, 300_000,
+                startedAt - 11_000, 0, true, declaredWaitMs)))
+                .isEqualTo(ToolApprovalGate.Decision.EXPIRED);
+        assertThat(System.currentTimeMillis() - startedAt).isLessThan(2_000);
+    }
+
+    @Test
+    @DisplayName("A declared CLI wait still ends the park: it is a ceiling of its own, not a blank cheque")
+    void declaredCliWaitIsStillACeiling() {
+        when(valueOps.get(KEY)).thenReturn(null);
+        gate.configureForTest(true, 240_000, 20);
+        long declaredWaitMs = 60_000;
+        long pastTheDeclaredWait = System.currentTimeMillis() - (declaredWaitMs + 1_000);
+
+        long startedAt = System.currentTimeMillis();
+        assertThat(gate.awaitDecision(new ToolApprovalGate.ParkRequest(
+                CONVERSATION, GATE_KEY, STREAM_ID, 0, 300_000, pastTheDeclaredWait, 0, true, declaredWaitMs)))
+                .isEqualTo(ToolApprovalGate.Decision.EXPIRED);
+        assertThat(System.currentTimeMillis() - startedAt)
+                .as("past the declared wait the park must give up at once")
+                .isLessThan(2_000);
+    }
+
+    @Test
+    @DisplayName("A declared CLI wait never outruns half the inactivity window - the watchdog still kills a silent run")
+    void declaredCliWaitStaysUnderTheHalfWindow() {
+        when(valueOps.get(KEY)).thenReturn(null);
+        gate.configureForTest(true, 240_000, 20);
+        // 30 s window => 15 s ceiling. A declared 60 s wait must not lift that: the run
+        // would be killed for silence, which no later answer can recover.
+        long callStarted = System.currentTimeMillis() - 16_000;
+
+        long startedAt = System.currentTimeMillis();
+        assertThat(gate.awaitDecision(new ToolApprovalGate.ParkRequest(
+                CONVERSATION, GATE_KEY, STREAM_ID, 0, 30_000, callStarted, 0, true, 60_000)))
+                .isEqualTo(ToolApprovalGate.Decision.EXPIRED);
+        assertThat(System.currentTimeMillis() - startedAt).isLessThan(2_000);
+    }
+
+    @Test
+    @DisplayName("A declared CLI wait is ignored on the direct route - nothing is holding that call")
+    void declaredCliWaitIsOnlyReadOnTheBridge() {
+        when(valueOps.get(KEY)).thenReturn(null, null, "approved");
+        gate.configureForTest(true, 240_000, 20);
+        // A stray value on a direct-route call must not cut a 240 s budget down to it.
+        long pastTheDeclaredWait = System.currentTimeMillis() - 11_000;
+
+        assertThat(gate.awaitDecision(new ToolApprovalGate.ParkRequest(
+                CONVERSATION, GATE_KEY, STREAM_ID, 0, 300_000, pastTheDeclaredWait, 0, false, 10_000)))
+                .isEqualTo(ToolApprovalGate.Decision.APPROVED);
     }
 
     @Test

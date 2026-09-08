@@ -21,7 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * HTTP client the {@code core:generate} node uses to run one generation.
+ * HTTP client the {@code agent:generate} node uses to run one generation.
  *
  * <p><b>Why this is a thin client and not the generation logic itself.</b>
  * Everything that decides what a generation costs and whether it succeeds lives
@@ -207,7 +207,7 @@ public class GenerationExecutionService {
      *
      * @param tenantId         executing workflow's tenant, the owner the asset is stored under
      * @param runId            workflow run the credit debit is scoped to
-     * @param nodeId           producing node key ({@code core:<label>}), recorded on the debit
+     * @param nodeId           producing node key ({@code agent:<label>}), recorded on the debit
      * @param model            public generation model id
      * @param params           unified generation parameters, already resolved from templates
      * @param credentialSource {@code "user"} or {@code "platform"}, or null to let the

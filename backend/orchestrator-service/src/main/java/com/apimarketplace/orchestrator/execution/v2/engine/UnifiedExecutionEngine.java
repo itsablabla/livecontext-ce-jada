@@ -131,6 +131,26 @@ public class UnifiedExecutionEngine {
         return nodeCreditGate != null ? nodeCreditGate.denyOrNull(nodeId, tenantId) : null;
     }
 
+    // Per-plan node-type gate, applied beside the credit gate in both dispatch paths.
+    // An admin can put a node type behind a paid plan; a run owned by an account below
+    // that bar fails the node with the plan that would unlock it rather than running it.
+    // Optional: plain unit-test construction leaves it null and executes unchanged.
+    private com.apimarketplace.orchestrator.services.plan.NodePlanGate nodePlanGate;
+
+    @Autowired(required = false)
+    public void setNodePlanGate(
+            com.apimarketplace.orchestrator.services.plan.NodePlanGate nodePlanGate) {
+        this.nodePlanGate = nodePlanGate;
+    }
+
+    /**
+     * Null-safe delegation to the plan gate - returns the FAILED result to use instead
+     * of executing {@code node}, or {@code null} to execute normally.
+     */
+    private NodeExecutionResult planDenialOrNull(ExecutionNode node, String tenantId) {
+        return nodePlanGate != null ? nodePlanGate.denyOrNull(node, tenantId) : null;
+    }
+
     // Unreachable-merge gate applied before EVERY node body in both dispatch paths
     // (executeSingleNode = SBS, executeNodeCore = AUTO traversal). A merge fires once all
     // its predecessors are terminal, SKIPPED included - which also lets it fire when NO
@@ -454,6 +474,15 @@ public class UnifiedExecutionEngine {
         if (balanceDenial != null) {
             ExecutionContext failCtx = context.withStart(nodeId).withResult(nodeId, balanceDenial);
             return NodeExecutionOutcome.completed(failCtx, balanceDenial);
+        }
+
+        // 0a-bis. Plan gate - the node TYPE itself may be sold at a higher tier than the
+        //     run owner's. Asked before the local budget mirror below so a node the
+        //     account may not run never spends a credit being refused.
+        NodeExecutionResult planDenial = planDenialOrNull(node, tenantId);
+        if (planDenial != null) {
+            ExecutionContext failCtx = context.withStart(nodeId).withResult(nodeId, planDenial);
+            return NodeExecutionOutcome.completed(failCtx, planDenial);
         }
 
         // 0b. Local budget mirror - flat per-node fee decremented from the balance
@@ -1208,8 +1237,12 @@ public class UnifiedExecutionEngine {
         // after emitNodeStart so the node still lights up before turning red, and
         // before every dispatch branch so no node type can bypass it - the trigger
         // node itself comes through here on every fire.
-        NodeExecutionResult creditDenial = creditDenialOrNull(
-            nodeId, resolveTenantId(contextWithStart, execution));
+        String gateTenantId = resolveTenantId(contextWithStart, execution);
+        NodeExecutionResult creditDenial = creditDenialOrNull(nodeId, gateTenantId);
+
+        // Plan gate: same placement and the same reasoning as the credit gate - the node
+        // lights up, then turns red carrying the plan that would unlock it.
+        NodeExecutionResult planDenial = planDenialOrNull(node, gateTenantId);
 
         // Unreachable-merge gate: ahead of the credit gate and of every dispatch branch, so
         // no node type (split merge, split aggregate, split-aware body) can run for an item
@@ -1230,6 +1263,9 @@ public class UnifiedExecutionEngine {
 
         } else if (creditDenial != null) {
             result = creditDenial;
+
+        } else if (planDenial != null) {
+            result = planDenial;
 
         } else if (node.isSplitNode()) {
             // Check for nested split (split inside another split scope)
@@ -1401,7 +1437,8 @@ public class UnifiedExecutionEngine {
         logger.info("[V2StepByStep] Split executing: nodeId={}, expression={}, maxItems={}, workflowItem={}",
             nodeId, sourceExpression, maxItems, workflowItemIndex);
 
-        return splitNodeExecutor.execute(runId, nodeId, sourceExpression, maxItems, workflowItemIndex, context);
+        return splitNodeExecutor.execute(runId, nodeId, sourceExpression, maxItems,
+            node.getSplitStrategy(), workflowItemIndex, context);
     }
 
 

@@ -9,44 +9,35 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * Single source of truth for deleting all OPERATIONAL org-scoped data across every
- * service schema for a given organization id. Reused by account deletion
- * ({@link AccountPurgeService}) and workspace deletion ({@link WorkspacePurgeService}).
+ * Auth-side half of a purge: deletes the org-scoped OPERATIONAL rows that live in the
+ * {@code auth} schema and records the decision in {@code auth.purge_log}, the outbox that
+ * every other service's {@code PurgeFollower} consumes to delete ITS rows. Reused by account
+ * deletion ({@link AccountPurgeService}) and workspace deletion ({@link WorkspacePurgeService}).
  *
- * <p><b>Deliberate scope - operational only.</b> This NEVER touches the financial /
- * audit ledger ({@code auth.credit_ledger}, {@code auth.usage_cycle},
- * {@code auth.credit_reconciliation_log}, {@code auth.organization_audit_event}) nor the
- * {@code auth.organization} row / its memberships. The workspace flow keeps the org row
- * as a tombstone so owner-pays credit-ledger references stay valid (ADR-009); the caller
- * decides what to do with the org shell.
+ * <p><b>This class no longer touches any other schema, and that is the point.</b> Until
+ * 2026-09-02 it fanned 31 DELETEs over nine schemas in native cross-schema SQL, the one class
+ * that pinned every schema to the same Postgres: as long as auth reached into
+ * {@code datasource.*} directly, user tables and vectors could never move to their own
+ * database. Now each service deletes its own rows within minutes of the log row appearing
+ * (auth-client {@code PurgeFollower}, cursor per schema), auth writes only to {@code auth.*},
+ * and the CI guard {@code scripts/ci/check-cross-schema-sql.py} keeps it that way with an
+ * empty allow-list.
  *
- * <p>Runs as native cross-schema SQL - the deliberate exception to the "each service owns
- * its schema" rule, exactly like the account-purge path. The CALLER owns the surrounding
- * {@code @Transactional}.
+ * <p><b>What did not change.</b> The old purger offered no atomicity across schemas either:
+ * every statement ran in its own savepoint and a failure was logged and skipped. The
+ * followers are at-least-once and stop on failure instead of skipping, which is strictly
+ * better for a deletion the user was promised. The financial / audit ledger
+ * ({@code auth.credit_ledger}, {@code auth.usage_cycle}, {@code auth.credit_reconciliation_log},
+ * {@code auth.organization_audit_event}) and the {@code auth.organization} row are still never
+ * touched here; the workspace flow keeps the org row as a tombstone (ADR-009).
  *
- * <p><b>Per-statement isolation via SAVEPOINT.</b> Each {@code nativeExec} runs inside its own
- * JDBC savepoint, so a single failing statement (a future schema/type drift, a missing table)
- * rolls back ONLY that statement and the purge continues - without it, Postgres aborts the whole
- * transaction on any error and every later statement (plus the caller's commit) would fail.
- * Statements are also type-safe: org-id columns are a UUID/VARCHAR mix across schemas, so
- * predicates cast {@code organization_id::text = ?}; the one UUID column uses {@code = ?::uuid}.
+ * <p><b>Custom APIs</b> ({@code catalog.apis} rows with an {@code organization_id}) are still
+ * not purged anywhere; the catalog has no follower yet. Tracked as before.
  *
- * <p><b>Storage:</b> deletes the underlying S3/MinIO objects as well as the
- * {@code storage.storage} rows. The objects go FIRST, because their keys live only in those
- * rows. Object deletion is best-effort per key and never aborts the purge, but the failure
- * count is logged: an erasure we could not complete has to be visible, not assumed.
- *
- * <p>⚠️ <b>Custom APIs:</b> {@code catalog.apis} (user-created custom APIs carry an
- * {@code organization_id}; the 700+ global third-party APIs are {@code organization_id
- * NULL}) is intentionally NOT purged here - same as the account-purge path - because that
- * table is the global catalog and a mistyped predicate would be catastrophic. The org's
- * custom APIs become invisible orphans (org tombstoned). Tracked as a follow-up.
- *
- * <p>{@link #PURGED_ORG_SCOPED_TABLES} declares every table this purges; the
- * {@code WorkspaceDataPurgerTest} captures the issued SQL and asserts (a) every statement is
- * org-scoped, (b) the retained financial/audit tables are never touched, and (c) every declared
- * table is actually hit. Thanks to the per-statement savepoint isolation, adding a new org-scoped
- * table here is always safe - a wrong/missing table name rolls back only its own statement.
+ * <p>The log row is written in the CALLER's transaction, after the auth-schema deletes, so a
+ * rolled-back purge leaves no promise behind and a committed one is guaranteed to be picked
+ * up. Per-statement SAVEPOINTs are kept for the auth deletes, for the same reason as before:
+ * one drifting table must not poison the caller's commit.
  */
 @Component
 public class WorkspaceDataPurger {
@@ -56,195 +47,74 @@ public class WorkspaceDataPurger {
     @PersistenceContext
     private EntityManager em;
 
-    /** Removes the stored bytes; the rows below only reference them. */
-    private final com.apimarketplace.storage.client.StorageClient storageClient;
-
-    public WorkspaceDataPurger(com.apimarketplace.storage.client.StorageClient storageClient) {
-        this.storageClient = storageClient;
-    }
-
     /**
-     * Every {@code schema.table} this purger deletes org-scoped rows from. Kept in sync with
-     * {@link #purgeOperationalData} and consumed by the anti-drift coverage test. Order here
-     * is documentation only; the method runs children-before-parents for FK safety.
+     * Every {@code auth.<table>} this purger deletes org-scoped rows from. The tables of the
+     * other schemas are each follower's business now; see the {@code *PurgeFollower} classes
+     * and their tests, which pin their own lists.
      */
-    public static final List<String> PURGED_ORG_SCOPED_TABLES = List.of(
-            "conversation.conversations",
-            "orchestrator.workflow_runs",
-            "orchestrator.workflows",
-            "orchestrator.projects",
-            "orchestrator.notifications",
-            "agent.agent_executions",
-            "agent.agent_tasks",
-            "agent.agent_task_recurrences",
-            "agent.agent_task_notes",
-            "agent.agent_task_events",
-            "agent.agent_task_claims",
-            "agent.agents",
-            "agent.skill_folders",
-            "agent.skills",
-            "interface.interfaces",
-            "datasource.data_sources",
-            "trigger.scheduled_executions",
-            "trigger.standalone_webhooks",
-            "trigger.standalone_chat_endpoints",
-            "trigger.standalone_form_endpoints",
-            "trigger.webhook_tokens",
-            "trigger.datasource_trigger_subscriptions",
-            "storage.storage",
-            "storage.organization_storage_quota",
-            "storage.org_storage_breakdown",
-            "storage.org_storage_usage_history",
-            "publication.workflow_publications",
-            "publication.publication_receipts",
+    public static final List<String> PURGED_AUTH_TABLES = List.of(
             "auth.org_resource_restrictions",
             "auth.org_member_quota_limit",
             "auth.credentials"
     );
 
-    /**
-     * Removes the stored objects themselves (S3/MinIO), not just the rows that reference them.
-     *
-     * <p>Best-effort per object and never fatal: a bucket hiccup must not abort a purge that has
-     * already destroyed rows in a dozen schemas, and every object we fail to delete is
-     * unreachable anyway once its row is gone. The count is logged both ways so an incomplete
-     * erasure is visible rather than assumed - "we deleted your files" should be something the
-     * logs can back up.
-     *
-     * <p>Keys are read before the rows are deleted because they exist nowhere else.
-     */
-    private void deleteStorageObjects(String orgId) {
-        List<Object[]> objects;
-        try {
-            @SuppressWarnings("unchecked")
-            List<Object[]> rows = em.createNativeQuery(
-                    "SELECT s3_key, tenant_id FROM storage.storage "
-                            + "WHERE organization_id::text = ?1 AND s3_key IS NOT NULL")
-                    .setParameter(1, orgId)
-                    .getResultList();
-            objects = rows;
-        } catch (Exception e) {
-            logger.warn("Workspace purge: could not enumerate storage objects for org {}: {}", orgId, e.getMessage());
-            return;
-        }
-        if (objects.isEmpty()) {
-            return;
-        }
-        int deleted = 0;
-        int failed = 0;
-        for (Object[] row : objects) {
-            String key = row[0] == null ? null : row[0].toString();
-            String tenantId = row[1] == null ? null : row[1].toString();
-            if (key == null || key.isBlank()) continue;
-            try {
-                // Owner tenant, not the caller: internal storage refuses a key whose prefix does
-                // not match the X-User-ID it is given.
-                if (storageClient.delete(tenantId, key)) {
-                    deleted++;
-                } else {
-                    failed++;
-                }
-            } catch (Exception e) {
-                failed++;
-                logger.warn("Workspace purge: object delete failed for key {}: {}", key, e.getMessage());
-            }
-        }
-        if (failed > 0) {
-            logger.warn("Workspace purge: org {} - {} stored objects deleted, {} FAILED and remain in the bucket",
-                    orgId, deleted, failed);
-        } else {
-            logger.info("Workspace purge: org {} - {} stored objects deleted from the bucket", orgId, deleted);
-        }
-    }
+    /** Where the log rows come from; shows up in {@code auth.purge_log.source}. */
+    public static final String SOURCE_WORKSPACE = "workspace-delete";
+    public static final String SOURCE_ACCOUNT = "account-delete";
 
     /**
-     * Deletes all operational org-scoped rows for {@code orgId}. Idempotent. Does NOT touch
-     * the financial ledger / audit / organization row. Must be called inside a transaction.
+     * Deletes the auth-schema operational rows of {@code orgId} and logs the purge for every
+     * follower. Idempotent. Must be called inside a transaction.
+     *
+     * @param source {@link #SOURCE_WORKSPACE} or {@link #SOURCE_ACCOUNT}
      */
-    public void purgeOperationalData(String orgId) {
-        // conversation schema
-        nativeExec("DELETE FROM conversation.messages WHERE conversation_id IN " +
-                "(SELECT id FROM conversation.conversations WHERE organization_id::text = ?)", orgId);
-        nativeExec("DELETE FROM conversation.conversations WHERE organization_id::text = ?", orgId);
-
-        // orchestrator schema - FK cascades handle child tables (plan_versions, signals, epochs)
-        // workflow_runs.id is UUID but workflow_step_data.run_id is VARCHAR - cast the subquery
-        // id to text so the IN comparison doesn't trip 'character varying = uuid'.
-        nativeExec("DELETE FROM orchestrator.workflow_step_data WHERE run_id IN " +
-                "(SELECT id::text FROM orchestrator.workflow_runs WHERE organization_id::text = ?)", orgId);
-        nativeExec("DELETE FROM orchestrator.workflow_runs WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM orchestrator.workflows WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM orchestrator.projects WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM orchestrator.notifications WHERE organization_id::text = ?", orgId);
-
-        // agent schema (children before parents)
-        nativeExec("DELETE FROM agent.agent_execution_tool_calls WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM agent.agent_execution_messages WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM agent.agent_execution_iterations WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM agent.agent_executions WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM agent.agent_task_recurrences WHERE organization_id::text = ?", orgId);
-        // agent_task_notes/events/claims also ON DELETE CASCADE from agent_tasks; deleting them
-        // explicitly first is defense-in-depth (survives a future cascade removal) and correctly ordered.
-        nativeExec("DELETE FROM agent.agent_task_notes WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM agent.agent_task_events WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM agent.agent_task_claims WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM agent.agent_tasks WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM agent.agents WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM agent.skill_folders WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM agent.skills WHERE organization_id::text = ?", orgId);
-
-        // interface schema
-        nativeExec("DELETE FROM interface.interfaces WHERE organization_id::text = ?", orgId);
-
-        // datasource schema
-        nativeExec("DELETE FROM datasource.data_sources WHERE organization_id::text = ?", orgId);
-
-        // trigger schema
-        nativeExec("DELETE FROM trigger.scheduled_executions WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM trigger.standalone_webhooks WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM trigger.standalone_chat_endpoints WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM trigger.standalone_form_endpoints WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM trigger.webhook_tokens WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM trigger.datasource_trigger_subscriptions WHERE organization_id::text = ?", orgId);
-
-        // storage schema - the OBJECTS first, then the rows that point at them.
-        // Dropping only the rows left every uploaded byte sitting in the bucket forever:
-        // unreachable through the app, but neither deleted nor billed to anyone, and still very
-        // much the customer's data on our disks after we told them it was erased. The keys only
-        // exist in these rows, so they have to be read before the DELETE - afterwards there is
-        // nothing left to enumerate.
-        deleteStorageObjects(orgId);
-        int storageRows = nativeExec("DELETE FROM storage.storage WHERE organization_id::text = ?", orgId);
-        if (storageRows > 0) {
-            logger.info("Workspace purge: deleted {} storage rows for org {}", storageRows, orgId);
-        }
-        // Org storage accounting: the V205 quota row + the V222 LIVE breakdown/usage-history tables
-        // (storage.org_storage_*, the entity-mapped ones the trackers write - NOT the dead V205
-        // storage.organization_storage_breakdown/usage_history). All keyed by organization_id VARCHAR.
-        nativeExec("DELETE FROM storage.organization_storage_quota WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM storage.org_storage_breakdown WHERE organization_id::text = ?", orgId);
-        nativeExec("DELETE FROM storage.org_storage_usage_history WHERE organization_id::text = ?", orgId);
-
-        // publication schema (ORG-owned publications + org-scoped receipts)
-        nativeExec("DELETE FROM publication.workflow_publications WHERE owner_type = 'ORG' AND owner_id::text = ?", orgId);
-        nativeExec("DELETE FROM publication.publication_receipts WHERE organization_id::text = ?", orgId);
-
-        // auth schema - org-scoped OPERATIONAL rows (NOT the financial ledger / audit).
+    public void purgeOperationalData(String orgId, String source) {
         // org_member_quota_limit.org_id is UUID (not organization_id VARCHAR); it has an
         // ON DELETE CASCADE on the org row, but the workspace flow keeps that row, so we
         // must delete it explicitly here.
         nativeExec("DELETE FROM auth.org_resource_restrictions WHERE organization_id::text = ?", orgId);
         nativeExec("DELETE FROM auth.org_member_quota_limit WHERE org_id = ?::uuid", orgId);
         nativeExec("DELETE FROM auth.credentials WHERE organization_id::text = ?", orgId);
+        recordPurge("ORG", orgId, source);
     }
 
     /**
-     * Execute one delete inside its OWN SAVEPOINT, so a single failing statement (e.g. a future
-     * schema/type drift, or a missing table) rolls back ONLY that statement instead of poisoning
-     * the whole purge transaction - Postgres aborts a transaction on any error, so a plain
-     * try/catch swallow does NOT keep "best-effort per statement". Best-effort: a failure is
-     * rolled back to the savepoint and logged, and the purge continues with the next table. The
-     * SQL uses one positional JDBC {@code ?} bound to the org-id string; returns the row count.
+     * Logs an ACCOUNT purge so the followers drop the user-owned rows they hold
+     * ({@code publication.workflow_publications} with {@code owner_type = 'USER'},
+     * {@code agent.user_skill_overrides}). The auth-schema user rows are deleted by
+     * {@link AccountPurgeService} itself.
+     */
+    public void recordUserPurge(String userId) {
+        recordPurge("USER", userId, SOURCE_ACCOUNT);
+    }
+
+    /**
+     * Writes the outbox row. Callers must make this the LAST thing of substance in their
+     * transaction and keep whatever follows fast: the internal purge feed serves a row only
+     * once it is 60 seconds old (so a lower seq still inside an open transaction cannot be
+     * skipped by a follower that already saw a higher one), and that margin assumes no purge
+     * transaction lives long after this insert. A slow remote call added after it would
+     * silently reopen the gap.
+     */
+    private void recordPurge(String subjectType, String subjectId, String source) {
+        em.unwrap(org.hibernate.Session.class).doWork(conn -> {
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO auth.purge_log (subject_type, subject_id, source) VALUES (?, ?, ?)")) {
+                ps.setString(1, subjectType);
+                ps.setString(2, subjectId);
+                ps.setString(3, source);
+                ps.executeUpdate();
+            }
+        });
+        logger.info("Purge logged: {} {} ({}); followers will delete their rows within minutes",
+                subjectType, subjectId, source);
+    }
+
+    /**
+     * Execute one delete inside its OWN SAVEPOINT, so a single failing statement (a future
+     * schema/type drift, a missing table) rolls back ONLY that statement instead of poisoning
+     * the caller's transaction. Postgres aborts a transaction on any error, so a plain
+     * try/catch swallow would NOT keep "best-effort per statement".
      */
     private int nativeExec(String sql, String orgId) {
         final int[] rows = {0};
@@ -255,8 +125,6 @@ public class WorkspaceDataPurger {
                 rows[0] = ps.executeUpdate();
                 conn.releaseSavepoint(sp);
             } catch (Exception e) {
-                // Best-effort per statement: roll back ONLY this statement (catch any error, not just
-                // SQLException, so a RuntimeException can't leak the savepoint and poison the tx).
                 conn.rollback(sp);
                 try {
                     conn.releaseSavepoint(sp);

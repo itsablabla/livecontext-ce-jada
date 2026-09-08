@@ -40,23 +40,36 @@ vi.mock('@/lib/stores/current-org-store', () => ({
 
 import { Store } from 'lucide-react';
 import { NavIconButton } from '../AppSidebar';
+import { SIDEBAR_NAV_ROW_ICON_CLASS } from '@/lib/sidebar/navRowStyles';
 
 /**
  * The row the expanded panel renders for the same entry, READ FROM ITS SOURCE.
  *
  * <p>It was a copied literal, with a comment claiming it tracked the row. It did
  * not: restyling ConversationSidebar left this file untouched and the suite
- * green, which is the exact drift the assertion says it prevents. Reading the
- * class string out of the file makes the claim true, and the throw keeps a
- * pattern that stops matching from turning the check into a no-op.
+ * green, which is the exact drift the assertion says it prevents.
+ *
+ * <p>It then scraped the class string out of ConversationSidebar with a regex,
+ * which was true but brittle: the rows now share ONE exported class list with
+ * the overflow row that ends the block, so the panel no longer spells it
+ * inline. Importing that list is the same claim without the regex - but ONLY
+ * while something really renders that list, which is what
+ * `expandedPanelUsesTheSharedIcon` below pins. Without that second half the
+ * import would compare the rail against a constant nothing renders, and the
+ * cross-file guard this test exists to be would quietly become a tautology.
+ *
+ * <p>The consumer is now SidebarNavigation, the single component that draws the
+ * navigation in both of the sidebar's shapes. That this test had to be pointed
+ * at a new file is the guard working: the rows moved, and it said so.
  */
 function expandedRowIconClasses(): string[] {
-  const source = readFileSync(join(__dirname, '../../chat/ConversationSidebar.tsx'), 'utf8');
-  // The Marketplace row, one of eight identical ones; any of them pins the same
-  // treatment, and naming one keeps the pattern anchored to a real line.
-  const match = source.match(/<Store className="([^"]+)"/);
-  if (!match) throw new Error('The expanded nav row was not found in ConversationSidebar.tsx');
-  return match[1].split(/\s+/).filter(Boolean);
+  return SIDEBAR_NAV_ROW_ICON_CLASS.split(/\s+/).filter(Boolean);
+}
+
+/** Does the expanded panel actually draw its rows from that list? */
+function expandedPanelUsesTheSharedIcon(): boolean {
+  const source = readFileSync(join(__dirname, '../SidebarNavigation.tsx'), 'utf8');
+  return source.includes('className={SIDEBAR_NAV_ROW_ICON_CLASS}');
 }
 
 function renderRail(isActive = false) {
@@ -122,10 +135,13 @@ describe('collapsed sidebar rail - a nav icon looks like its expanded row', () =
   });
 
   it('applies every colour rule the expanded row applies', () => {
-    // Read out of ConversationSidebar.tsx at run time, so the day that row is
+    // Read out of SidebarNavigation.tsx at run time, so the day that row is
     // restyled this test says the rail drifted instead of quietly passing.
     const { icon } = renderRail();
     const railClasses = (icon.getAttribute('class') ?? '').split(/\s+/);
+
+    // The comparison is only worth anything if the panel draws from this list.
+    expect(expandedPanelUsesTheSharedIcon(), 'SidebarNavigation no longer renders SIDEBAR_NAV_ROW_ICON_CLASS').toBe(true);
 
     for (const cls of expandedRowIconClasses()) {
       if (cls === 'mr-2') continue; // spacing before the label; the rail has no label

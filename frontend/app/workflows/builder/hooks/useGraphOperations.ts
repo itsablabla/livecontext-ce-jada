@@ -12,6 +12,7 @@ import type { ConnectionType } from '../components/ConnectionTypeSelector';
 import { stripRuntimeProps } from '../utils/nodeDataUtils';
 import { nodeRegistry } from '../registry/nodeRegistry';
 import { isAncestor as isAncestorOverForwardEdges } from '../utils/backEdgeDetection';
+import { track } from '@/lib/analytics/analytics';
 
 /**
  * Check if targetId is an ancestor of sourceId, ignoring edges already known to be loop-backs.
@@ -357,6 +358,12 @@ export function useGraphOperations(
         return [...updatedNodes, newNode];
       });
       setSelectedNodeIds([id]);
+      track('workflow_node_added', {
+        node_type: item.nodeType,
+        node_kind: item.kind,
+        palette_item_id: item.id,
+        has_parent: Boolean(options?.parentId),
+      });
       // Hand back the id: a caller that needs to act on the node it just created
       // (pan onto it, wire it up) would otherwise guess it from the end of the
       // nodes array, which is only correct until something else appends.

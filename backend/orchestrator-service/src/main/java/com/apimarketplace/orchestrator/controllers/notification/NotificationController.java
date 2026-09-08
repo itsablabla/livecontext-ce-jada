@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator.controllers.notification;
 
+import com.apimarketplace.orchestrator.services.badge.BadgeNotificationEmitter;
 import com.apimarketplace.orchestrator.services.notification.NotificationService;
 import com.apimarketplace.orchestrator.services.notification.NotificationService.BucketRef;
 import com.apimarketplace.orchestrator.services.notification.NotificationsResponse;
@@ -47,12 +48,16 @@ public class NotificationController {
      * silently stripped from delete-batch, making that row impossible to
      * delete - the optimistic removal in the frontend is reverted by the
      * settle refetch and the row reappears. {@code AGENT_TASK_AWAITING_REVIEW}
-     * was exactly that drift.
+     * was exactly that drift, and so were {@code AGENT_TASK_MENTION} and
+     * {@code BADGE_UNLOCKED} after it, which is why this list is no longer
+     * maintained by hand alone: {@code NotificationCategoryCoverageTest} reads
+     * the producers' own source and fails the build on the next one.
      */
     private static final Set<String> KNOWN_CATEGORIES = Set.of(
             "RUN_FAILED", "APPROVAL_PENDING", "CRED_EXPIRED", "WEBHOOK_TRIGGER_DISABLED",
-            "AGENT_TASK_ASSIGNED", "AGENT_TASK_AWAITING_REVIEW", "BRIDGE_LOW_CREDIT",
-            "ORG_INVITATION_PENDING");
+            "AGENT_TASK_ASSIGNED", "AGENT_TASK_AWAITING_REVIEW", "AGENT_TASK_MENTION",
+            "BRIDGE_LOW_CREDIT", "ORG_INVITATION_PENDING", "BUDGET_REACHED",
+            BadgeNotificationEmitter.CATEGORY_BADGE_UNLOCKED);
 
     private final NotificationService notificationService;
 

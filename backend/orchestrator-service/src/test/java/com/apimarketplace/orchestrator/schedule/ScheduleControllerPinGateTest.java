@@ -69,7 +69,7 @@ class ScheduleControllerPinGateTest {
         ResponseEntity<?> response = controller().createOrUpdateSchedule(
                 WORKFLOW_ID.toString(), TRIGGER_ID,
                 new ScheduleCreateRequest("0 9 * * *", "UTC", null, true, null),
-                TENANT, null, "FREE");
+                TENANT, null, "MEMBER", "FREE");
 
         assertThat(response.getStatusCode().value()).isEqualTo(400);
         Map<String, Object> body = (Map<String, Object>) response.getBody();
@@ -86,7 +86,7 @@ class ScheduleControllerPinGateTest {
         ResponseEntity<?> response = controller().createOrUpdateSchedule(
                 WORKFLOW_ID.toString(), TRIGGER_ID,
                 new ScheduleCreateRequest("0 9 * * *", "UTC", null, true, null),
-                TENANT, null, "FREE");
+                TENANT, null, "MEMBER", "FREE");
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
         verify(triggerClient, never()).createOrUpdateSchedule(any(), anyString(), anyString(), any());
@@ -110,7 +110,7 @@ class ScheduleControllerPinGateTest {
         ResponseEntity<?> response = controller().createOrUpdateSchedule(
                 WORKFLOW_ID.toString(), TRIGGER_ID,
                 new ScheduleCreateRequest("0 9 * * *", "UTC", null, true, null),
-                TENANT, null, "PRO");
+                TENANT, null, "MEMBER", "PRO");
 
         assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
         verify(triggerClient).createOrUpdateSchedule(

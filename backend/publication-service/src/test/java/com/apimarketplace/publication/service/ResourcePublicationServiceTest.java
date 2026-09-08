@@ -106,13 +106,18 @@ class ResourcePublicationServiceTest {
     }
 
     @Test
-    @DisplayName("publishResource STAMPS the CE-exclusive label on the persisted row for a vector table")
+    @DisplayName("publishResource RECORDS vector search on a vector table, without making it un-installable")
     void publishResourceStampsCeExclusiveForVectorTable() {
-        // End-to-end for the resource publish path: the detector is wired into
-        // publishResource, so a table carrying an embedding column is persisted
-        // already flagged. Deleting the applyTo call here would leave the row
-        // ce_exclusive=false and installable on cloud, where the clone silently
-        // drops the very column the table exists for.
+        // End-to-end for the resource publish path: the detector is wired into publishResource, so
+        // a table carrying an embedding column is persisted already labelled. Deleting the applyTo
+        // call here would leave the row with no feature list, and the acquire gate reads that list
+        // to decide whether the installing workspace's plan has to include vector search - so the
+        // app would install for anyone and the clone would silently drop the very column it exists
+        // for.
+        //
+        // The boolean stays FALSE, and that is the 2026-09-03 change: ce_exclusive means "managed
+        // cloud cannot run this at any price", which is true of a local CLI agent and no longer
+        // true of embeddings.
         String tableId = "42";
         Map<String, Object> resourceSnapshot = new LinkedHashMap<>(Map.of(
                 "name", "Docs",
@@ -146,8 +151,10 @@ class ResourcePublicationServiceTest {
 
         WorkflowPublicationEntity published = service.publishResource(request, TENANT_ID, ORGANIZATION_ID);
 
-        assertThat(published.isCeExclusive()).isTrue();
         assertThat(published.getCeExclusiveFeatures()).containsExactly("VECTOR_SEARCH");
+        assertThat(published.isCeExclusive())
+                .as("embeddings are priced on cloud, not impossible: the install is plan-gated, not refused")
+                .isFalse();
     }
 
     @Test

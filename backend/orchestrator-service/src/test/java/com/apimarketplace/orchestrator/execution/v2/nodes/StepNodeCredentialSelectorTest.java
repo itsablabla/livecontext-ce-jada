@@ -184,4 +184,22 @@ class StepNodeCredentialSelectorTest {
 
         assertThat(result.output()).doesNotContainKey("credential_selection");
     }
+
+    @Test
+    @DisplayName("analytics attribution markers ride beside the billing ones, never through the billing step key")
+    void attributionMarkersReachTheGateway() {
+        when(toolsGateway.executeTool(any(ToolRef.class), anyMap(), anyString(), anyMap()))
+                .thenReturn(new ExecutionResult(true, Map.of("ok", true), List.of(), List.of()));
+
+        node(null).execute(context);
+
+        Map<String, Object> markers = capturedMarkers();
+        org.junit.jupiter.api.Assertions.assertEquals("workflow-1", markers.get("__workflowId__"),
+                "__workflowId__ attributes api_call_completed to the plan");
+        org.junit.jupiter.api.Assertions.assertEquals("node-1", markers.get("__analyticsNodeId__"),
+                "__analyticsNodeId__ attributes api_call_completed to the node");
+        org.junit.jupiter.api.Assertions.assertEquals("run-1", markers.get("__workflowRunId__"));
+        org.junit.jupiter.api.Assertions.assertNull(markers.get("__nodeId__"),
+                "__nodeId__ is the billing step key and must stay unset");
+    }
 }

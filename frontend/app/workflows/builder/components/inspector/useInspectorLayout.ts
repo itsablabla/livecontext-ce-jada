@@ -1,5 +1,120 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+/**
+ * Window width below which the inspector uses its tabbed layout, whatever the
+ * panel measures. Must match the Tailwind `lg:` breakpoint the panel's own
+ * container classes use.
+ */
+export const INSPECTOR_MOBILE_WINDOW_WIDTH = 1024;
+
+/** Minimum the parameters column keeps for itself (`min-w-[200px]`). */
+export const INSPECTOR_MIN_PARAMS_WIDTH = 200;
+
+/** A collapsed side column is a 32px rail button, not its stored width. */
+export const INSPECTOR_COLLAPSED_COLUMN_WIDTH = 32;
+
+/** Each expanded side column is followed by a `w-4` resize handle. */
+export const INSPECTOR_RESIZE_HANDLE_WIDTH = 16;
+
+/**
+ * Extra width the panel must gain before going BACK to columns. The two layouts
+ * have different intrinsic widths, so a single threshold flip-flops on a panel
+ * parked right at the boundary.
+ */
+export const INSPECTOR_WIDE_PANEL_MARGIN = 48;
+
+interface ColumnWidths {
+  inputCollapsed: boolean;
+  inputWidth: number;
+  outputCollapsed: boolean;
+  outputWidth: number;
+}
+
+/**
+ * How much width the three-column layout needs RIGHT NOW.
+ *
+ * Not a constant: both side columns are user-draggable (200-500px) and either
+ * can be collapsed to a rail, so a fixed threshold is wrong in both directions -
+ * it lets a panel with two 500px columns overflow unflagged, and pushes a narrow
+ * panel with both columns collapsed into tabs it does not need.
+ */
+export function requiredColumnsWidth({
+  inputCollapsed,
+  inputWidth,
+  outputCollapsed,
+  outputWidth,
+}: ColumnWidths): number {
+  const input = inputCollapsed
+    ? INSPECTOR_COLLAPSED_COLUMN_WIDTH
+    : inputWidth + INSPECTOR_RESIZE_HANDLE_WIDTH;
+  const output = outputCollapsed
+    ? INSPECTOR_COLLAPSED_COLUMN_WIDTH
+    : outputWidth + INSPECTOR_RESIZE_HANDLE_WIDTH;
+  return input + INSPECTOR_MIN_PARAMS_WIDTH + output;
+}
+
+/**
+ * Whether the inspector renders its tabbed layout instead of its columns.
+ *
+ * A narrow PANEL only matters to a layout that has side columns to lose: the
+ * single-column inspector (300px, floating) reads perfectly well, and putting IT
+ * in tabs would be a regression. The caller owns the effective `isAdvanced`,
+ * which is why the two signals are combined here rather than inside the hook.
+ */
+export function shouldUseTabbedLayout({
+  isWindowMobile,
+  isNarrowPanel,
+  isAdvanced,
+  isFullscreen,
+}: {
+  isWindowMobile: boolean;
+  isNarrowPanel: boolean;
+  isAdvanced: boolean;
+  isFullscreen: boolean;
+}): boolean {
+  return isWindowMobile || ((isAdvanced || isFullscreen) && isNarrowPanel);
+}
+
+/**
+ * Whether the minimized inspector renders as the compact pill.
+ *
+ * Gated on the WINDOW, never on `shouldUseTabbedLayout`. The tabbed flag folds
+ * in "the PANEL measured narrow", and an advanced-mode user whose panel measured
+ * narrow then got the full panel back when they clicked minimize: minimize was a
+ * no-op for them. Whether a panel is narrow has no bearing on whether the user
+ * asked for it out of the way.
+ */
+export function shouldRenderMinimizedPill({
+  isMinimized,
+  isWindowMobile,
+  isDocked,
+}: {
+  isMinimized: boolean;
+  isWindowMobile: boolean;
+  isDocked: boolean;
+}): boolean {
+  return isMinimized && !isWindowMobile && !isDocked;
+}
+
+/**
+ * Whether the floating panel is capped to its container's measured size.
+ *
+ * Also gated on the WINDOW rather than the panel-derived flag, and here the
+ * reason is circularity: this style IS what constrains the panel, so keying it
+ * on "the panel is narrow" would remove the cause of its own condition.
+ */
+export function shouldConstrainPanelToContainer({
+  isFullscreen,
+  isDocked,
+  isWindowMobile,
+}: {
+  isFullscreen: boolean;
+  isDocked: boolean;
+  isWindowMobile: boolean;
+}): boolean {
+  return !isFullscreen && !isDocked && !isWindowMobile;
+}
+
 interface UseInspectorLayoutProps {
   isAdvanced: boolean;
   isFullscreen?: boolean;
@@ -28,8 +143,22 @@ interface UseInspectorLayoutReturn {
   columns: ColumnState;
   // Resize handlers
   resize: ResizeHandlers;
-  // Mobile detection
+  /** The WINDOW is too narrow for the columns layout (Tailwind lg: breakpoint). */
   isMobile: boolean;
+  /**
+   * The PANEL is too narrow to host the three-column layout. Left separate from
+   * {@link isMobile} because only a layout that actually renders the side
+   * columns should act on it: the 300px single-column inspector reads perfectly
+   * well, and switching IT to tabs would be a regression. The caller, which is
+   * the only place that knows the EFFECTIVE advanced flag, combines the two.
+   */
+  isNarrowPanel: boolean;
+  /**
+   * Callback ref for the panel element. Attaching it is what lets the hook
+   * measure the space the inspector actually has, rather than assuming the
+   * window's width is it.
+   */
+  measurePanel: (element: HTMLElement | null) => void;
   // Active tab for mobile/advanced view
   activeTab: string;
   setActiveTab: (tab: string) => void;
@@ -42,7 +171,10 @@ interface UseInspectorLayoutReturn {
  * - Mobile detection
  * - Active tab state
  */
-export function useInspectorLayout({ isAdvanced, isFullscreen = false }: UseInspectorLayoutProps): UseInspectorLayoutReturn {
+export function useInspectorLayout({
+  isAdvanced,
+  isFullscreen = false,
+}: UseInspectorLayoutProps): UseInspectorLayoutReturn {
   // Column collapse state
   const [inputCollapsed, setInputCollapsed] = useState(true);
   const [outputCollapsed, setOutputCollapsed] = useState(true);
@@ -61,12 +193,17 @@ export function useInspectorLayout({ isAdvanced, isFullscreen = false }: UseInsp
   // Default to 'parameter' - in non-advanced mode only the parameter tab exists
   const [activeTab, setActiveTab] = useState('parameter');
 
-  // Mobile detection
-  const [isMobile, setIsMobile] = useState(() => {
+  // Mobile detection - the window half
+  const [isWindowMobile, setIsWindowMobile] = useState(() => {
     if (typeof window === 'undefined') return false;
     // Must match Tailwind lg: breakpoint (1024px) used by InspectorPanel container
-    return window.innerWidth < 1024;
+    return window.innerWidth < INSPECTOR_MOBILE_WINDOW_WIDTH;
   });
+
+  // Mobile detection - the panel half. A wide window says nothing about the
+  // space the inspector was actually given: docked into the side panel it is
+  // only as wide as the user dragged that panel.
+  const [isNarrowPanel, setIsNarrowPanel] = useState(false);
 
   // Calculate max width based on fullscreen mode
   const getMaxWidth = useCallback(() => {
@@ -105,12 +242,70 @@ export function useInspectorLayout({ isAdvanced, isFullscreen = false }: UseInsp
   // Mobile detection - threshold must match Tailwind lg: breakpoint (1024px)
   useEffect(() => {
     const checkSize = () => {
-      setIsMobile(window.innerWidth < 1024);
+      setIsWindowMobile(window.innerWidth < INSPECTOR_MOBILE_WINDOW_WIDTH);
     };
     checkSize();
     window.addEventListener('resize', checkSize);
     return () => window.removeEventListener('resize', checkSize);
   }, []);
+
+  // Read through a ref, not a closure capture: the observer callback is created
+  // once (a stable callback ref, so it does not churn), while the column widths
+  // and collapse state change under it. The ref is seeded on the first render
+  // and updated from an effect - writing it DURING render is what makes a
+  // component miss its own update.
+  const requiredWidth = requiredColumnsWidth({
+    inputCollapsed,
+    inputWidth,
+    outputCollapsed,
+    outputWidth,
+  });
+  const requiredWidthRef = useRef(requiredWidth);
+  const lastMeasuredWidthRef = useRef(0);
+
+  const applyMeasuredWidth = useCallback((width: number) => {
+    if (width <= 0) return; // hidden / not laid out yet - no opinion
+    lastMeasuredWidthRef.current = width;
+    const required = requiredWidthRef.current;
+    setIsNarrowPanel((wasNarrow) =>
+      wasNarrow ? width < required + INSPECTOR_WIDE_PANEL_MARGIN : width < required,
+    );
+  }, []);
+
+  // Measure the panel itself. A callback ref rather than an effect on a
+  // RefObject: the panel unmounts and remounts as the selection changes, and a
+  // mount-once effect would keep observing a detached element (or nothing at
+  // all, when the first render had no node to show).
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const measurePanel = useCallback((element: HTMLElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) applyMeasuredWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+    observerRef.current = observer;
+    applyMeasuredWidth(element.getBoundingClientRect().width);
+  }, [applyMeasuredWidth]);
+
+  // Dragging a column wider can overflow a panel that never changed size, so the
+  // verdict is re-evaluated on the requirement too, not only on a resize event.
+  useEffect(() => {
+    requiredWidthRef.current = requiredWidth;
+    if (lastMeasuredWidthRef.current > 0) applyMeasuredWidth(lastMeasuredWidthRef.current);
+  }, [applyMeasuredWidth, requiredWidth]);
+
+  useEffect(() => {
+    return () => {
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+    };
+  }, []);
+
+
 
   // Resize start handlers
   const handleInputResizeStart = useCallback((e: React.MouseEvent) => {
@@ -207,7 +402,9 @@ export function useInspectorLayout({ isAdvanced, isFullscreen = false }: UseInsp
       isResizingInput,
       isResizingOutput,
     },
-    isMobile,
+    isMobile: isWindowMobile,
+    isNarrowPanel,
+    measurePanel,
     activeTab,
     setActiveTab,
   };

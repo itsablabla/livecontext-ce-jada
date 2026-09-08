@@ -24,6 +24,39 @@ public class SqlSanitizer {
     private static final Logger log = LoggerFactory.getLogger(SqlSanitizer.class);
 
     /**
+     * Physical columns of {@code data_source_items}. A user column of the same name
+     * lives inside the {@code data} JSONB blob and is shadowed by the physical column
+     * on every projection, so writing one stores a value nobody can ever read back.
+     *
+     * <p>Kept here rather than in the agent-tool layer because the tool surface was the
+     * only caller enforcing it: a workflow update_row went straight to the repository
+     * and answered {@code success: true, rows_affected: 1} while the real column kept
+     * its value. Verified 2026-09-02 on {@code priority}, where the consequence was
+     * that a queue could not be reordered and every attempt reported success.
+     */
+    public static final Set<String> RESERVED_DATA_COLUMN_NAMES = Set.of(
+        "id", "data_source_id", "tenant_id", "data",
+        "priority", "row_index", "created_at", "updated_at"
+    );
+
+    /**
+     * Refuse a reserved name on a WRITE. Reads are deliberately not covered: a WHERE
+     * clause on {@code id} means the row's primary key and is the documented way to
+     * address a row.
+     */
+    public void rejectReservedWriteColumn(String columnName) {
+        if (columnName == null) return;
+        if (RESERVED_DATA_COLUMN_NAMES.contains(columnName.toLowerCase().trim())) {
+            throw new IllegalArgumentException(
+                "Column name '" + columnName + "' is reserved (conflicts with an internal "
+                + "column). Reserved names: " + String.join(", ", new java.util.TreeSet<>(RESERVED_DATA_COLUMN_NAMES))
+                + ". A value written under one of these is stored but never readable, "
+                + "because the internal column of the same name shadows it. Pick a "
+                + "different name.");
+        }
+    }
+
+    /**
      * Valid SQL operators for WHERE conditions.
      */
     private static final Set<String> ALLOWED_OPERATORS = Set.of(

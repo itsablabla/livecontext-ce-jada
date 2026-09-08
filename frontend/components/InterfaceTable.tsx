@@ -650,7 +650,7 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
           </div>
         )}
         {canMutate && !loading && interfaceTypeFilter !== 'web_search' && (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 md:shrink-0">
             {folders.foldersEnabled && (
               <Button variant="outline" size="sm" onClick={() => folders.setShowCreateDialog(true)}>
                 <FolderPlus className="h-4 w-4 mr-1.5" />
@@ -684,7 +684,7 @@ export function InterfaceTable({ className = '', interfaceTypeFilter }: Interfac
               className="w-full pl-11 rounded-xl bg-theme-primary border-theme text-sm"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={visibilityFilter} onValueChange={(v) => setVisibilityFilter(v as VisibilityFilter)}>
               <SelectTrigger className="w-auto gap-1.5" aria-label={t('common.filterByVisibility')}>
                 <Eye className="h-3.5 w-3.5 opacity-70" />

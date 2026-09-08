@@ -19,6 +19,7 @@ import { showsNodeRunActions } from './shared';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { getTargetHandleGeometry, getBranchHandleGeometry, getBranchRowFlow } from './handleGeometry';
+import { NodeActivityShimmer } from './NodeActivityShimmer';
 export interface ForkOutputRow {
   id: string;
   label: string;
@@ -64,7 +65,7 @@ export function ForkNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
   }, [outputs, edges, nodes, id]);
 
   // Step-by-step execution status
-  const executionStatus = useNodeExecutionStatus(id, { label: data.label, kind: 'fork' });
+  const executionStatus = useNodeExecutionStatus(id, { label: data.label, kind: 'fork', status: data.status });
 
   // Use centralized validation context for error state
   const { hasNodeErrors: checkNodeErrors } = useValidation();
@@ -113,17 +114,7 @@ export function ForkNode({ data, selected, id }: NodeProps<BuilderNodeData>) {
       }}
       tabIndex={0}
     >
-      {/* Shimmer scan effect for running state */}
-      {effectiveStatus === 'running' && (
-        <div
-          className="absolute inset-0 pointer-events-none rounded-[26px]"
-          style={{
-            background: 'linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.15) 50%, transparent 100%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer-scan 2.5s ease-in-out infinite',
-          }}
-        />
-      )}
+      <NodeActivityShimmer status={effectiveStatus} className="rounded-[26px]" />
 
       {/* Single input handle on the left */}
       <Handle

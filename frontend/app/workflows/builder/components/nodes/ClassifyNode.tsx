@@ -21,6 +21,7 @@ import { getProviderIconSlug } from '@/lib/ai-providers/providerIcons';
 
 import { useWorkflowLayoutDirectionSafe } from '@/contexts/WorkflowLayoutDirectionContext';
 import { getTargetHandleGeometry, getBranchHandleGeometry, getBranchRowFlow } from './handleGeometry';
+import { NodeActivityShimmer } from './NodeActivityShimmer';
 /**
  * Get iconSlug for Classify node based on provider
  */
@@ -47,7 +48,7 @@ export function ClassifyNode({ data, selected, id }: NodeProps<BuilderNodeData>)
   const nodeFamily = nodeClass?.family;
 
   // Step-by-step execution status - pass node data for accurate backend ID mapping
-  const executionStatus = useNodeExecutionStatus(id, { label: data.label, kind: 'classify' });
+  const executionStatus = useNodeExecutionStatus(id, { label: data.label, kind: 'classify', status: data.status });
 
   // Use centralized validation context for error state
   const { hasNodeErrors: checkNodeErrors } = useValidation();
@@ -108,17 +109,7 @@ export function ClassifyNode({ data, selected, id }: NodeProps<BuilderNodeData>)
       }}
       tabIndex={0}
     >
-      {/* Shimmer scan effect for running state - show in all modes */}
-      {effectiveStatus === 'running' && (
-        <div
-          className="absolute inset-0 pointer-events-none rounded-[26px]"
-          style={{
-            background: 'linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.15) 50%, transparent 100%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer-scan 2.5s ease-in-out infinite',
-          }}
-        />
-      )}
+      <NodeActivityShimmer status={effectiveStatus} className="rounded-[26px]" />
 
       <NodeHeader
         visuals={visuals}

@@ -176,6 +176,19 @@ public class GenerationModule implements ToolModule {
         // our public id ('eleven-v3' vs 'eleven_v3') would match nothing.
         Map<String, String> knownValues = Map.of("model",
                 target.model().upstream() != null ? target.model().upstream() : target.modelId());
+        // A SCALED binding writes a different unit from the one this parameter is
+        // named in: duration_seconds reaching music_length_ms multiplies by 1000,
+        // so the provider's own values are milliseconds and handing one back to be
+        // passed as duration_seconds would ask for a half-minute clip as 30000.
+        // The two listing paths already refuse it; this is the one that hands the
+        // values over.
+        if (binding.scale() != null) {
+            return ToolExecutionResult.failure(ToolErrorCode.INVALID_PARAMETER_VALUE,
+                    "'" + parameter + "' cannot be listed for model '" + modelId + "': this endpoint "
+                    + "takes it in a different unit from the one the name states, so the provider's "
+                    + "own values are not values you could pass back. Read its limits in "
+                    + "action='models' instead.");
+        }
         DynamicOptionsResolver.Resolution resolution = optionsResolver.resolve(
                 target.apiToolId(), binding.path(), tenantId, source, credentialId, knownValues,
                 (sourceToolId, credSource, credId) -> fetchSource(sourceToolId, credSource, tenantId, context));
@@ -218,8 +231,11 @@ public class GenerationModule implements ToolModule {
                                       GenerationRegistry.GenerationModel target, String parameter) {
         switch (reason) {
             case NOT_DYNAMIC:
-                return "'" + parameter + "' has no list to fetch: its values are not held by the "
-                        + "provider account. Any value the model accepts may be sent.";
+                return "'" + parameter + "' has no list to fetch here: either this endpoint "
+                        + "declares no source for it, in which case any value the model accepts may "
+                        + "be sent, or more than one of its parameters claims that field and none "
+                        + "of them can be called its owner. Read its limits in action='models', "
+                        + "which is what this platform can state about it either way.";
             case NO_CREDENTIAL:
                 return "no " + target.apiName() + " key is connected, so its account cannot be "
                         + "asked what '" + parameter + "' accepts. Connecting one is the account "
@@ -328,7 +344,24 @@ public class GenerationModule implements ToolModule {
      */
     private ToolExecutionResult listModels(Map<String, Object> parameters) {
         String kind = str(parameters, "kind");
+        String askedProvider = str(parameters, "provider");
         List<GenerationRegistry.GenerationModel> models = registry.list(kind);
+
+        // Narrowing to ONE provider, because a provider that sells a quality or
+        // an output size as its own price sells it as its own model id, and
+        // comparing those ids is the only way to choose between them. Without
+        // this the only way to see one provider's tiers was to read every
+        // model of that kind, which for images is most of the catalogue.
+        // Matched on the slug and on the display name, since an agent has both
+        // in front of it and no way to know which one this asks for.
+        String provider = str(parameters, "provider");
+        if (provider != null && !provider.isBlank()) {
+            String wanted = provider.trim().toLowerCase(java.util.Locale.ROOT);
+            models = models.stream()
+                    .filter(m -> wanted.equalsIgnoreCase(m.apiSlug())
+                            || wanted.equalsIgnoreCase(m.apiName()))
+                    .toList();
+        }
 
         Map<PlatformSalesResolver.ModelRef, PlatformSalesResolver.Verdict> sold =
                 platformSales.resolve(models.stream().map(PlatformSalesResolver.ModelRef::of).toList());
@@ -378,6 +411,21 @@ public class GenerationModule implements ToolModule {
                     });
             if (!inputs.isEmpty()) row.put("inputs", inputs);
 
+            // What this model SENDS whatever the caller asks, which is the only
+            // machine-readable statement of what separates one id from the next
+            // when a provider sells a tier as its own model. Nine OpenAI image
+            // ids accept nothing but a prompt and differ solely in a pinned
+            // quality and size; without this the difference exists only in the
+            // id string and the label, so an agent looking for a portrait image
+            // has to parse names to find one. Empty for the ordinary model,
+            // which pins nothing and pays no tokens for the key.
+            // The endpoint's own scaffolding as well as the model's tier: both
+            // are written on every call whatever the caller passes, and a field
+            // that claims to list them cannot show only half.
+            Map<String, Object> fixed = new LinkedHashMap<>(m.spec().constants());
+            fixed.putAll(m.model().constants());
+            if (!fixed.isEmpty()) row.put("fixed", fixed);
+
             // What this model is billed ON, and what that value becomes when the
             // parameter is left out. Without both, an agent cannot predict the
             // price of the call it is about to make - and a model that defaults
@@ -417,9 +465,22 @@ public class GenerationModule implements ToolModule {
                 + "refused naming it, at no cost. A per-character model is measured by its own "
                 + "prompt, so it never needs a size.");
         if (rows.isEmpty()) {
-            data.put("hint", kind == null
-                    ? "No generation models are configured on this platform."
-                    : "No generation models of kind '" + kind + "'. Available kinds: " + registry.kinds());
+            // WHICH filter emptied it. Saying "none are configured" when a
+            // provider name simply matched nothing tells an agent to give up on
+            // a platform that sells plenty, and a mistyped name is the likeliest
+            // way to get here.
+            String hint;
+            if (askedProvider != null && !askedProvider.isBlank()) {
+                hint = "No generation models from a provider called '" + askedProvider + "'"
+                        + (kind == null ? "" : " of kind '" + kind + "'")
+                        + ". The name is matched against the 'provider' field of a listing, so ask "
+                        + "without the filter and read one from there rather than guessing it.";
+            } else if (kind == null) {
+                hint = "No generation models are configured on this platform.";
+            } else {
+                hint = "No generation models of kind '" + kind + "'. Available kinds: " + registry.kinds();
+            }
+            data.put("hint", hint);
         }
         return ToolExecutionResult.success(data);
     }

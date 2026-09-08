@@ -32,6 +32,23 @@ interface Props {
   snapshot: InterfaceSnapshotLike | null | undefined;
   className?: string;
   emptyLabel?: string;
+  /**
+   * Overrides the mode derived from `snapshot.data`.
+   *
+   * A frozen showcase can arrive with its HTML ALREADY resolved by the backend
+   * (`_resolvedHtml`) and no `data` alongside it. Deriving the mode from `data`
+   * would then pick `edit`, which rewrites unresolved `{{var|default}}`
+   * placeholders to `[var]` - and a snapshot that deliberately kept some is
+   * exactly the case that produces. See `resolveShowcaseContent`, which decides
+   * this for showcase renders and passes its answer here.
+   */
+  mode?: 'run' | 'edit';
+  /**
+   * Mute the interface's own `<audio>`/`<video>`. Undefined = play as authored.
+   * A grid of previews should pass `true`: several apps talking at once the
+   * moment a page loads is what this exists to prevent.
+   */
+  mediaMuted?: boolean;
 }
 
 /**
@@ -46,11 +63,20 @@ interface Props {
  * no `allow-same-origin`) - the script can manipulate its own DOM but cannot reach
  * the parent's storage, cookies, or DOM.
  *
- * <p>Render mode is `run` when the snapshot carries pre-resolved `data` (signed
- * URLs from `ShowcaseFileRefRewriter.rewriteLanding`), `edit` otherwise. The
- * `run` path is what makes user-supplied FileRefs visible on marketplace cards.
+ * <p>Render mode defaults to `run` when the snapshot carries pre-resolved `data`
+ * (signed URLs from `ShowcaseFileRefRewriter.rewriteLanding`), `edit` otherwise.
+ * The `run` path is what makes user-supplied FileRefs visible on marketplace
+ * cards. A caller that already knows the answer passes `mode` explicitly: a
+ * showcase whose HTML the backend resolved carries no `data` and would be
+ * misread as `edit`.
  */
-export function InterfacePreview({ snapshot, className, emptyLabel = 'No preview' }: Props) {
+export function InterfacePreview({
+  snapshot,
+  className,
+  emptyLabel = 'No preview',
+  mode,
+  mediaMuted,
+}: Props) {
   const resolvedData = (snapshot?.data && typeof snapshot.data === 'object'
       && !Array.isArray(snapshot.data)
       && Object.keys(snapshot.data as Record<string, unknown>).length > 0)
@@ -62,10 +88,11 @@ export function InterfacePreview({ snapshot, className, emptyLabel = 'No preview
         htmlTemplate={snapshot?.htmlTemplate ?? ''}
         customCss={snapshot?.cssTemplate || undefined}
         jsTemplate={snapshot?.jsTemplate || undefined}
-        mode={resolvedData ? 'run' : 'edit'}
+        mode={mode ?? (resolvedData ? 'run' : 'edit')}
         resolvedData={resolvedData}
         fit="contain"
         viewport={resolveInterfaceFormat(snapshot?.format) ?? undefined}
+        mediaMuted={mediaMuted}
         emptyLabel={emptyLabel}
       />
     </div>

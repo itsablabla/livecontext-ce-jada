@@ -1,5 +1,6 @@
 package com.apimarketplace.conversation.entity;
 
+import com.apimarketplace.conversation.domain.ConversationKind;
 import com.apimarketplace.common.scope.OrgScopedEntity;
 import com.apimarketplace.common.scope.OrgScopedEntityListener;
 import jakarta.persistence.*;
@@ -57,6 +58,21 @@ public class Conversation implements OrgScopedEntity {
 
     @Column(name = "provider")
     private String provider;
+
+    /**
+     * What this conversation IS: {@code chat} or {@code studio}. See
+     * {@link com.apimarketplace.conversation.domain.ConversationKind}.
+     *
+     * <p>Set once, when the row is created, and never written again. The value is validated at the
+     * write boundary rather than by a schema constraint, and the update path refuses a change
+     * outright: the two kinds hold different message shapes and are dispatched to different back
+     * ends, so re-labelling one as the other produces a thread neither side can serve.
+     *
+     * <p>Defaults to {@code chat} for the same reason the column does - every row that predates the
+     * kind is one.
+     */
+    @Column(name = "kind", nullable = false, length = 20)
+    private String kind = ConversationKind.defaultKind().wireValue();
 
     @Column(name = "workflow_id")
     private String workflowId;
@@ -362,6 +378,14 @@ public class Conversation implements OrgScopedEntity {
 
     public void setShareMode(String shareMode) {
         this.shareMode = shareMode;
+    }
+
+    public String getKind() {
+        return kind;
+    }
+
+    public void setKind(String kind) {
+        this.kind = kind;
     }
 
     public Boolean getMemoryEnabled() {

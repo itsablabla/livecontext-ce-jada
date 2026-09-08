@@ -2,19 +2,24 @@ package com.apimarketplace.catalog.bundle;
 
 import com.apimarketplace.catalog.domain.ApiCatalogBundleEntity;
 import com.apimarketplace.catalog.domain.ApiCatalogBundleSyncStatusEntity;
+import com.apimarketplace.catalog.repository.ApiCatalogBundleRepository;
 import com.apimarketplace.catalog.repository.ApiCatalogBundleSyncStatusRepository;
 import com.apimarketplace.common.web.AdminRoleGuard;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -67,9 +72,12 @@ public class ApiCatalogBundleController {
         try {
             ApiCatalogBundleEntity saved = bundleService.buildBundle();
             return ResponseEntity.ok(toAdminView(saved));
-        } catch (IllegalStateException e) {
+        } catch (IllegalStateException | java.io.UncheckedIOException e) {
+            // UncheckedIOException is caught alongside because serialising or compressing the
+            // payload can fail, and letting it escape hands the admin the same opaque HTTP 500
+            // this area was fixed to stop producing. The message names what actually failed.
             log.warn("API catalog bundle build rejected: {}", e.getMessage());
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            return ResponseEntity.badRequest().body(Map.of("error", String.valueOf(e.getMessage())));
         }
     }
 
@@ -103,8 +111,8 @@ public class ApiCatalogBundleController {
         var denied = AdminRoleGuard.denyIfNotAdmin(roles);
         if (denied != null) return denied;
 
+        // Already newest-first from the query, and payload-free.
         List<Map<String, Object>> view = bundleService.listBundles().stream()
-                .sorted((a, b) -> Long.compare(b.getVersion(), a.getVersion()))
                 .map(this::toAdminView)
                 .toList();
         // LinkedHashMap: publicKeyBase64() is null on envs without a signing
@@ -162,20 +170,103 @@ public class ApiCatalogBundleController {
         return ResponseEntity.ok(toSyncStatusView(row));
     }
 
-    /** CE download (public): the currently active signed bundle. 404 if none. */
+    /**
+     * CE download (public): the currently active signed bundle. 404 if none.
+     *
+     * <p><b>Conditional GET.</b> A CE instance polls this every 15 minutes and
+     * the bundle changes far less often, so a client that sends
+     * {@code If-None-Match} with the checksum it already holds gets a bodiless
+     * {@code 304} - answered from a payload-free projection, so the ~24 MB
+     * gzip is never read. Clients that send no validator keep getting the full
+     * {@code 200} body exactly as before.
+     */
     @GetMapping("/api/catalog/public/bundles/latest")
-    public ResponseEntity<?> latestSignedBundle() {
-        Optional<ApiCatalogSignedBundle> bundle = bundleService.getActiveSignedBundle();
-        return bundle.<ResponseEntity<?>>map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+    public ResponseEntity<StreamingResponseBody> latestSignedBundle(
+            @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
+
+        // Only look up the identity when the caller actually sent a validator:
+        // a client that sends none (every CE reader shipped so far) would
+        // otherwise pay an extra query and transaction per poll for an answer
+        // that cannot change the response.
+        if (ifNoneMatch != null && !ifNoneMatch.isBlank()) {
+            Optional<ApiCatalogBundleRepository.ActiveBundleMeta> meta = bundleService.getActiveBundleMetadata();
+            // Only a row that still carries its payload is servable; a CE-side
+            // applied row must 404 here exactly as it did before, never 304.
+            if (meta.isPresent() && isServable(meta.get()) && matchesEtag(ifNoneMatch, meta.get().getChecksum())) {
+                return ResponseEntity.status(HttpStatus.NOT_MODIFIED)
+                        .eTag(quoted(meta.get().getChecksum()))
+                        .build();
+            }
+        }
+        return streamOrNotFound(bundleService.getActiveRawBundle());
     }
 
     /** CE download (public): a specific version (replay / diagnostics). */
     @GetMapping("/api/catalog/public/bundles/{version}")
-    public ResponseEntity<?> signedBundleByVersion(@PathVariable long version) {
-        Optional<ApiCatalogSignedBundle> bundle = bundleService.getSignedBundleByVersion(version);
-        return bundle.<ResponseEntity<?>>map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+    public ResponseEntity<StreamingResponseBody> signedBundleByVersion(@PathVariable long version) {
+        return streamOrNotFound(bundleService.getRawBundleByVersion(version));
+    }
+
+    /**
+     * 200 + streamed envelope, or 404. The body is written by
+     * {@link ApiCatalogBundleJsonWriter} so the base64 is encoded into the
+     * response instead of being built in heap first.
+     *
+     * <p>The return type names {@link StreamingResponseBody} explicitly, and
+     * must keep naming it: Spring selects
+     * {@code StreamingResponseBodyReturnValueHandler} from the handler's
+     * DECLARED generic. Widen this to {@code ResponseEntity<?>} and the generic
+     * resolves to null, the handler declines, and Jackson serialises the lambda
+     * as {@code {}} - a 200 carrying a valid ETag and an empty body, with no
+     * exception and no log line.
+     */
+    private ResponseEntity<StreamingResponseBody> streamOrNotFound(Optional<ApiCatalogBundleService.RawBundle> bundle) {
+        if (bundle.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        ApiCatalogBundleService.RawBundle b = bundle.get();
+        StreamingResponseBody body = out -> ApiCatalogBundleJsonWriter.write(b, out);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_JSON)
+                .eTag(quoted(b.checksum()))
+                .body(body);
+    }
+
+    private static boolean isServable(ApiCatalogBundleRepository.ActiveBundleMeta meta) {
+        Integer servable = meta.getServable();
+        return servable != null && servable == 1;
+    }
+
+    /**
+     * RFC 9110 {@code If-None-Match}: a comma-separated list of entity tags, or
+     * {@code *}. Weak prefixes are ignored because the comparison for a
+     * conditional GET is the weak one. A blank header matches nothing.
+     */
+    private static boolean matchesEtag(String ifNoneMatch, String checksum) {
+        if (ifNoneMatch == null || ifNoneMatch.isBlank() || checksum == null || checksum.isBlank()) {
+            return false;
+        }
+        String header = ifNoneMatch.trim();
+        if ("*".equals(header)) {
+            return true;
+        }
+        for (String candidate : header.split(",")) {
+            String tag = candidate.trim();
+            if (tag.startsWith("W/")) {
+                tag = tag.substring(2).trim();
+            }
+            if (tag.length() >= 2 && tag.startsWith("\"") && tag.endsWith("\"")) {
+                tag = tag.substring(1, tag.length() - 1);
+            }
+            if (tag.equals(checksum)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String quoted(String checksum) {
+        return "\"" + checksum + "\"";
     }
 
     /**
@@ -210,20 +301,41 @@ public class ApiCatalogBundleController {
         return out;
     }
 
+    /** Admin view of a freshly built or activated bundle (entity in hand). */
     private Map<String, Object> toAdminView(ApiCatalogBundleEntity e) {
+        return adminView(e.getId(), e.getVersion(), e.getSchemaVersion(), e.getChecksum(),
+                e.getSigningKeyId(), e.getIssuer(), e.getApiCount(), e.getToolCount(),
+                e.getRawBytesSize(), e.isActive(), e.getImportedAt(), e.getActivatedAt());
+    }
+
+    /** Admin view of a listed bundle (payload-free projection). */
+    private Map<String, Object> toAdminView(ApiCatalogBundleRepository.BundleSummary s) {
+        return adminView(s.getId(), s.getVersion(), s.getSchemaVersion(), s.getChecksum(),
+                s.getSigningKeyId(), s.getIssuer(), s.getApiCount(), s.getToolCount(),
+                s.getRawBytesSize(), s.getActive(), s.getImportedAt(), s.getActivatedAt());
+    }
+
+    /**
+     * The admin JSON shape, defined once. The two callers above only forward
+     * fields, so the entity path and the projection path cannot drift apart.
+     */
+    private static Map<String, Object> adminView(
+            Long id, Long version, Integer schemaVersion, String checksum, String signingKeyId,
+            String issuer, Integer apiCount, Integer toolCount, Integer rawBytesSize,
+            boolean active, Instant importedAt, Instant activatedAt) {
         LinkedHashMap<String, Object> out = new LinkedHashMap<>();
-        out.put("id", e.getId());
-        out.put("version", e.getVersion());
-        out.put("schemaVersion", e.getSchemaVersion());
-        out.put("checksum", e.getChecksum());
-        out.put("signingKeyId", e.getSigningKeyId());
-        out.put("issuer", e.getIssuer());
-        out.put("apiCount", e.getApiCount());
-        out.put("toolCount", e.getToolCount());
-        out.put("rawBytesSize", e.getRawBytesSize());
-        out.put("isActive", e.isActive());
-        out.put("importedAt", e.getImportedAt());
-        out.put("activatedAt", e.getActivatedAt());
+        out.put("id", id);
+        out.put("version", version);
+        out.put("schemaVersion", schemaVersion);
+        out.put("checksum", checksum);
+        out.put("signingKeyId", signingKeyId);
+        out.put("issuer", issuer);
+        out.put("apiCount", apiCount);
+        out.put("toolCount", toolCount);
+        out.put("rawBytesSize", rawBytesSize);
+        out.put("isActive", active);
+        out.put("importedAt", importedAt);
+        out.put("activatedAt", activatedAt);
         return out;
     }
 }

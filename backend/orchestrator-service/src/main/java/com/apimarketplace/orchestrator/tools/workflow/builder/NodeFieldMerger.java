@@ -45,7 +45,7 @@ public final class NodeFieldMerger {
     private NodeFieldMerger() {}
 
     /** Map-shaped fields that should be deep-merged with existing data. */
-    private static final Set<String> MERGE_MAP_FIELDS = Set.of(
+    public static final Set<String> MERGE_MAP_FIELDS = Set.of(
         "params",
         "actionMapping",
         "variableMapping",
@@ -62,7 +62,7 @@ public final class NodeFieldMerger {
      * merging by label could yield two {@code if} branches in the same
      * decision, which is invalid. Decision condition lists stay REPLACE.
      */
-    private static final Set<String> MERGE_LIST_BY_LABEL_FIELDS = Set.of(
+    public static final Set<String> MERGE_LIST_BY_LABEL_FIELDS = Set.of(
         "switchCases",
         "classifyCategories"
     );

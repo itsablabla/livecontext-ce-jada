@@ -19,6 +19,37 @@ export const CELL_PADDING = {
   default: 'px-3',
 } as const;
 
+/**
+ * The cue that shows a user where the column they just created landed.
+ *
+ * `addNewColumn` refetches the whole grid, so a new column simply appears - appended to the right
+ * of a table that is usually wider than the viewport, which is to say: off screen. The grid scrolls
+ * it into view and flags it with these two classes for {@link TABLE_REVEAL_WINDOW_MS}; what the
+ * cue looks like and how long it plays lives entirely in globals.css.
+ */
+export const COLUMN_REVEAL_HEAD_CLASS = 'table-column-reveal-head';
+export const COLUMN_REVEAL_CELL_CLASS = 'table-column-reveal-cell';
+
+/**
+ * The same cue for a whole row, worn by every copy a duplicate just produced.
+ *
+ * Duplicates are written server-side and land wherever the table's order puts them (by default at
+ * the top, since rows are newest-first), so without this a "3 rows duplicated" toast is the only
+ * evidence anything happened.
+ */
+export const ROW_REVEAL_CLASS = 'table-row-reveal';
+
+/**
+ * How long the grid keeps either flag on, in ms.
+ *
+ * A WINDOW, not the animation's duration: the classes above are applied from React state, so a CSS
+ * animation that has already finished costs nothing while the flag stays up. What the window buys
+ * is that the flag comes OFF - otherwise a row that mounts much later (an infinite-scroll page, a
+ * row the user adds) would animate its cell in that column long after the column stopped being new.
+ * It must stay >= the animation duration in globals.css, which `tableReveal.css.test.ts` pins.
+ */
+export const TABLE_REVEAL_WINDOW_MS = 2000;
+
 // Row height constraints
 export const ROW_HEIGHT = {
   min: '62px',

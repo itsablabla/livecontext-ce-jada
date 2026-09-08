@@ -362,6 +362,133 @@ class ExecutionNodeFactoryTest {
         }
     }
 
+    /**
+     * Generate is built HERE, from the plan's agents, and not by the core
+     * builder.
+     *
+     * <p>It belongs to the AI family: keyed {@code agent:<label>} and filed
+     * under {@code agents[]}, so its output is referenced
+     * {@code {{agent:make_clip.output.file}}}. A plan that still files it under
+     * {@code cores[]} builds no node at all, and the run then reports a step
+     * that never existed rather than an error.
+     */
+    @Nested
+    @DisplayName("createAgentNodes() - generate")
+    class CreateGenerateNodesTests {
+
+        private WorkflowPlan planWithGenerateAgent(String label, Map<String, Object> params) {
+            Map<String, Object> data = createBasePlanData();
+            Map<String, Object> agentData = new HashMap<>();
+            agentData.put("id", "g1");
+            agentData.put("type", "generate");
+            agentData.put("label", label);
+            if (params != null) {
+                agentData.put("params", params);
+            }
+            data.put("agents", List.of(agentData));
+            return WorkflowPlan.fromMap(data);
+        }
+
+        /**
+         * Two KEYS, one NODE, and the difference matters downstream.
+         *
+         * <p>A label that does not normalize to itself is registered twice: once
+         * under the normalized key and once under the raw lowercased label, so an
+         * edge written either way resolves. Both entries hold the SAME instance.
+         *
+         * <p>Worth stating explicitly because a caller that counts the map to
+         * decide how many nodes were built gets the wrong answer. That is exactly
+         * what the standalone-node probe did, and it refused every generate node
+         * whose label had a space in it while reporting a fan-out that had not
+         * happened.
+         */
+        @Test
+        @DisplayName("Should register a spaced label under two keys that hold ONE node")
+        void shouldRegisterTwoKeysForOneNode() {
+            WorkflowPlan plan = planWithGenerateAgent("Make Clip",
+                Map.of("model", "seedance-2.0-fast"));
+            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+
+            factory.createAgentNodes(nodeMap, plan);
+
+            assertEquals(2, nodeMap.size(), "the alias is registered as well as the key");
+            assertSame(nodeMap.get("agent:make_clip"), nodeMap.get("agent:make clip"),
+                "the alias must point at the SAME node, so counting keys counts nodes wrong");
+        }
+
+        /**
+         * And a label that already normalizes to itself gets ONE key, which is
+         * why the defect above only ever showed on a multi-word label.
+         */
+        @Test
+        @DisplayName("Should register a single key when the label already normalizes to itself")
+        void shouldRegisterOneKeyForASimpleLabel() {
+            WorkflowPlan plan = planWithGenerateAgent("generate",
+                Map.of("model", "seedance-2.0-fast"));
+            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+
+            factory.createAgentNodes(nodeMap, plan);
+
+            assertEquals(1, nodeMap.size());
+        }
+
+        @Test
+        @DisplayName("Should create generate node under the agent key, carrying the FULL params map verbatim")
+        void shouldCreateGenerateNodeWithParamsMap() {
+            Map<String, Object> params = Map.of(
+                "model", "seedance-2.0-fast",
+                "prompt", "a paper boat in a rain gutter",
+                "duration_seconds", 5,
+                "credential_source", "platform");
+            WorkflowPlan plan = planWithGenerateAgent("Make Clip", params);
+            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+
+            factory.createAgentNodes(nodeMap, plan);
+
+            String agentKey = "agent:make_clip";
+            assertTrue(nodeMap.containsKey(agentKey));
+            // The key it must NOT carry, derived at RUN TIME from the one it must.
+            // Written as "core:" + "make_clip" the compiler folds the two halves into
+            // one constant, so the trick bought nothing: a repo-wide rename of the old
+            // spelling would have rewritten it just as readily and left this asserting
+            // that the CORRECT key is absent.
+            String forbiddenKey = "core:" + agentKey.substring(agentKey.indexOf(':') + 1);
+            assertFalse(nodeMap.containsKey(forbiddenKey),
+                "a core: key addresses nothing and resolves to an empty string");
+            assertInstanceOf(GenerateNode.class, nodeMap.get("agent:make_clip"));
+            GenerateNode node = (GenerateNode) nodeMap.get("agent:make_clip");
+            assertEquals("seedance-2.0-fast", node.getParams().get("model"));
+            // Numbers must survive the plan round trip: a stringified duration would
+            // change what the platform bills the run on.
+            assertEquals(5, node.getParams().get("duration_seconds"));
+            assertEquals("platform", node.getParams().get("credential_source"));
+        }
+
+        @Test
+        @DisplayName("Should create node with empty params when the params map is absent (fails at runtime, not build time)")
+        void shouldCreateNodeWithEmptyParamsWhenAbsent() {
+            WorkflowPlan plan = planWithGenerateAgent("Make Clip", null);
+            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+
+            factory.createAgentNodes(nodeMap, plan);
+
+            assertTrue(nodeMap.containsKey("agent:make_clip"));
+            GenerateNode node = (GenerateNode) nodeMap.get("agent:make_clip");
+            assertTrue(node.getParams().isEmpty());
+        }
+
+        @Test
+        @DisplayName("Should leave the other AI types alone: only type=generate builds a GenerateNode")
+        void shouldOnlyBuildGenerateForItsOwnType() {
+            WorkflowPlan plan = createPlanWithAgent("Data Analyzer");
+            Map<String, ExecutionNode> nodeMap = new HashMap<>();
+
+            factory.createAgentNodes(nodeMap, plan);
+
+            assertInstanceOf(AgentNode.class, nodeMap.get("agent:data_analyzer"));
+        }
+    }
+
     @Nested
     @DisplayName("createEndNode()")
     class CreateEndNodeTests {

@@ -78,7 +78,7 @@ public final class AgentModuleResolver {
         if (toolsConfig == null) {
             // No config → all opt-out modules enabled. The credit-spending
             // generation module stays opt-in.
-            enabled.addAll(Set.of("table", "interface", "agent", "skill", "workflow", "application", "web_search", "files", "wait"));
+            enabled.addAll(Set.of("table", "interface", "agent", "skill", "memory", "workflow", "application", "web_search", "files", "wait", "ask_user"));
             return enabled;
         }
 
@@ -87,7 +87,7 @@ public final class AgentModuleResolver {
             // mode=none → only MCP/catalog tools blocked; internal tools stay enabled.
             // generation still requires explicit opt-in (it is not "internal": it spends
             // the customer's credits).
-            enabled.addAll(Set.of("table", "interface", "agent", "skill", "workflow", "application", "web_search", "files", "wait"));
+            enabled.addAll(Set.of("table", "interface", "agent", "skill", "memory", "workflow", "application", "web_search", "files", "wait", "ask_user"));
             enabled.remove("catalog");
             if (isGenerationEnabled(toolsConfig)) enabled.add("generation");
             return enabled;
@@ -101,6 +101,18 @@ public final class AgentModuleResolver {
         if (isResourceAccessible(toolsConfig, "agents"))       enabled.add("agent");
         // Skills are always enabled (not in toolsConfig restrictions yet)
         enabled.add("skill");
+        // Memory is always registered, for the same reason and one more: the memory
+        // INDEX is appended to the system prompt from the execution path, not from
+        // this resolver, so an agent whose config dropped the module would still be
+        // handed an index it had no tool to open. "Always available" means
+        // REGISTERED, not unrestricted, and the restriction lives in two other places:
+        // toolsConfig.memoryAccessMode='read' leaves recall and search working while
+        // ToolAccessControl blocks save/delete, and the workspace role gate in
+        // MemoryService refuses every write from a VIEWER regardless of that mode.
+        // Those are different axes: the mode is per-agent, set by whoever configures the
+        // agent; the role is per-person, set by the workspace. Neither is the other's
+        // fallback, so both are asserted separately in the tests.
+        enabled.add("memory");
         // Files browser module is always registered (no none/all/custom grant axis - files are
         // opt-in scoped by the allowedFileIds allow-list, not a grant). It DOES enforce a
         // per-resource read/write axis (fileAccessMode, in FilesToolsProvider) plus the
@@ -109,6 +121,10 @@ public final class AgentModuleResolver {
         // Wait tool is always registered: pausing is a harmless primitive with no
         // resource to scope (bounded by wait.max-seconds server-side).
         enabled.add("wait");
+        // ask_user is always registered: putting a question to the person in the chat has no
+        // resource to scope. Outside an interactive chat the tool itself answers "nobody is
+        // watching" (ToolAuthorizationScope.isUserPromptable), so headless runs are unaffected.
+        enabled.add("ask_user");
         if (isResourceAccessible(toolsConfig, "workflows"))    enabled.add("workflow");
         if (isResourceAccessible(toolsConfig, "applications")) enabled.add("application");
         // Web search: opt-out boolean toggle (absent or true = enabled, false = disabled)

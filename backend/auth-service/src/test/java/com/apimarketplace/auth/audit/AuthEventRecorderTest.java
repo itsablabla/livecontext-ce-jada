@@ -144,4 +144,49 @@ class AuthEventRecorderTest {
         AuthEventRecorder r = newRecorder(metrics, null);
         assertThatCode(() -> r.recordLoginSuccess(1L, "google")).doesNotThrowAnyException();
     }
+
+    @Test
+    @DisplayName("signup+login emits auth_registered AND auth_login_succeeded through the analytics emitter")
+    void recordSignupAndLogin_emitsBothAnalyticsEvents() {
+        com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics =
+                org.mockito.Mockito.mock(com.apimarketplace.auth.analytics.AuthAnalyticsEmitter.class);
+        AuthEventRecorder r = newRecorder(null, null);
+        ReflectionTestUtils.setField(r, "analytics", analytics);
+
+        r.recordSignupAndLogin(42L, "google", true);
+
+        org.mockito.Mockito.verify(analytics).registered(42L, "google", true);
+        org.mockito.Mockito.verify(analytics).loginSucceeded(42L, "google");
+    }
+
+    @Test
+    @DisplayName("a plain login emits only auth_login_succeeded; a failure emits no analytics (no user to attribute)")
+    void recordLoginSuccess_emitsLoginOnly() {
+        com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics =
+                org.mockito.Mockito.mock(com.apimarketplace.auth.analytics.AuthAnalyticsEmitter.class);
+        AuthEventRecorder r = newRecorder(null, null);
+        ReflectionTestUtils.setField(r, "analytics", analytics);
+
+        r.recordLoginSuccess(7L, "keycloak");
+        r.recordLoginFailure("local", "bad_password");
+
+        org.mockito.Mockito.verify(analytics).loginSucceeded(7L, "keycloak");
+        org.mockito.Mockito.verify(analytics, org.mockito.Mockito.never())
+                .registered(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.anyBoolean());
+        org.mockito.Mockito.verifyNoMoreInteractions(analytics);
+    }
+
+    @Test
+    @DisplayName("an analytics emitter that throws never breaks the auth path")
+    void analyticsFailureIsSwallowed() {
+        com.apimarketplace.auth.analytics.AuthAnalyticsEmitter analytics =
+                org.mockito.Mockito.mock(com.apimarketplace.auth.analytics.AuthAnalyticsEmitter.class);
+        org.mockito.Mockito.doThrow(new IllegalStateException("posthog down")).when(analytics)
+                .loginSucceeded(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString());
+        AuthEventRecorder r = newRecorder(null, null);
+        ReflectionTestUtils.setField(r, "analytics", analytics);
+
+        r.recordLoginSuccess(7L, "keycloak"); // must not throw
+    }
 }

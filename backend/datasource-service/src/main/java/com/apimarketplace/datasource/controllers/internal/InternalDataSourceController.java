@@ -42,21 +42,27 @@ public class InternalDataSourceController {
     private final DataSourceRepository dataSourceRepository;
     private final DataSourceItemRepository dataSourceItemRepository;
     private final CrudExecutorService crudExecutorService;
+    private final com.apimarketplace.datasource.crud.service.MediaCellHydrator mediaCellHydrator;
     private final ObjectMapper objectMapper;
     private final com.apimarketplace.datasource.services.VectorFeatureGate vectorFeatureGate;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     public InternalDataSourceController(DataSourceService dataSourceService,
                                          DataSourceRepository dataSourceRepository,
                                          DataSourceItemRepository dataSourceItemRepository,
                                          CrudExecutorService crudExecutorService,
+                                         com.apimarketplace.datasource.crud.service.MediaCellHydrator mediaCellHydrator,
                                          ObjectMapper objectMapper,
-                                         com.apimarketplace.datasource.services.VectorFeatureGate vectorFeatureGate) {
+                                         com.apimarketplace.datasource.services.VectorFeatureGate vectorFeatureGate,
+                                         org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.dataSourceService = dataSourceService;
         this.dataSourceRepository = dataSourceRepository;
         this.dataSourceItemRepository = dataSourceItemRepository;
         this.crudExecutorService = crudExecutorService;
+        this.mediaCellHydrator = mediaCellHydrator;
         this.objectMapper = objectMapper;
         this.vectorFeatureGate = vectorFeatureGate;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -176,6 +182,12 @@ public class InternalDataSourceController {
     /**
      * Get raw items for a datasource (for trigger data resolution + interface-render path).
      * Honors {@code X-Organization-ID} when present - see {@link #getItemsCount} for rationale.
+     *
+     * <p>{@code hydrateMedia} decides which of the two legitimate answers the caller wants, and it
+     * defaults to the STORED one. A caller that is going to RUN on the value wants media cells as
+     * file objects, like every other read; a caller that is COPYING the table - the publication
+     * snapshot, and the live side of the moderation diff that is compared against an older snapshot -
+     * must get exactly what is stored, or an unchanged table reads as changed on every media cell.
      */
     @GetMapping("/{id}/items")
     public ResponseEntity<List<DataSourceItem>> getItems(
@@ -183,11 +195,58 @@ public class InternalDataSourceController {
             @RequestHeader("X-User-ID") String tenantId,
             @RequestHeader(value = "X-Organization-ID", required = false) String organizationId,
             @RequestParam(defaultValue = "0") int offset,
-            @RequestParam(defaultValue = "50") int limit) {
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "false") boolean hydrateMedia) {
 
         List<DataSourceItem> items = dataSourceService.getDataSourceItemsByTenantAndDataSourcePaginated(
                 id.intValue(), tenantId, organizationId, offset, limit);
-        return ResponseEntity.ok(items);
+        return ResponseEntity.ok(hydrateMedia ? hydrateMediaCells(id, items) : items);
+    }
+
+    /**
+     * Media cells in the shape the rest of the platform reads them.
+     *
+     * <p>Asked for by a table trigger's {@code data[]} and by the interface-render path. A table
+     * trigger payload carries BOTH that array and the promoted {@code row}, and the row is hydrated
+     * at its source, so leaving this raw made one payload disagree with itself:
+     * {@code trigger:x.output.row.photo} an object, {@code trigger:x.output.data[0].data.photo} a
+     * string - the second being the form the node docs tell an agent to write. The interface path
+     * gains the same thing: its file-URL rewriters only recognise an object, so a media cell in a
+     * datasource-backed page reached them as text and rendered as raw JSON.
+     */
+    private List<DataSourceItem> hydrateMediaCells(Long dataSourceId, List<DataSourceItem> items) {
+        if (items == null || items.isEmpty()) {
+            return items;
+        }
+        // Before the lookup: a page with no cell that could be a file must not pay for a query,
+        // and this runs on every trigger resolution and every interface render.
+        if (items.stream().noneMatch(item -> item.data() != null && !item.data().isEmpty())) {
+            return items;
+        }
+        Map<String, com.apimarketplace.datasource.domain.DataSourceModels.ColumnMappingSpec> mappingSpec;
+        try {
+            mappingSpec = dataSourceService.getDataSource(dataSourceId)
+                    .map(DataSource::mappingSpec)
+                    .orElse(null);
+        } catch (Exception e) {
+            // Best-effort, like the event path: the caller still gets its rows, in the stored form.
+            log.warn("Could not read the column spec for datasource={} - media cells in this "
+                    + "response keep their stored text form: {}", dataSourceId, e.getMessage());
+            return items;
+        }
+        if (mediaCellHydrator.mediaColumns(mappingSpec).isEmpty()) {
+            return items;
+        }
+        List<DataSourceItem> hydrated = new java.util.ArrayList<>(items.size());
+        for (DataSourceItem item : items) {
+            // A copy, not the repository's own map: the caller owns what it hands back.
+            Map<String, Object> data = item.data() == null
+                    ? null
+                    : mediaCellHydrator.hydrateRow(new LinkedHashMap<>(item.data()), mappingSpec);
+            hydrated.add(new DataSourceItem(item.id(), item.dataSourceId(), item.tenantId(),
+                    data, item.priority(), item.createdAt()));
+        }
+        return hydrated;
     }
 
     /**
@@ -220,12 +279,27 @@ public class InternalDataSourceController {
     public ResponseEntity<Void> deleteByWorkflow(@PathVariable UUID workflowId,
                                                    @RequestHeader("X-User-ID") String tenantId,
                                                    @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
+        // Read the vector-carrying datasources BEFORE the bulk delete: this path
+        // deletes through the repository and never reaches
+        // DataSourceService.deleteDataSource, so without this every vector table
+        // owned by a deleted workflow left its HNSW index behind.
+        List<DataSource> doomed = hasOrg(organizationId)
+                ? dataSourceRepository.findBySourceWorkflowIdAndOrganizationId(workflowId, organizationId)
+                : dataSourceRepository.findBySourceWorkflowIdAndTenantId(workflowId, tenantId);
+        List<Long> vectorDataSourceIds = doomed.stream()
+                .filter(ds -> com.apimarketplace.datasource.services.VectorFeatureGate.findVectorColumn(ds.mappingSpec()) != null)
+                .map(DataSource::id)
+                .toList();
+
         if (hasOrg(organizationId)) {
             dataSourceRepository.deleteBySourceWorkflowIdAndOrganizationId(workflowId, organizationId);
         } else {
             log.warn("[InternalDataSource] delete by-workflow fell back to tenant-only scope (no organizationId): tenantId={}, workflowId={}",
                     tenantId, workflowId);
             dataSourceRepository.deleteBySourceWorkflowIdAndTenantId(workflowId, tenantId);
+        }
+        for (Long id : vectorDataSourceIds) {
+            eventPublisher.publishEvent(new com.apimarketplace.datasource.events.VectorDataSourceDeletedEvent(id));
         }
         return ResponseEntity.noContent().build();
     }
@@ -411,9 +485,9 @@ public class InternalDataSourceController {
             // survive); the workflow's similarity steps then fail at run time
             // with the gate's explicit message. The same names are purged from
             // columnOrder so the UI doesn't render a ghost column.
-            List<String> strippedColumns = vectorFeatureGate.disallowedVectorColumns(mappingSpec);
+            List<String> strippedColumns = vectorFeatureGate.disallowedVectorColumns(tenantId, mappingSpec);
             if (!strippedColumns.isEmpty()) {
-                mappingSpec = vectorFeatureGate.stripDisallowedVectorColumns(mappingSpec);
+                mappingSpec = vectorFeatureGate.stripDisallowedVectorColumns(tenantId, mappingSpec);
                 columnOrder = columnOrder.stream()
                         .filter(entry -> !strippedColumns.contains(String.valueOf(entry.get("field"))))
                         .toList();
@@ -456,6 +530,19 @@ public class InternalDataSourceController {
         );
 
         DataSource saved = dataSourceRepository.save(newDs);
+
+        // This path saves through the repository, not through
+        // DataSourceService.createDataSource, so it never published the event that
+        // builds the per-datasource HNSW index. A cloned vector table therefore had
+        // its rows but no index, and every similarity search on it sequential-scanned,
+        // silently, at the measured 153x cost. Publish it here for the column the
+        // clone kept (dimension and metric travel in the column's display config).
+        String vectorColumn = com.apimarketplace.datasource.services.VectorFeatureGate.findVectorColumn(mappingSpec);
+        if (vectorColumn != null) {
+            com.apimarketplace.datasource.events.VectorColumnCreatedEvent
+                    .forColumn(saved.id(), mappingSpec.get(vectorColumn).display())
+                    .ifPresent(eventPublisher::publishEvent);
+        }
         return ResponseEntity.ok(saved);
     }
 

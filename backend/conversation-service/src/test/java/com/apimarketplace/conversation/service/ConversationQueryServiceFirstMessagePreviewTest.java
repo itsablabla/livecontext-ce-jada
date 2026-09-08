@@ -91,7 +91,7 @@ class ConversationQueryServiceFirstMessagePreviewTest {
             when(messageRepository.findFirstUserMessagePreviewBatch(List.of("c-1")))
                     .thenReturn(previewRows(new Object[]{"c-1", "Hello, can you help me?"}));
 
-            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false);
+            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false, null);
 
             assertThat(result.getContent()).hasSize(1);
             assertThat(result.getContent().get(0).getFirstMessagePreview()).isEqualTo("Hello, can you help me?");
@@ -110,7 +110,7 @@ class ConversationQueryServiceFirstMessagePreviewTest {
             when(messageRepository.findFirstUserMessagePreviewBatch(List.of("c-1")))
                     .thenReturn(Collections.emptyList());
 
-            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false);
+            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false, null);
 
             assertThat(result.getContent().get(0).getFirstMessagePreview()).isNull();
         }
@@ -128,7 +128,7 @@ class ConversationQueryServiceFirstMessagePreviewTest {
             when(messageRepository.findFirstUserMessagePreviewBatch(List.of("c-1")))
                     .thenReturn(previewRows(new Object[]{"c-1", "   "}));
 
-            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false);
+            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false, null);
 
             assertThat(result.getContent().get(0).getFirstMessagePreview()).isNull();
         }
@@ -197,7 +197,7 @@ class ConversationQueryServiceFirstMessagePreviewTest {
             when(messageRepository.findFirstUserMessagePreviewBatch(any()))
                     .thenThrow(new RuntimeException("DB unavailable"));
 
-            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false);
+            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false, null);
 
             assertThat(result.getContent()).hasSize(1);
             assertThat(result.getContent().get(0).getFirstMessagePreview()).isNull();
@@ -217,7 +217,7 @@ class ConversationQueryServiceFirstMessagePreviewTest {
             when(conversationRepository.findByOrganizationIdStrictAndActiveTrueOrderByUpdatedAtDesc(eq(orgId), any(Pageable.class)))
                     .thenReturn(page);
 
-            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false);
+            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false, null);
 
             assertThat(result.getContent()).isEmpty();
             verify(messageRepository, never()).findFirstUserMessagePreviewBatch(any());
@@ -241,7 +241,7 @@ class ConversationQueryServiceFirstMessagePreviewTest {
                             new Object[]{"c-2", "Second conv message"}
                     ));
 
-            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false);
+            Page<ConversationDto> result = service.getConversationsByUserId("user-1", orgId, 0, 50, false, null);
 
             assertThat(result.getContent()).hasSize(2);
             assertThat(result.getContent().get(0).getFirstMessagePreview()).isEqualTo("First conv message");

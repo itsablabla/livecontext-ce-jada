@@ -406,6 +406,11 @@ public class ConversationRedisStreamingCallback {
                     case SERVICE -> publishServiceApprovalRequired(
                         card.services(), card.reason(), card.needsAttention());
                     case AUTHORIZATION -> publishToolAuthorizationRequired(card.authorizationMetadata());
+                    // Reached only when the ask_user tool could not park (gate off, no budget):
+                    // the question is still open, so the card goes up non-blocking and the
+                    // person's answer starts the next turn.
+                    case USER_QUESTION -> approvalCardPublisher.publishUserQuestion(
+                        streamId, conversationId, card.userQuestion(), false, null);
                 }
             });
         }

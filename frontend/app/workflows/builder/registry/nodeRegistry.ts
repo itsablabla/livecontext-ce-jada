@@ -252,16 +252,6 @@ const NODE_DEFINITIONS: Record<string, NodeDefinition> = {
     label: 'Media',
     category: 'utility',
   },
-  generateNode: {
-    type: 'flowNode', // Generate uses flowNode with kind='generate'
-    prefix: 'core',
-    kind: 'generate',
-    hasPorts: false,
-    singleEntry: false,
-    terminal: false,
-    label: 'Generate',
-    category: 'utility',
-  },
   httpRequestNode: {
     type: 'flowNode', // HTTP Request uses flowNode with kind='http_request'
     prefix: 'core',
@@ -630,6 +620,18 @@ const NODE_DEFINITIONS: Record<string, NodeDefinition> = {
     label: 'Browser Agent',
     category: 'agent',
   },
+  // Generate belongs to the AI family: it is keyed `agent:<label>` and lives in
+  // the plan's `agents` array, even though it renders as a flowNode and runs no LLM.
+  generateNode: {
+    type: 'flowNode', // Generate uses flowNode with kind='generate'
+    prefix: 'agent',
+    kind: 'generate',
+    hasPorts: false,
+    singleEntry: false,
+    terminal: false,
+    label: 'Generate',
+    category: 'agent',
+  },
 
   // === Data Nodes ===
   crudNode: {
@@ -758,6 +760,29 @@ class NodeRegistry {
   }
 
   /**
+   * The prefix an OUTPUT REFERENCE to this node must carry.
+   *
+   * <p>This is the string a reader drags into a downstream field, so getting
+   * it wrong does not fail: an unresolved template resolves to an empty
+   * string, and the field simply receives nothing at run time.
+   *
+   * <p>Unlike {@link getPrefixesForNode}, which answers a list for matching
+   * incoming events, this answers the ONE prefix that addresses the node.
+   * It exists because three inspector surfaces were each deciding it with
+   * their own ternary, and the generate node had to be added to all three
+   * separately when it moved to the AI family.
+   */
+  getReferencePrefixForNode = (node: Node<BuilderNodeData>): NodePrefix => {
+    if (this.isCrudNode(node) || this.isFindNode(node)) return 'table';
+    if (this.isGenerateNode(node)) return 'agent';
+    // `core` and not a kind lookup: the surfaces that ask this question render
+    // the control-flow family, where every remaining node is keyed core:. A
+    // definitions lookup would answer `mcp` for anything it did not recognise,
+    // which is a plausible-looking prefix that addresses a different node.
+    return 'core';
+  };
+
+  /**
    * Get prefixes for streaming event matching.
    * Handles flowNode specially based on kind.
    */
@@ -767,6 +792,16 @@ class NodeRegistry {
     // For flowNode, resolve prefix from kind (single source of truth)
     if (node.type === 'flowNode') {
       const kindPrefix = kind ? this.kindToPrefix.get(kind) : null;
+      // Generate answers to its old key here as well, and only here. This method
+      // matches a canvas node against the rows a PAST run wrote, and every run
+      // before the move keyed the node core:<label>. Answering agent: alone would
+      // show a historical run with the generate step and its edges blank, as if it
+      // had never executed, which is a worse lie than the run being old.
+      //
+      // Deliberately not a compatibility path anywhere else: nothing is written
+      // under the old key any more, and the prefix an author is HANDED comes from
+      // getReferencePrefixForNode, which answers agent: and nothing else.
+      if (kindPrefix === 'agent' && kind === 'generate') return ['agent', 'core'];
       if (kindPrefix) return [kindPrefix];
       return ['mcp', 'agent'];
     }
@@ -810,7 +845,7 @@ class NodeRegistry {
     if (controlTypes.includes(type)) return true;
 
     // Check by kind for flowNode-based control nodes
-    const controlKinds = ['transform', 'wait', 'download_file', 'public_link', 'media', 'generate', 'http_request', 'data_input', 'filter', 'sort', 'limit', 'remove_duplicates', 'summarize', 'date_time', 'crypto_jwt', 'xml', 'compression', 'rss', 'convert_to_file', 'extract_from_file', 'compare_datasets', 'set', 'html_extract', 'sub_workflow', 'respond_to_webhook', 'send_email', 'email_inbox', 'code', 'task', 'stop_on_error', 'ssh', 'sftp', 'database', 'output', 'exit'];
+    const controlKinds = ['transform', 'wait', 'download_file', 'public_link', 'media', 'http_request', 'data_input', 'filter', 'sort', 'limit', 'remove_duplicates', 'summarize', 'date_time', 'crypto_jwt', 'xml', 'compression', 'rss', 'convert_to_file', 'extract_from_file', 'compare_datasets', 'set', 'html_extract', 'sub_workflow', 'respond_to_webhook', 'send_email', 'email_inbox', 'code', 'task', 'stop_on_error', 'ssh', 'sftp', 'database', 'output', 'exit'];
     if (controlKinds.includes(kind)) return true;
 
     // Check by is*Node() for nodes created from palette with generic kind: 'action'
@@ -909,7 +944,10 @@ class NodeRegistry {
            kind === 'reasoning' ||
            kind === 'guardrail' ||
            kind === 'classify' ||
-           kind === 'browser_agent';
+           kind === 'browser_agent' ||
+           // Generate runs no LLM, but it is keyed `agent:` like the rest of the
+           // AI family, so every prefix-deriving caller must see it here.
+           kind === 'generate';
   }
 
   /**
@@ -1566,6 +1604,7 @@ export const {
   getPrefix,
   getPrefixForKind,
   getPrefixesForNode,
+  getReferencePrefixForNode,
   computeBackendKey,
   extractBranchType,
 } = nodeRegistry;

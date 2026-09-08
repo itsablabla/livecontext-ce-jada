@@ -8,7 +8,7 @@
  */
 
 import type { Node, Edge } from 'reactflow';
-import type { BuilderNodeData, NodeStatus } from '../types';
+import type { BuilderNodeData, DerivedNodeStatus, NodeStatus } from '../types';
 import { normalizeLabel, extractCoreLabelWithoutPort, extractAgentLabelWithoutPort, extractPortFromRef } from '../utils/labelNormalizer';
 import { normalizeStatusCounts } from '../utils/statusCounts';
 import { nodeRegistry } from '../registry/nodeRegistry';
@@ -129,6 +129,105 @@ function deriveEdgeStatus(batchEdge: BatchEdgeData): NodeStatus {
   if (completed > 0) return 'completed';
   if (skipped > 0) return 'skipped';
   return 'pending';
+}
+
+/**
+ * Edge coherence: a FAILED source node's outgoing edges are persisted as `skipped`
+ * in StateSnapshot (that skipped count is load-bearing for merge convergence and
+ * MUST stay skipped there - see EdgeStatusEmitter). But a grey "skipped" edge is
+ * visually identical to a branch a SUCCEEDING node simply didn't take (a guardrail
+ * that passed greys its fail-edge), so a failed node looked indistinguishable from
+ * a passing one. When the source node itself failed, render its skipped outgoing
+ * edges as `failed` (red) to match the red node.
+ *
+ * <p>This only ever affects EDGE COLOUR - never the counts, never convergence.
+ *
+ * <p>It lives here, applied by every path that writes an edge status, because it
+ * used to be inlined in {@link updateEdgesFromBatch} alone: the While/loop-internal
+ * pass and the per-epoch viewing pass both wrote their own statuses and left the
+ * same edges grey, so the red simply vanished when the run was reopened on one of
+ * its epoch tabs.
+ */
+export function coerceStatusForFailedSource<T extends string>(
+  status: T,
+  sourceNode: Node<BuilderNodeData> | undefined,
+): T | 'failed' {
+  return status === 'skipped' && sourceNode?.data?.status === 'failed' ? 'failed' : status;
+}
+
+/**
+ * Paints the outgoing edges of a node that is PARKED ON A SIGNAL (wait timer, user
+ * approval, interface `__continue`) in the waiting colour.
+ *
+ * <p><b>Why this is derived on the client and not read from the backend.</b> An edge
+ * only ever carries three lifecycles: {@code EdgeLifecycle} is RUNNING | COMPLETED |
+ * SKIPPED, and {@code EdgeStatusEmitter} writes them all AFTER the source node
+ * finishes. Waiting is tracked at NODE level only ({@code EpochState.awaitingSignalNodeIds},
+ * and the live {@code AWAITING_SIGNAL} step event). So no edge can ever arrive with a
+ * waiting status, and the amber the edge renderer knows about would be unreachable
+ * without this pass. Teaching the backend a fourth edge lifecycle is not the fix: the
+ * edge counters are load-bearing for merge convergence and their increment is
+ * non-idempotent, so a new state there is a correctness risk for a colour.
+ *
+ * <p>Exactly the same shape as {@link coerceStatusForFailedSource}: the frontend
+ * derives, from the node, a state the edge protocol cannot express.
+ *
+ * <p><b>Only edges that carry nothing yet.</b> A waiting node's INCOMING edges are
+ * legitimately COMPLETED - data really did flow through them - and must stay green. It
+ * is the un-traversed outgoing edges that say "this is where the run resumes once the
+ * signal arrives". The pass also RELEASES its own colour when the node moves on, so a
+ * resolved wait cannot leave an edge amber forever.
+ */
+export function applyAwaitingSourceToEdges(
+  edges: Edge[],
+  nodes: Node<BuilderNodeData>[],
+  awaitingStepIds?: Iterable<string>,
+): Edge[] {
+  // Two ways in, on purpose. `awaitingStepIds` is the run snapshot's own list and is
+  // read DIRECTLY rather than through the node array, because the live path queues the
+  // node update and the edge update as two separate React state writes: the nodes may
+  // not carry the waiting status yet when this runs, and the edge would then stay grey
+  // until some unrelated later event happened to re-fire the pass. The node scan stays
+  // for the per-epoch path, which has already applied its own signal override.
+  const awaitingKeys = new Set(awaitingStepIds ?? []);
+  const awaitingSourceIds = new Set(
+    nodes
+      .filter((n) => {
+        if (n.data?.status === 'awaiting_signal') return true;
+        if (awaitingKeys.size === 0) return false;
+        const key = computeNodeBackendKey(n);
+        return !!key && awaitingKeys.has(key);
+      })
+      .map((n) => n.id),
+  );
+  // Nothing waiting and nothing left amber by a previous pass: return the same array so
+  // the canvas does not re-render on every step event.
+  if (awaitingSourceIds.size === 0 && !edges.some((e) => e.data?.status === 'awaiting_signal')) {
+    return edges;
+  }
+
+  let changed = false;
+  const next = edges.map((edge) => {
+    const current = edge.data?.status as DerivedNodeStatus | undefined;
+    const sourceIsAwaiting = awaitingSourceIds.has(edge.source);
+
+    if (sourceIsAwaiting) {
+      // Never overwrite a real edge status: a terminal one is what actually flowed.
+      if (current && current !== 'pending' && current !== 'awaiting_signal') return edge;
+      if (current === 'awaiting_signal') return edge;
+      changed = true;
+      return { ...edge, data: { ...edge.data, status: 'awaiting_signal' as DerivedNodeStatus } };
+    }
+
+    // Release: only ever clears the colour this pass wrote itself.
+    if (current === 'awaiting_signal') {
+      changed = true;
+      return { ...edge, data: { ...edge.data, status: undefined } };
+    }
+    return edge;
+  });
+
+  return changed ? next : edges;
 }
 
 /**
@@ -329,20 +428,8 @@ export function updateEdgesFromBatch(
 
     if (!matchingBatchEdge) return edge;
 
-    let newStatus = deriveEdgeStatus(matchingBatchEdge);
+    const newStatus = coerceStatusForFailedSource(deriveEdgeStatus(matchingBatchEdge), sourceNode);
     const newStatusCounts = createEdgeStatusCounts(matchingBatchEdge);
-
-    // Edge coherence: a FAILED source node's outgoing edges are persisted as
-    // `skipped` in StateSnapshot (that skipped count is load-bearing for merge
-    // convergence and MUST stay skipped there - see EdgeStatusEmitter). But a
-    // grey "skipped" edge is visually identical to a branch a SUCCEEDING node
-    // simply didn't take (e.g. a guardrail that passed greys its fail-edge), so
-    // a failed node looked indistinguishable from a passing one. When the source
-    // node itself failed, render its skipped outgoing edges as `failed` (red) to
-    // match the red node. This only affects edge colour, never convergence.
-    if (newStatus === 'skipped' && sourceNode.data?.status === 'failed') {
-      newStatus = 'failed';
-    }
 
     // Skip if unchanged
     if (
@@ -433,7 +520,7 @@ export function updateLoopInternalEdges(
         });
 
         if (match) {
-          const newStatus = deriveEdgeStatus(match);
+          const newStatus = coerceStatusForFailedSource(deriveEdgeStatus(match), sourceNode);
           const newStatusCounts = createEdgeStatusCounts(match);
           if (edge.data?.status === newStatus &&
               JSON.stringify(edge.data?.statusCounts) === JSON.stringify(newStatusCounts)) {
@@ -461,7 +548,7 @@ export function updateLoopInternalEdges(
       });
 
       if (match) {
-        const newStatus = deriveEdgeStatus(match);
+        const newStatus = coerceStatusForFailedSource(deriveEdgeStatus(match), sourceNode);
         const newStatusCounts = createEdgeStatusCounts(match);
         if (edge.data?.status === newStatus &&
             JSON.stringify(edge.data?.statusCounts) === JSON.stringify(newStatusCounts)) {

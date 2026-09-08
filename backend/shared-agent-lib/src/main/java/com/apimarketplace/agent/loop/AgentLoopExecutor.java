@@ -844,7 +844,14 @@ public class AgentLoopExecutor {
                 // performed BY the user out of band, so it is never held and must not be
                 // given the budget for a wait that cannot happen.
                 && !ToolAuthorizationPolicy.isUserPerformedRule(toolCall.toolName(), actionOf(toolCall));
-        return canPark ? base + APPROVAL_GATE_BUDGET_MS : base;
+        // ask_user parks on the same gate, waiting for the person to fill in the card. It is
+        // its own test rather than a rule in the policy because nothing about it needs
+        // authorizing; it just needs the time. Only where somebody can answer, for the same
+        // reason as above: unattended runs get "nobody is watching" immediately.
+        boolean asksUser = "ask_user".equals(toolCall.toolName())
+                && "ask".equals(actionOf(toolCall))
+                && ToolAuthorizationScope.isUserPromptable(credentials);
+        return canPark || asksUser ? base + APPROVAL_GATE_BUDGET_MS : base;
     }
 
     /**

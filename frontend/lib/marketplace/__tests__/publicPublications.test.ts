@@ -7,8 +7,9 @@ vi.mock('server-only', () => ({}));
 import {
   fetchAllPublicPublications,
   PUBLIC_MARKETPLACE_REVALIDATE_SECONDS,
-  fetchMarketplacePage,
   fetchPublicationBySlug,
+  fetchShowcaseRender,
+  fetchPublicationReviews,
   gatewayBaseUrl,
   mapPublication,
   mapPublications,
@@ -28,15 +29,26 @@ function rawRow(overrides: Record<string, unknown> = {}) {
     description: 'Chases unpaid invoices.',
     publicSlug: 'invoice-bot',
     publisherName: 'John Doe',
+    publisherId: '42',
     publisherHandle: 'john-doe',
     publisherAvatarUrl: 'avatar-uuid',
-    category: { slug: 'automation', name: 'Automation' },
+    category: { slug: 'automation', name: 'Automation', color: '#6366f1' },
     averageRating: 4.5,
     reviewCount: 12,
     useCount: 42,
     publishedAt: '2026-07-01T10:00:00Z',
     updatedAt: '2026-07-02T10:00:00Z',
     publicationType: 'WORKFLOW',
+    displayMode: 'APPLICATION',
+    creditsPerUse: 3,
+    hasShowcase: true,
+    nodeIcons: [{ isMcp: true, iconSlug: 'xai' }],
+    agentCount: 1,
+    interfaceCount: 2,
+    workflowCount: 3,
+    skillCount: 4,
+    datasourceCount: 5,
+    planSnapshot: { cores: [] },
     ...overrides,
   };
 }
@@ -86,6 +98,7 @@ describe('mapPublication', () => {
       title: 'Invoice Bot',
       description: 'Chases unpaid invoices.',
       publisherName: 'John Doe',
+      publisherId: '42',
       publisherHandle: 'john-doe',
       publisherAvatarUrl: 'avatar-uuid',
       categorySlug: 'automation',
@@ -96,6 +109,17 @@ describe('mapPublication', () => {
       publishedAt: '2026-07-01T10:00:00Z',
       updatedAt: '2026-07-02T10:00:00Z',
       publicationType: 'WORKFLOW',
+      categoryColor: '#6366f1',
+      displayMode: 'APPLICATION',
+      creditsPerUse: 3,
+      hasShowcase: true,
+      nodeIcons: [{ isMcp: true, iconSlug: 'xai' }],
+      agentCount: 1,
+      interfaceCount: 2,
+      workflowCount: 3,
+      skillCount: 4,
+      datasourceCount: 5,
+      planSnapshot: { cores: [] },
     });
   });
 
@@ -172,7 +196,7 @@ describe('mapPublications', () => {
   });
 });
 
-describe('fetchMarketplacePage', () => {
+describe('the shared gateway read', () => {
   beforeEach(() => {
     process.env.GATEWAY_SERVICE_URL = 'http://gw:8080';
   });
@@ -188,11 +212,11 @@ describe('fetchMarketplacePage', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const items = await fetchMarketplacePage();
+    const { publications } = await fetchAllPublicPublications();
 
-    expect(items).toHaveLength(1);
+    expect(publications).toHaveLength(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://gw:8080/api/publications/marketplace?page=0&size=24');
+    expect(url).toBe('http://gw:8080/api/publications/marketplace?page=0&size=100');
     // Never through the Next proxy: that would be an HTTP hop to ourselves.
     expect(url).not.toContain('/api/proxy');
     expect(init.next).toEqual({ revalidate: PUBLIC_MARKETPLACE_REVALIDATE_SECONDS });
@@ -202,31 +226,57 @@ describe('fetchMarketplacePage', () => {
     expect(init.credentials).toBeUndefined();
   });
 
-  it('forwards pagination and the caller revalidate window', async () => {
+  it('forwards the caller revalidate window and page size', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ publications: [] }) });
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchMarketplacePage(3, 10, 60);
+    await fetchAllPublicPublications({ pageSize: 10, revalidateSeconds: 60 });
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toContain('page=3&size=10');
+    expect(url).toContain('page=0&size=10');
     expect(init.next).toEqual({ revalidate: 60 });
   });
 
-  it('returns an empty list on a non-200 response', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) }));
+  it('arms an abort signal, so a gateway that never answers cannot hang the render', async () => {
+    // A page that awaits this read is on the critical path of a public page and,
+    // for the landing, of the BUILD. A refused connection is caught by the
+    // try/catch; a socket that simply never answers is not, and that is the
+    // failure that would stall a render indefinitely. What is asserted here is
+    // that the signal is ARMED - a real elapsed timeout is the platform's job,
+    // and the abort it raises is covered by the rejection case below, which is
+    // the same code path.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ publications: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
 
-    await expect(fetchMarketplacePage()).resolves.toEqual([]);
+    await fetchAllPublicPublications();
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it('returns an empty list when the gateway is unreachable', async () => {
+  it('reports nothing readable when the read is aborted', async () => {
+    // What the timeout above actually produces. Distinct from a 503: an abort
+    // never yields a Response at all, so it takes the catch, not `!res.ok`.
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(
+      Object.assign(new Error('The operation was aborted'), { name: 'TimeoutError' }),
+    ));
+
+    await expect(fetchAllPublicPublications()).resolves.toEqual({ publications: [], truncated: true });
+  });
+
+  it('reports nothing readable when the gateway refuses the connection', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
 
-    // The public marketplace page must still render its empty state.
-    await expect(fetchMarketplacePage()).resolves.toEqual([]);
+    await expect(fetchAllPublicPublications()).resolves.toEqual({ publications: [], truncated: true });
   });
 
-  it('returns an empty list when the body is not JSON', async () => {
+  it('returns nothing readable on a non-200 response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) }));
+
+    await expect(fetchAllPublicPublications()).resolves.toEqual({ publications: [], truncated: true });
+  });
+
+  it('returns nothing readable when the body is not JSON', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => {
@@ -234,7 +284,7 @@ describe('fetchMarketplacePage', () => {
       },
     }));
 
-    await expect(fetchMarketplacePage()).resolves.toEqual([]);
+    await expect(fetchAllPublicPublications()).resolves.toEqual({ publications: [], truncated: true });
   });
 });
 
@@ -369,6 +419,248 @@ describe('fetchPublicationBySlug', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(fetchPublicationBySlug(slug)).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('mapPublication - fields the public pages draw with', () => {
+  it('keeps the plan, so a listing can draw its workflow', () => {
+    // The whole point of carrying it: the crawlable page cannot call the
+    // authenticated builder endpoints, so the published plan is its only source.
+    const item = mapPublication(rawRow({ planSnapshot: { cores: [{ id: 'core:a' }] } }));
+
+    expect(item?.planSnapshot).toEqual({ cores: [{ id: 'core:a' }] });
+  });
+
+  it('reads hasShowcase strictly, so a truthy string does not promise a preview', () => {
+    // A page that believes a preview exists renders a frame for one and then
+    // has nothing to put in it.
+    expect(mapPublication(rawRow({ hasShowcase: 'yes' }))?.hasShowcase).toBe(false);
+    expect(mapPublication(rawRow({ hasShowcase: undefined }))?.hasShowcase).toBe(false);
+    expect(mapPublication(rawRow({ hasShowcase: true }))?.hasShowcase).toBe(true);
+  });
+
+  it('drops malformed icon entries instead of losing the whole icon row', () => {
+    const item = mapPublication(rawRow({ nodeIcons: [{ iconSlug: 'xai' }, null, 'nope', 7] }));
+
+    expect(item?.nodeIcons).toEqual([{ iconSlug: 'xai' }]);
+  });
+
+  it('degrades a non-array nodeIcons to an empty row', () => {
+    expect(mapPublication(rawRow({ nodeIcons: 'xai' }))?.nodeIcons).toEqual([]);
+  });
+
+  it('defaults every count to zero on a row that predates them', () => {
+    const item = mapPublication(rawRow({
+      agentCount: undefined,
+      interfaceCount: undefined,
+      workflowCount: undefined,
+      skillCount: undefined,
+      datasourceCount: undefined,
+      creditsPerUse: undefined,
+    }));
+
+    expect(item).toMatchObject({
+      agentCount: 0,
+      interfaceCount: 0,
+      workflowCount: 0,
+      skillCount: 0,
+      datasourceCount: 0,
+      creditsPerUse: 0,
+    });
+  });
+
+  it('reads the category accent colour from the nested category object', () => {
+    expect(mapPublication(rawRow())?.categoryColor).toBe('#6366f1');
+    expect(mapPublication(rawRow({ category: {} }))?.categoryColor).toBeNull();
+  });
+});
+
+describe('fetchShowcaseRender', () => {
+  beforeEach(() => {
+    process.env.GATEWAY_SERVICE_URL = 'http://gw:8080';
+  });
+  afterEach(() => {
+    restoreEnv();
+    vi.unstubAllGlobals();
+  });
+
+  const render = (overrides: Record<string, unknown> = {}) => ({
+    htmlTemplate: '<div id="app"></div>',
+    cssTemplate: 'body{margin:0}',
+    jsTemplate: 'render()',
+    format: 'vertical',
+    items: [{ data: { title: 'Volcano' } }],
+    ...overrides,
+  });
+
+  it('reads the anonymous showcase endpoint of that publication', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => render() });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchShowcaseRender('pub-1');
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'http://gw:8080/api/publications/by-id/pub-1/showcase-render',
+    );
+    expect(result?.htmlTemplate).toBe('<div id="app"></div>');
+    expect(result?.format).toBe('vertical');
+  });
+
+  it('returns null when the render carries no HTML', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => render({ htmlTemplate: '' }) }));
+
+    // A blank shell renders as an empty white box, which reads as a broken app.
+    await expect(fetchShowcaseRender('pub-1')).resolves.toBeNull();
+  });
+
+  it('returns null rather than throwing when the gateway fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+
+    // A listing page must not go down because one showcase is unavailable.
+    await expect(fetchShowcaseRender('pub-1')).resolves.toBeNull();
+  });
+
+  it('returns null on a 404 (publication without a showcase)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) }));
+
+    await expect(fetchShowcaseRender('pub-1')).resolves.toBeNull();
+  });
+
+  it('does not call the gateway at all for a blank publication id', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchShowcaseRender('')).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('drops malformed items so one bad epoch cannot break the preview', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => render({ items: [null, { data: { a: 1 } }, 'nope'] }),
+    }));
+
+    const result = await fetchShowcaseRender('pub-1');
+
+    expect(result?.items).toEqual([{ data: { a: 1 } }]);
+  });
+
+  it('yields an empty item list when items is not an array', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => render({ items: null }) }));
+
+    const result = await fetchShowcaseRender('pub-1');
+
+    // The interface still renders, just with unresolved placeholders.
+    expect(result?.items).toEqual([]);
+    expect(result?.htmlTemplate).toBe('<div id="app"></div>');
+  });
+});
+
+describe('fetchPublicationReviews', () => {
+  beforeEach(() => {
+    process.env.GATEWAY_SERVICE_URL = 'http://gw:8080';
+  });
+  afterEach(() => {
+    restoreEnv();
+    vi.unstubAllGlobals();
+  });
+
+  const reviewRow = (overrides: Record<string, unknown> = {}) => ({
+    id: 'rev-1',
+    reviewerName: 'John Doe',
+    rating: 5,
+    comment: 'Saved me a week.',
+    createdAt: '2026-07-01T10:00:00Z',
+    replyCount: 2,
+    ...overrides,
+  });
+
+  const okWith = (body: unknown) =>
+    vi.fn().mockResolvedValue({ ok: true, json: async () => body });
+
+  it('reads the anonymous alias, not the authenticated reviews route', async () => {
+    const fetchMock = okWith({ reviews: [reviewRow()], totalElements: 7 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const page = await fetchPublicationReviews('pub-1');
+
+    // The bare /publications/{id}/reviews path sits behind the gateway's JWT
+    // filter and answers 401 to a visitor; only the /by-id/ prefix is public.
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/publications/by-id/pub-1/reviews');
+    expect(page.reviews).toHaveLength(1);
+    expect(page.totalElements).toBe(7);
+  });
+
+  it('asks only for reviews that carry words', async () => {
+    const fetchMock = okWith({ reviews: [], totalElements: 0 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchPublicationReviews('pub-1');
+
+    // A bare star with no comment is already summarised by the average in the
+    // header; a page of empty rows gives a reader nothing.
+    expect(fetchMock.mock.calls[0][0]).toContain('onlyWithComment=true');
+  });
+
+  it('never reads a reviewer id, even if the payload carries one', async () => {
+    vi.stubGlobal('fetch', okWith({
+      reviews: [reviewRow({ reviewerId: '42' })],
+      totalElements: 1,
+    }));
+
+    const page = await fetchPublicationReviews('pub-1');
+
+    // The server strips it; not mapping it is the second half of that, so a
+    // field re-added upstream cannot reach a crawlable page by accident.
+    expect(page.reviews[0]).not.toHaveProperty('reviewerId');
+  });
+
+  it('keeps a comment left without a rating', async () => {
+    vi.stubGlobal('fetch', okWith({ reviews: [reviewRow({ rating: null })], totalElements: 1 }));
+
+    const page = await fetchPublicationReviews('pub-1');
+
+    expect(page.reviews[0].rating).toBeNull();
+    expect(page.reviews[0].comment).toBe('Saved me a week.');
+  });
+
+  it('drops a row with no id rather than rendering an unkeyed entry', async () => {
+    vi.stubGlobal('fetch', okWith({
+      reviews: [reviewRow(), reviewRow({ id: null }), 'nope'],
+      totalElements: 2,
+    }));
+
+    const page = await fetchPublicationReviews('pub-1');
+
+    expect(page.reviews).toHaveLength(1);
+  });
+
+  it('degrades to an empty page when the gateway fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+
+    // Reviews are secondary content: a listing must still render without them.
+    await expect(fetchPublicationReviews('pub-1')).resolves.toEqual({
+      reviews: [],
+      totalElements: 0,
+    });
+  });
+
+  it('degrades to an empty page on a 404 (publication not publicly readable)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) }));
+
+    await expect(fetchPublicationReviews('pub-1')).resolves.toEqual({
+      reviews: [],
+      totalElements: 0,
+    });
+  });
+
+  it('does not call the gateway for a blank publication id', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchPublicationReviews('');
+
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

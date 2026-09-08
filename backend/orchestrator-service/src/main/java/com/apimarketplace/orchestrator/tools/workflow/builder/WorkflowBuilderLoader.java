@@ -395,6 +395,13 @@ public class WorkflowBuilderLoader {
                 Map<String, Object> agentCopy = LabelNormalizer.normalizeVariableReferencesDeep(new LinkedHashMap<>(agent));
                 // Ensure isAgent flag is set (should already be, but make sure)
                 agentCopy.put("isAgent", true);
+                // ... and re-derive the discriminator from the type, as the set_plan
+                // import does. A plan written by the builder frontend carries the type
+                // and no flags at all, so anything downstream that reads isGenerate
+                // would see a loaded node as an ordinary LLM agent.
+                if ("generate".equals(agentCopy.get("type"))) {
+                    agentCopy.put("isGenerate", true);
+                }
                 session.getMcps().add(agentCopy);
 
                 // Assign logical number
@@ -409,10 +416,64 @@ public class WorkflowBuilderLoader {
 
         // Load control nodes (loops, decisions, switch, merge, fork, etc.)
         // All core nodes use the "core:" prefix regardless of their specific type
+        // Old key -> new key for every generate node adopted below. Emptied for
+        // the plans that hold none, which is all of them from now on.
+        Map<String, String> adoptedGenerateKeys = new LinkedHashMap<>();
         List<Map<String, Object>> cores = (List<Map<String, Object>>) plan.get("cores");
         if (cores != null) {
             for (Map<String, Object> cn : cores) {
                 Map<String, Object> cnCopy = LabelNormalizer.normalizeVariableReferencesDeep(new LinkedHashMap<>(cn));
+
+                // A generate node saved before it joined the AI family is still
+                // filed here. Loaded as a core it would be invisible to every
+                // check that knows about it: validate walks the AI nodes and
+                // would answer clean, finish would save the node back under
+                // cores, and the run would then be refused by the engine. So it
+                // is adopted on the way in, exactly as the builder frontend
+                // adopts it, and the next save files it where it belongs.
+                //
+                // Not a compatibility path: nothing writes a generate core any
+                // more, add_node cannot produce one and set_plan refuses one.
+                // This is the one-way repair of what is already stored.
+                // A node with no label cannot be adopted: computeNodeId would fall
+                // back to the id, which is routinely already prefixed, and the plan
+                // parser then drops any agent whose label is blank. It would be
+                // deleted from the workflow by being opened. Left among the cores it
+                // is refused by the engine instead, which is loud. Unreachable
+                // through add_node or the builder, both of which require a label.
+                Object storedLabel = cnCopy.get("label");
+                if ("generate".equals(cnCopy.get("type"))
+                        && storedLabel instanceof String labelText && !labelText.isBlank()) {
+                    cnCopy.put("isAgent", true);
+                    cnCopy.put("isGenerate", true);
+                    String generateId = computeNodeId(cnCopy, LabelNormalizer.PREFIX_AGENT);
+                    // The node's own id comes with it. Left as core:<label> the
+                    // exporter looks the node up among the cores, finds nothing,
+                    // and writes the edge back untouched.
+                    Object storedIdValue = cnCopy.get("id");
+                    String storedId = storedIdValue instanceof String text ? text : null;
+                    // A plan may also address the node by a bare, unprefixed id.
+                    // Both spellings are registered, or the edges written the other
+                    // way are left dangling at a node that has moved.
+                    if (storedId != null && !storedId.isBlank()) {
+                        adoptedGenerateKeys.put(storedId, generateId);
+                    }
+                    // The label form too, since a plan may address the node either
+                    // way. Registered only when no OTHER core owns that key: a
+                    // rename map is applied to every edge in the plan, so a
+                    // collision would repoint a neighbour's edges at this node,
+                    // silently and depending on the order the two were read in.
+                    String labelKey = "core:" + generateId.substring("agent:".length());
+                    if (!labelKey.equals(storedId) && !planHasCoreKeyed(cores, labelKey)) {
+                        adoptedGenerateKeys.put(labelKey, generateId);
+                    }
+                    cnCopy.put("id", generateId);
+                    session.getMcps().add(cnCopy);
+                    rebuildStepSchema(session, generateId, cnCopy, true);
+                    syncInterfaceIds(session, generateId, cnCopy);
+                    continue;
+                }
+
                 session.getCores().add(cnCopy);
 
                 // Assign logical number - all cores use "core:" prefix
@@ -443,11 +504,110 @@ public class WorkflowBuilderLoader {
         List<Map<String, Object>> edges = (List<Map<String, Object>>) plan.get("edges");
         if (edges != null) {
             for (Map<String, Object> edge : edges) {
-                expandAndAddEdge(session, edge);
+                expandAndAddEdge(session, rekeyAdoptedEnds(edge, adoptedGenerateKeys));
             }
         }
 
+        // ... and what the downstream nodes READ from it. Last, so every bucket
+        // is populated: a reference lives in a node's params, not on the edge.
+        rekeyAdoptedReferences(session, adoptedGenerateKeys);
+
         return session;
+    }
+
+    /** True when a core kept in the plan already answers to this key. */
+    private boolean planHasCoreKeyed(List<Map<String, Object>> cores, String key) {
+        if (cores == null) return false;
+        for (Map<String, Object> core : cores) {
+            if ("generate".equals(core.get("type"))) continue;
+            if (key.equals(core.get("id"))) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Repoint every {@code {{core:<label>.output.…}}} reference to an adopted node.
+     *
+     * <p>The edges are only half the wiring. What a downstream node READS from
+     * this one is a template in its params, and the documentation told authors
+     * to write {@code {{core:<label>.output.file}}} for as long as the node was
+     * a core, so real stored plans are full of them. Left alone they name a key
+     * nothing answers to, and an unresolved template is an empty string rather
+     * than an error: the downstream node runs with no file and the run reports
+     * success. That is the exact failure this whole change exists to remove, so
+     * moving the node without moving its references would have reintroduced it.
+     */
+    private void rekeyAdoptedReferences(WorkflowBuilderSession session, Map<String, String> adopted) {
+        if (adopted.isEmpty()) return;
+        // The EDGES are in this list, and not for decoration: an edge's params map
+        // is handed to the step it points at, so a reference written there is live
+        // node configuration and would have been left naming a key nothing answers
+        // to. Notes carry text a reader sees, so they follow too.
+        List<List<Map<String, Object>>> buckets = List.of(
+                session.getTriggers(), session.getMcps(), session.getCores(),
+                session.getTables(), session.getInterfaces(),
+                session.getEdges(), session.getNotes());
+        for (List<Map<String, Object>> bucket : buckets) {
+            for (Map<String, Object> node : bucket) {
+                for (Map.Entry<String, Object> field : node.entrySet()) {
+                    field.setValue(rekeyReferencesDeep(field.getValue(), adopted));
+                }
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object rekeyReferencesDeep(Object value, Map<String, String> adopted) {
+        if (value instanceof String text) {
+            String rewritten = text;
+            for (Map.Entry<String, String> rename : adopted.entrySet()) {
+                // Anchored on the opening braces and followed by a dot, so a node
+                // whose key is a PREFIX of another's cannot rewrite the longer one:
+                // {{core:clip.output}} must not match inside {{core:clip_two...}}.
+                rewritten = rewritten.replace("{{" + rename.getKey() + ".",
+                                              "{{" + rename.getValue() + ".");
+            }
+            return rewritten;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> copy = new LinkedHashMap<>();
+            map.forEach((k, v) -> copy.put(k, rekeyReferencesDeep(v, adopted)));
+            return copy;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>(list.size());
+            for (Object item : list) copy.add(rekeyReferencesDeep(item, adopted));
+            return copy;
+        }
+        return value;
+    }
+
+    /**
+     * Point an edge at the key a node was adopted UNDER.
+     *
+     * <p>Moving a generate node out of the cores without moving its edges is
+     * worse than leaving it there: the plan then names the node under
+     * {@code agents} and every edge naming {@code core:<label>}, so the engine
+     * drops those edges, the node is unreachable and everything after it is
+     * skipped. The author sees a repaired-looking workflow that does less than
+     * it did.
+     *
+     * <p>Only the node part is rewritten. A port suffix is preserved as written
+     * (generate declares none, but an edge is free to carry one and swallowing
+     * it would change where the edge lands).
+     */
+    private Map<String, Object> rekeyAdoptedEnds(Map<String, Object> edge, Map<String, String> adopted) {
+        if (adopted.isEmpty()) return edge;
+        Map<String, Object> rekeyed = new LinkedHashMap<>(edge);
+        for (String end : List.of("from", "to")) {
+            if (!(rekeyed.get(end) instanceof String ref) || ref.isBlank()) continue;
+            int portAt = ref.indexOf(':', ref.indexOf(':') + 1);
+            String node = portAt < 0 ? ref : ref.substring(0, portAt);
+            String port = portAt < 0 ? "" : ref.substring(portAt);
+            String adoptedKey = adopted.get(node);
+            if (adoptedKey != null) rekeyed.put(end, adoptedKey + port);
+        }
+        return rekeyed;
     }
 
     /**
@@ -1008,13 +1168,23 @@ public class WorkflowBuilderLoader {
         // For agents, use generic response output
         if (isAgent) {
             String normalizedLabel = normalizeLabel(label);
-            Map<String, String> outputs = Map.of("response", "object");
-            Map<String, String> referenceSyntax = Map.of(
-                "response", "{{agent:" + normalizedLabel + ".output.response}}"
-            );
+            // ... except generate, which shares the family's key and none of its
+            // outputs. It runs no LLM and answers with a FILE; advertising
+            // `.output.response` for it hands the agent a reference that resolves
+            // to an empty string rather than failing, which is exactly the failure
+            // moving this node was meant to remove. Keyed on the node's own type,
+            // because a plan written by the builder frontend carries no flags.
+            boolean isGenerate = "generate".equals(step.get("type"))
+                || Boolean.TRUE.equals(step.get("isGenerate"));
+            Map<String, String> outputs = isGenerate
+                ? Map.of("file", "object")
+                : Map.of("response", "object");
+            Map<String, String> referenceSyntax = isGenerate
+                ? Map.of("file", "{{agent:" + normalizedLabel + ".output.file}}")
+                : Map.of("response", "{{agent:" + normalizedLabel + ".output.response}}");
             session.getNodeSchemas().put(nodeId, WorkflowBuilderSession.NodeSchema.builder()
                 .nodeId(nodeId)
-                .nodeType("agent")
+                .nodeType(isGenerate ? "generate" : "agent")
                 .label(label)
                 .outputs(outputs)
                 .referenceSyntax(referenceSyntax)

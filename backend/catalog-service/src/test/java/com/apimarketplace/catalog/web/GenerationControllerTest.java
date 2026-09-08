@@ -34,7 +34,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link GenerationController}, the HTTP face the workflow
- * builder and the {@code core:generate} node speak to.
+ * builder and the {@code agent:generate} node speak to.
  *
  * <p>Two things are load bearing here. The model listing must carry
  * {@code apiToolId} and {@code integrationName}, because those are what a price
@@ -193,6 +193,49 @@ class GenerationControllerTest {
     }
 
     @Test
+    @DisplayName("reports what a model sends whatever the caller passes, so a picker can group by tier")
+    void reportsWhatIsFixed() {
+        // A provider that charges differently for a quality or an output size
+        // sells each as its own model id. On this surface three pickers render
+        // one provider's models as a flat list, and without this field the only
+        // thing telling those ids apart is their label text.
+        GenerationSpec.Model tier = new GenerationSpec.Model(
+                "img-tall", "img", "Image (tall)",
+                java.util.Set.of("prompt"), java.util.Set.of("prompt"), Map.of(),
+                Map.of("size", "1024x1536"),
+                new GenerationSpec.Price("call", BigDecimal.valueOf(15), null, null, null));
+        GenerationSpec spec = new GenerationSpec("image", "model", "$binary",
+                Map.of(), Map.of("response_format", "b64_json"), List.of(tier));
+        GenerationRegistry.GenerationModel m = new GenerationRegistry.GenerationModel(
+                "img-tall", "image", tier, spec, TOOL_ID, "acme/create-image", "acme",
+                "Acme", "acme", "acme", "sync");
+        when(registry.list(null)).thenReturn(List.of(m));
+        when(registry.kinds()).thenReturn(List.of("image"));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows =
+                (List<Map<String, Object>>) controller.models(null).getBody().get("models");
+
+        // The model's own tier AND the endpoint's scaffolding: both are sent on
+        // every call, so a field that claims to list them cannot show one half.
+        assertThat(rows.get(0)).containsEntry("fixed",
+                Map.of("response_format", "b64_json", "size", "1024x1536"));
+    }
+
+    @Test
+    @DisplayName("a model that pins nothing carries no 'fixed' key at all")
+    void reportsNothingFixedWhenNothingIs() {
+        when(registry.list(null)).thenReturn(List.of(videoModel()));
+        when(registry.kinds()).thenReturn(List.of("video"));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows =
+                (List<Map<String, Object>>) controller.models(null).getBody().get("models");
+
+        assertThat(rows.get(0)).doesNotContainKey("fixed");
+    }
+
+    @Test
     @DisplayName("narrows the listing to one kind when asked")
     void narrowsByKind() {
         when(registry.list("video")).thenReturn(List.of(videoModel()));
@@ -213,7 +256,7 @@ class GenerationControllerTest {
 
         ResponseEntity<Map<String, Object>> response = controller.execute(
                 Map.of("model", "seedance-2.0-fast", "params", Map.of("prompt", "a boat")),
-                "tenant-1", null, "RUN", "run-1", "core:make_clip");
+                "tenant-1", null, "RUN", "run-1", "agent:make_clip");
 
         assertThat(response.getBody().get("success")).isEqualTo(true);
         verify(module).execute(eq("create"), parametersCaptor.capture(), eq("tenant-1"), any());
@@ -226,7 +269,7 @@ class GenerationControllerTest {
         when(module.execute(eq("create"), anyMap(), anyString(), any()))
                 .thenReturn(Optional.of(ToolExecutionResult.success(Map.of("file", Map.of("path", "p")))));
 
-        controller.execute(Map.of("model", "m"), "tenant-1", "org-9", "RUN", "run-1", "core:make_clip");
+        controller.execute(Map.of("model", "m"), "tenant-1", "org-9", "RUN", "run-1", "agent:make_clip");
 
         verify(module).execute(eq("create"), anyMap(), eq("tenant-1"), contextCaptor.capture());
         ToolExecutionContext context = contextCaptor.getValue();
@@ -234,7 +277,7 @@ class GenerationControllerTest {
         assertThat(context.orgId()).isEqualTo("org-9");
         // Without these the credit debit is scoped to nothing and the run is not charged.
         assertThat(context.credentials()).containsEntry("__workflowRunId__", "run-1");
-        assertThat(context.credentials()).containsEntry("__nodeId__", "core:make_clip");
+        assertThat(context.credentials()).containsEntry("__nodeId__", "agent:make_clip");
     }
 
     @Test
@@ -280,7 +323,7 @@ class GenerationControllerTest {
                 .thenReturn(Optional.of(ToolExecutionResult.success(Map.of("file", Map.of("path", "p")))));
 
         controller.execute(Map.of("model", "m", "credential_source", "user", "credential_id", 42),
-                "tenant-1", null, "RUN", "run-1", "core:make_clip");
+                "tenant-1", null, "RUN", "run-1", "agent:make_clip");
 
         verify(module).execute(eq("create"), anyMap(), eq("tenant-1"), contextCaptor.capture());
         assertThat(contextCaptor.getValue().credentials()).containsEntry("__credentialId__", 42);
@@ -321,7 +364,7 @@ class GenerationControllerTest {
 
         ResponseEntity<Map<String, Object>> response = controller.execute(
                 Map.of("model", "m", "params", Map.of("voice", "rachel")),
-                "tenant-1", null, "RUN", "run-1", "core:make_clip");
+                "tenant-1", null, "RUN", "run-1", "agent:make_clip");
 
         assertThat(response.getBody().get("success")).isEqualTo(false);
         assertThat(response.getBody().get("error"))
@@ -360,7 +403,7 @@ class GenerationControllerTest {
                         ToolErrorCode.EXECUTION_FAILED, Map.of())));
 
         ResponseEntity<Map<String, Object>> response = controller.execute(
-                Map.of("model", "m"), "tenant-1", null, "RUN", "run-1", "core:make_clip");
+                Map.of("model", "m"), "tenant-1", null, "RUN", "run-1", "agent:make_clip");
 
         assertThat(response.getBody().get("success")).isEqualTo(false);
         assertThat(response.getBody().get("data")).isEqualTo(recovery);

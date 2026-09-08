@@ -90,4 +90,58 @@ class AgentStorageUsageServiceTest {
         assertThat(result.get("AGENTS").usedBytes()).isZero();
         assertThat(result.get("AGENTS").itemCount()).isZero();
     }
+    @Test
+    @DisplayName("reports long-term memory under its own MEMORIES key, from the memory query and not the skills one")
+    @SuppressWarnings("unchecked")
+    void reportsMemoriesSeparatelyFromSkills() throws Exception {
+        // Each category gets a DIFFERENT row, keyed off the table its SQL reads. With
+        // one shared stub every category returns the same numbers, and a MEMORIES value
+        // wired to the skills query - or to no query at all - would still look right.
+        when(jdbcTemplate.queryForObject(anyString(), any(RowMapper.class), any(Object[].class)))
+            .thenAnswer(inv -> {
+                String sql = inv.getArgument(0);
+                long bytes = sql.contains("agent_memories") ? 55L
+                           : sql.contains("skills") ? 22L
+                           : 11L;
+                int count = sql.contains("agent_memories") ? 5
+                          : sql.contains("skills") ? 2
+                          : 1;
+                ResultSet rs = mock(ResultSet.class);
+                when(rs.getLong(1)).thenReturn(bytes);
+                when(rs.getInt(2)).thenReturn(count);
+                RowMapper<StorageUsageDto> mapper = inv.getArgument(1);
+                return mapper.mapRow(rs, 0);
+            });
+
+        Map<String, StorageUsageDto> result = service.getStorageUsage("tenant-1");
+
+        assertThat(result).containsKey("MEMORIES");
+        assertThat(result.get("MEMORIES").usedBytes()).isEqualTo(55L);
+        assertThat(result.get("MEMORIES").itemCount()).isEqualTo(5);
+        assertThat(result.get("SKILLS").usedBytes()).isEqualTo(22L);
+    }
+
+    @Test
+    @DisplayName("a failing memory query costs only the memory line, not the whole usage report")
+    @SuppressWarnings("unchecked")
+    void memoryQueryFailureDoesNotSinkTheOtherCategories() throws Exception {
+        when(jdbcTemplate.queryForObject(anyString(), any(RowMapper.class), any(Object[].class)))
+            .thenAnswer(inv -> {
+                String sql = inv.getArgument(0);
+                if (sql.contains("agent_memories")) {
+                    throw new IncorrectResultSetColumnCountException(1, 2);
+                }
+                ResultSet rs = mock(ResultSet.class);
+                when(rs.getLong(1)).thenReturn(11L);
+                when(rs.getInt(2)).thenReturn(1);
+                RowMapper<StorageUsageDto> mapper = inv.getArgument(1);
+                return mapper.mapRow(rs, 0);
+            });
+
+        Map<String, StorageUsageDto> result = service.getStorageUsage("tenant-1");
+
+        assertThat(result.get("MEMORIES")).isEqualTo(StorageUsageDto.zero());
+        assertThat(result.get("AGENTS").usedBytes()).isEqualTo(11L);
+        assertThat(result.get("SKILLS").usedBytes()).isEqualTo(11L);
+    }
 }

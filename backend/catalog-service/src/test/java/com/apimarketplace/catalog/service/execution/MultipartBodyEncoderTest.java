@@ -52,6 +52,43 @@ class MultipartBodyEncoderTest {
     }
 
     @Test
+    @DisplayName("does not read a remote URL in 'path' as a storage key")
+    void doesNotTreatARemoteUrlAsAStorageKey() throws Exception {
+        // A {path, name} pair whose path is a link is not a file this platform
+        // holds. Read as a key, the download found nothing and the part was
+        // dropped with a message about a missing file, which pointed the reader
+        // nowhere near the actual mistake. Same rule as FileAttachmentResolver's.
+        JsonNode fields = objectMapper.readTree(
+                "[{\"name\":\"file\",\"source\":\"fileRef\",\"paramName\":\"audio\"}]");
+        Map<String, Object> remote = new LinkedHashMap<>();
+        remote.put("path", "https://example.com/x.wav");
+        remote.put("name", "x.wav");
+
+        MultiValueMap<String, Object> body = encoder.encode(fields, Map.of("audio", remote), "tenant");
+
+        assertTrue(body.isEmpty(), "a link is not a stored file, so no part is built from it");
+        verify(storageClient, never()).download(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("still reads a stored file whose path merely contains a colon")
+    void stillReadsAKeyThatIsNotAUrl() throws Exception {
+        // The rule is "scheme://", not "contains a colon": a storage key may hold
+        // one, and refusing those would drop real files.
+        JsonNode fields = objectMapper.readTree(
+                "[{\"name\":\"file\",\"source\":\"fileRef\",\"paramName\":\"audio\"}]");
+        when(storageClient.download(anyString(), anyString())).thenReturn(new byte[]{1, 2, 3});
+        Map<String, Object> stored = new LinkedHashMap<>();
+        stored.put("path", "tenant/general/wf:12/x.wav");
+        stored.put("name", "x.wav");
+
+        MultiValueMap<String, Object> body = encoder.encode(fields, Map.of("audio", stored), "tenant");
+
+        assertEquals(1, body.size());
+        verify(storageClient).download("tenant", "tenant/general/wf:12/x.wav");
+    }
+
+    @Test
     @DisplayName("encodes a 'fileRef' source by downloading bytes from MinIO")
     void encodesFileRef() throws Exception {
         when(storageClient.download(eq("tenant"), eq("tenant/general/x.wav")))

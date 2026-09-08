@@ -22,11 +22,20 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('next-intl', () => ({
   useTranslations: (ns?: string) => (key: string) => (ns ? `${ns}.${key}` : key),
+  useLocale: () => 'en',
 }));
 
+// Records the locale it is handed, so a test can prove this component passes
+// one at all. Stubbed to String(v), the argument was invisible: dropping it
+// left every test green while reintroducing an SSR/hydration mismatch for the
+// five non-English locales.
+const compactCalls = vi.hoisted(() => [] as Array<[number, string | undefined]>);
 vi.mock('@/lib/format-cost', () => ({
   isCeMode: false,
-  formatCreditsCompact: (v: number) => String(v),
+  formatCreditsCompact: (v: number, locale?: string) => {
+    compactCalls.push([v, locale]);
+    return String(v);
+  },
 }));
 
 vi.mock('@/lib/hooks/smart-hooks-complete', () => ({
@@ -232,5 +241,20 @@ describe('TopUpModal', () => {
 
       expect(onClose).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('TopUpModal - credit amounts carry the app locale', () => {
+  it('hands the formatter the locale, not just the number', () => {
+    // Without an explicit locale the formatter falls back to getClientLocale(),
+    // which is a hardcoded 'en' with no window - so the tier amounts would be
+    // spelled in English on the server and re-spelled on hydration for de, fr,
+    // es, pt and zh. Dropping the argument passed every other test here,
+    // because the formatter was stubbed to String(v) and swallowed it.
+    compactCalls.length = 0;
+    renderModal();
+
+    expect(compactCalls.length).toBeGreaterThan(0);
+    expect(compactCalls.every(([, locale]) => locale === 'en')).toBe(true);
   });
 });

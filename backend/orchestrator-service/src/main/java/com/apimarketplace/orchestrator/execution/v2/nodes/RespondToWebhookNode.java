@@ -101,7 +101,7 @@ public class RespondToWebhookNode extends BaseNode {
             result.put("item_index", context.itemIndex());
             result.put("itemIndex", context.itemIndex());
             result.put("item_id", context.itemId());
-            result.put("resolved_params", buildInputDataMap(statusCode, contentType, resolvedBody));
+            result.put("resolved_params", buildInputDataMap(statusCode, contentType, resolvedBody, headers));
 
             return NodeExecutionResult.success(nodeId, result);
 
@@ -112,7 +112,7 @@ public class RespondToWebhookNode extends BaseNode {
             failOutput.put("item_index", context.itemIndex());
             failOutput.put("itemIndex", context.itemIndex());
             failOutput.put("item_id", context.itemId());
-            failOutput.put("resolved_params", buildInputDataMap(statusCode, contentType, resolvedBody));
+            failOutput.put("resolved_params", buildInputDataMap(statusCode, contentType, resolvedBody, headers));
             failOutput.put("error", e.getMessage());
             return NodeExecutionResult.failureWithOutput(nodeId, e.getMessage(), failOutput, 0L);
         }
@@ -141,12 +141,20 @@ public class RespondToWebhookNode extends BaseNode {
         return expression;
     }
 
-    private Map<String, Object> buildInputDataMap(int statusCode, String contentType, String bodyExpression) {
+    private Map<String, Object> buildInputDataMap(int statusCode, String contentType, String bodyExpression,
+                                                  Map<String, String> headers) {
         Map<String, Object> inputData = new LinkedHashMap<>();
         inputData.put("statusCode", statusCode);
         inputData.put("contentType", contentType);
         if (bodyExpression != null) {
             inputData.put("body", bodyExpression);
+        }
+        // RespondToWebhookConfig has `headers` and the node was sending them on the
+        // wire without ever reporting them, so a reader debugging a response could
+        // not see the headers they configured. The label registry already had an
+        // entry for the key, waiting on a node that never sent it.
+        if (headers != null && !headers.isEmpty()) {
+            inputData.put("headers", headers);
         }
         return inputData;
     }

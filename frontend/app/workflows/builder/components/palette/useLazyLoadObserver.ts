@@ -51,6 +51,11 @@ export function useLazyLoadObserver({
 
   React.useEffect(() => {
     if (!enabled) return;
+    // No IntersectionObserver (older embedded webviews, jsdom): the list stays on the
+    // page it has instead of taking the whole palette down with a ReferenceError. It
+    // only became reachable on the DEFAULT screen with the ranked integrations section,
+    // so a gap that used to be unobservable is now a crash on open.
+    if (typeof IntersectionObserver === 'undefined') return;
 
     const observer = new IntersectionObserver(
       (entries) => {

@@ -27,11 +27,6 @@ public class WorkflowHelpProvider {
     /** Reads the model catalogue so the generate help can name the ids. */
     private final com.apimarketplace.orchestrator.services.generation.GenerationExecutionService
             generationExecutionService;
-    // Vector similarity (RAG) is self-hosted-only: datasource-service rejects
-    // similarity queries and vector columns on managed cloud, so the
-    // workflow-builder help must not advertise them there - an
-    // advertised-but-rejected pattern sends the agent into failing plans.
-    private final com.apimarketplace.common.web.AppEditionProvider appEditionProvider;
 
     // ==================== AVAILABLE TOPICS ====================
 
@@ -77,7 +72,7 @@ public class WorkflowHelpProvider {
         "ssh",           // SSH node (execute commands on remote servers)
         "sftp",          // SFTP node (file operations on remote servers)
         "database",      // Database node (execute SQL queries)
-        "media",         // Media node (probe, mux_audio, mix, extract_audio, concat, frame, overlay)
+        "media",         // Media node (probe, mux_audio, mix, extract_audio, concat, frame, overlay, subtitles)
         "generate",      // Generate node (image, video, audio, voice, music from a prompt)
         "runs",          // Inspecting past workflow runs
         "pin",           // Production version pinning (pin/unpin actions)
@@ -254,7 +249,8 @@ public class WorkflowHelpProvider {
             // Media aliases (fallback when the node docs row is absent; the "media" topic
             // itself is normally answered above with the DB row merged with this section)
             case "media", "mux", "mux_audio", "extract_audio", "audio_video",
-                 "concat", "stitch", "join", "join_videos", "frame", "thumbnail", "cover", "overlay", "watermark" -> getMediaHelp();
+                 "concat", "stitch", "join", "join_videos", "frame", "thumbnail", "cover", "overlay", "watermark",
+                 "subtitles", "subtitle", "captions", "caption" -> getMediaHelp();
 
             // Generate aliases (fallback when the node docs row is absent; the "generate"
             // topic itself is normally answered above with the DB row merged with this section)
@@ -493,7 +489,7 @@ public class WorkflowHelpProvider {
      */
     private Map<String, Object> getMediaHelp() {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("title", "Media Node - Audio/Video Processing (probe, mux_audio, mix, extract_audio, concat, frame, overlay)");
+        result.put("title", "Media Node - Audio/Video Processing (probe, mux_audio, mix, extract_audio, concat, frame, overlay, subtitles)");
         result.put("requires_component", "Runs on the optional renderer component. When that component is not " +
             "enabled on this installation, the node FAILS at run time (producing the media output IS its purpose - " +
             "this is NOT best-effort like interface screenshots) and validate warns with MEDIA_RENDERER_UNAVAILABLE. " +
@@ -524,7 +520,11 @@ public class WorkflowHelpProvider {
                 "used after default/clamp); duration_seconds is null for frame.",
             "overlay", "Burn an image (logo, watermark, badge) onto a video. params={operation:'overlay', " +
                 "video:'{{...file}}', image:'{{...file}}'} + options below. PNG alpha is respected; the operation " +
-                "fails if the image file is not an image. Output: file (mp4) + duration_seconds."
+                "fails if the image file is not an image. Output: file (mp4) + duration_seconds.",
+            "subtitles", "Burn timed captions INTO the picture (they become part of the image, so they show on " +
+                "every player and on platforms that ignore a caption track). params={operation:'subtitles', " +
+                "video:'{{...file}}', cues:[{start_seconds:0, end_seconds:2.4, text:'It starts here'}, ...]} + " +
+                "options below. Output: file (mp4) + duration_seconds."
         ));
         result.put("mux_audio_options", ordered(
             "volume", "Audio volume in percent 0-400, default 100",
@@ -591,6 +591,38 @@ public class WorkflowHelpProvider {
                 "timestamps (end_seconds must be greater than start_seconds); absent = the whole video. The " +
                 "video re-encodes; the audio is copied untouched when present"
         ));
+        result.put("subtitles_cues", ordered(
+            "cues", "REQUIRED array of 1-600 entries, each {start_seconds, end_seconds, text}: when the line " +
+                "appears, when it disappears (seconds from the start of the VIDEO), and what it says. text is at " +
+                "most 240 characters - split a longer line across consecutive cues - and the whole track is at " +
+                "most 40000 characters. Can also be a whole-value expression when the track is computed upstream " +
+                "(a transcription, a code node): cues:'{{core:build_cues.output.result.cues}}'.",
+            "ordering", "Cues must be given in ASCENDING, NON-OVERLAPPING order (each start_seconds at or after " +
+                "the previous end_seconds). An overlap is REFUSED rather than reordered: two cues covering the " +
+                "same instant are drawn on top of each other, so an overlap is always a timing bug.",
+            "gaps", "Gaps between cues are fine and normal - nothing is shown there. A cue that runs past the end " +
+                "of the video simply stops being visible when the video ends.",
+            "timing_source", "To caption a narration you generated, time the cues from the audio you are burning " +
+                "in, not from the script: media probe gives the audio's real duration_seconds. Cues that ALL start " +
+                "at or after the end of the video are refused rather than producing a video with no caption on it."
+        ));
+        result.put("subtitles_options", ordered(
+            "style", "tiktok (default) or classic. tiktok is the big, bold, UPPERCASE block that sits above the " +
+                "middle of the frame (the short-form video look); classic is smaller, mixed case, near the bottom " +
+                "(the film-subtitle look). Every size in a preset is a percentage of the video HEIGHT, so one " +
+                "style reads the same on a 720x1280 phone cut and a 1080x1920 master.",
+            "font_family", "Optional font family name. OMIT IT unless you have a reason: the default is a family " +
+                "the renderer always ships (it covers Latin script; other scripts fall back to the fonts the " +
+                "renderer has for them), and a family it cannot find is REFUSED (the operation fails with a clear " +
+                "error) rather than silently swapped for another face.",
+            "font_size_percent", "Optional 1-20: caption size as a percent of the video HEIGHT, overriding the " +
+                "style preset.",
+            "position_percent", "Optional 0-100: distance from the TOP of the frame, overriding the style preset " +
+                "(72 sits above centre, 89 near the bottom, 100 sits on the bottom edge). 0 means as high as the " +
+                "line can sit and still be fully visible - captions are never placed off the frame.",
+            "text_color/outline_color", "Optional hex colours like '#FFFFFF' / '#000000'. The outline is what " +
+                "keeps captions readable over a bright shot - lightening it defeats that."
+        ));
         result.put("constraints", ordered(
             "loop_vs_trim", "loop:true cannot be combined with trim_start_seconds/trim_end_seconds on the same " +
                 "audio or track: extract the trimmed segment with a separate media node first, or drop one of the two.",
@@ -610,6 +642,15 @@ public class WorkflowHelpProvider {
             "frame_default_middle", "frame without at_seconds grabs the MIDDLE of the video; an at_seconds past " +
                 "the end is clamped to just before the end (never an error) - read output.timestamp_seconds for " +
                 "the timestamp actually used.",
+            "subtitles_are_permanent", "subtitles burns the captions INTO the picture: they cannot be turned off, " +
+                "restyled or translated afterwards. Caption LAST, once the cut is final, and keep the un-captioned " +
+                "file if another language may be needed - re-running subtitles on a captioned video stacks a " +
+                "second set of captions over the first.",
+            "subtitles_ordering", "cues must be ascending and non-overlapping, and an overlap is refused rather " +
+                "than reordered (overlapping cues would be drawn on top of each other).",
+            "subtitles_font", "A font_family the renderer cannot find is REFUSED, not substituted: an unreadable " +
+                "or wrong-looking caption track is a worse outcome than a failed run, and a substituted face would " +
+                "come back as a perfectly successful video. Omit font_family to use the guaranteed default.",
             "budget", "Renders have a per-operation time budget and an input size limit on the renderer. A timeout " +
                 "or too-large failure means: use shorter inputs (trim_start_seconds/trim_end_seconds) or smaller files. " +
                 "A busy failure means: retry when fewer media operations run concurrently."
@@ -629,12 +670,15 @@ public class WorkflowHelpProvider {
                 "$output = {words: Math.floor(input_duration * 2.5)}; (3) the agent/TTS tool generates speech for " +
                 "that budget; (4) media mux_audio puts the narration onto the video. The probe's flat fields " +
                 "(has_audio, video.fps, ...) are all referencable the same way.",
-            "4_compile_clips_with_crossfade", "Stitch three generated clips into one reel with soft transitions: " +
+            "4_compile_clips_with_crossfade", "Stitch three clips into one reel with soft transitions: " +
                 "workflow(action='add_node', type='media', label='Compile Reel', params={operation:'concat', " +
-                "inputs:[{source:'{{core:intro.output.file}}'}, {source:'{{core:demo.output.file}}', " +
-                "trim_end_seconds:12}, {source:'{{core:outro.output.file}}'}], transition:'crossfade', " +
-                "transition_seconds:0.5, fade_out_seconds:1}, connect_after='Outro'). One input + trims/speed = " +
-                "a simple cut-down edit of a single video.",
+                "inputs:[{source:'{{agent:intro.output.file}}'}, {source:'{{core:demo.output.file}}', " +
+                "trim_end_seconds:12}, {source:'{{agent:outro.output.file}}'}], transition:'crossfade', " +
+                "transition_seconds:0.5, fade_out_seconds:1}, connect_after='Outro'). Note the two prefixes: " +
+                "Intro and Outro were made by generate nodes, which are AI nodes keyed agent:<label>, while Demo " +
+                "came from a core node such as download_file. Each source carries the prefix of the node that " +
+                "produced it, and the wrong one resolves to an empty string rather than failing. One input + " +
+                "trims/speed = a simple cut-down edit of a single video.",
             "5_cover_frame", "Grab a cover image for a produced video (default = the middle, usually the best " +
                 "shot): workflow(action='add_node', type='media', label='Cover', params={operation:'frame', " +
                 "input:'{{core:compile_reel.output.file}}', width:1280}, connect_after='Compile Reel'). Then " +
@@ -643,7 +687,15 @@ public class WorkflowHelpProvider {
             "6_watermark", "Brand a video with a semi-transparent logo bottom-right: workflow(action='add_node', " +
                 "type='media', label='Brand It', params={operation:'overlay', video:'{{core:compile_reel.output.file}}', " +
                 "image:'{{core:download_logo.output.file}}', position:'bottom_right', margin_px:24, width_percent:12, " +
-                "opacity:0.7}, connect_after='Compile Reel')."
+                "opacity:0.7}, connect_after='Compile Reel').",
+            "7_burn_captions", "Caption a finished cut in the short-form style: workflow(action='add_node', " +
+                "type='media', label='Caption It', params={operation:'subtitles', " +
+                "video:'{{core:add_music.output.file}}', style:'tiktok', cues:[{start_seconds:0, end_seconds:2.4, " +
+                "text:'Ninety metres below the surface'}, {start_seconds:2.6, end_seconds:5.2, " +
+                "text:'nothing has moved for eight months'}]}, connect_after='Add Music'). Caption LAST, after the " +
+                "cut and the audio are final: the captions become part of the picture. Time the cues from the " +
+                "narration you actually burned in (media probe reports its real duration_seconds), not from the " +
+                "script, or the captions drift out of sync with the voice."
         ));
         result.put("edges", "No ports. Exactly ONE incoming edge (like every utility node - validate rejects more). "
             + "To feed it from two branches (e.g. a video download AND an audio download), either chain them "
@@ -658,15 +710,20 @@ public class WorkflowHelpProvider {
      */
     private Map<String, Object> getGenerateHelp() {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("title", "Generate Node - one asset from a prompt (image, video, audio, voice, music)");
+        result.put("title", "Generate Node (AI) - one asset from a prompt (image, video, audio, voice, music)");
+        result.put("family", "An AI node, like agent, browser_agent, classify and guardrail: it is keyed "
+            + "agent:<label> and its output is addressed as {{agent:<label>.output.file}}. A {{core:...}} "
+            + "reference to it resolves to nothing, silently, because an unresolved template is an empty "
+            + "string rather than an error.");
         result.put("model_first", "'model' is the only required param and it decides everything else: the "
             + "format produced, which other params are accepted, and the price. Model ids cannot be guessed, "
             + "so the ids are listed under 'models' in THIS payload - you already have them, no other call "
             + "is needed to build the node. Then workflow(action='add_node', type='generate', "
             + "label='Make Clip', params={model:'<id-from-that-list>', prompt:'...'}, connect_after='...'). "
-            + "The generation tool, if you have it, answers the same list with action='models' plus the "
-            + "per-model limits; it is opt-in per agent because CREATING spends credits, so do not assume "
-            + "you hold it and never tell someone to run it. Building the node needs only this list.");
+            + "The generation tool, if you have it, answers the same list; it is opt-in per agent because "
+            + "CREATING spends credits, so do not assume you hold it and never tell someone to run it. "
+            + "Building the node needs only this list: each row carries what the model accepts, the limits "
+            + "on those params, what its file slots are for, and what it costs.");
         // The ids, from the live catalogue, in the payload the builder already
         // reads. Discovery is free; only creating spends. Before this, the ids
         // existed solely behind the opt-in generation tool, so an agent without
@@ -719,6 +776,26 @@ public class WorkflowHelpProvider {
                 // on this installation, and it differs cloud versus self-hosted.
                 Object runsOn = m.get("runsOn");
                 row.put("runs_on", runsOn == null ? "unknown" : String.valueOf(runsOn));
+                // The three things the BUILDER shows on this same model that this
+                // payload used to withhold, sending the reader to a tool that is
+                // opt-in and that most agents do not hold:
+                //   * limits - the allowed values and the min/max of each param.
+                //     Without them a param with a closed vocabulary can only be
+                //     guessed at, and while a wrong guess is refused for free, the
+                //     refusal is a round trip that the builder never has to make.
+                //   * inputs - what each FILE slot is FOR and how many it takes.
+                //     "input_image" does not say whether the image comes back
+                //     changed, becomes a first frame, or only lends its style.
+                //   * price - the rate. Stating what a run will cost before it runs
+                //     is not a nicety here: the amount is charged on success and
+                //     scales with a param the caller chooses.
+                // 59 models on the reference catalogue, so this is a readable
+                // payload rather than a large one; if that ever stops being true
+                // the answer is to let the reader ask for ONE model, not to go back
+                // to describing a model two different ways on two surfaces.
+                if (m.get("limits") != null) row.put("limits", m.get("limits"));
+                if (m.get("inputs") != null) row.put("inputs", m.get("inputs"));
+                if (m.get("price") != null) row.put("price", m.get("price"));
                 rows.add(row);
             }
             result.put("models", rows);
@@ -736,9 +813,19 @@ public class WorkflowHelpProvider {
                 + "the call cannot be measured in.");
             result.put("models_note", "Every generation model this installation offers, by kind. "
                 + "'accepts' is the exact set of params that model takes: anything else is refused before "
-                + "the provider is called, at no cost. Limits per param (allowed values, min/max) are not "
-                + "here to keep this readable; the generation tool's action='models' carries them when you "
-                + "have that tool.");
+                + "the provider is called, at no cost. 'limits' gives the allowed values and the min/max "
+                + "of each of those params, 'inputs' says what each file slot is for and how many files it "
+                + "takes, and 'price' is the starting rate (unit, unitCredits, baseCredits, and a floor or "
+                + "ceiling where the model has one). That is everything you need to write a valid node and "
+                + "to say what it will cost, from this payload alone. Two things inside 'limits' change "
+                + "what you should DO with a value. allowedEnforced:false means the listed values are what "
+                + "the provider documents and nothing checks them, so one outside the list reaches the "
+                + "provider and fails there: treat that list as a suggestion and confirm the value with "
+                + "the person. optionsAvailable:true means there is no fixed list at all: those values "
+                + "belong to the provider ACCOUNT whose key runs the node, so the voices or presets one "
+                + "key can use are not the ones another can, and no list written here could be true for "
+                + "two readers. Ask the person for that value rather than inventing one: a wrong id is "
+                + "opaque and is only refused after the generation has been paid for.");
         }
         result.put("params", ordered(
             "model", "REQUIRED. One of the ids under 'models' in this payload.",
@@ -753,7 +840,15 @@ public class WorkflowHelpProvider {
             "seed", "Seed for reproducible output.",
             "negative_prompt", "What to avoid.",
             "input_image / input_audio / input_video", "A whole FileRef from an upstream node, used as a "
-                + "reference or a first frame, e.g. '{{core:download.output.file}}' - never .path, never a URL.",
+                + "reference or a first frame, e.g. '{{core:download.output.file}}' from a core node or "
+                + "'{{agent:make_cover.output.file}}' from another generate node - never .path, never a URL. "
+                + "What the file is FOR is the 'role' under that model's 'inputs' row, and it is not the "
+                + "same on every model: an image can be the first frame of the clip, the picture that comes "
+                + "back edited, or only a style reference. Where that row says maxItems above 1 the model "
+                + "takes SEVERAL files here: send a LIST of whole FileRefs and their order is the order the "
+                + "provider reads them in. A list longer than maxItems is refused before the provider is "
+                + "called, at no cost, and so is a list where any one file cannot be read (never partly "
+                + "sent, so you are never charged for a request you did not make).",
             "credential_source", "'platform' = the platform's provider key, billed at the platform "
                 + "price. 'user' = a key the owner configured themselves, billed nothing by the platform. "
                 + "UNSTATED MEANS 'platform' for this node: it is substituted before the run, so leaving "
@@ -764,8 +859,9 @@ public class WorkflowHelpProvider {
             "credential_id", "WHICH of the owner's own provider keys this node runs on, when they hold "
                 + "several for the same provider. Only meaningful beside credential_source:'user'. You have "
                 + "no way to look one up: the ids belong to the owner's account and no action here lists "
-                + "them, so the owner sets this in the builder. What you must do is leave it ALONE - copy it "
-                + "unchanged when you rewrite a node that already has one, and never invent a number. A "
+                + "them, so the owner sets this in the builder. add_node and modify both ACCEPT it, which is "
+                + "what lets you carry one across a rewrite - copy it unchanged when you rewrite a node that "
+                + "already has one, and never invent a number. A "
                 + "node without it runs on the owner's default key for that provider, which is the right "
                 + "answer for every node you create."
         ));
@@ -791,7 +887,7 @@ public class WorkflowHelpProvider {
             + "unstated means 'platform'.");
         result.put("outputs", ordered(
             "file", "The generated asset as a whole FileRef, stored so it outlives the provider's own link. "
-                + "Map the WHOLE object into a downstream file param: '{{core:make_clip.output.file}}'.",
+                + "Map the WHOLE object into a downstream file param: '{{agent:make_clip.output.file}}'.",
             "model", "The model id that ran.",
             "kind", "The format produced: image, video, audio, voice, music, ...",
             "provider", "The provider whose model ran.",
@@ -813,8 +909,9 @@ public class WorkflowHelpProvider {
                 + "prompt:'Welcome aboard. Please fasten your seatbelt.', voice:'<a voice id from limits>'}. "
                 + "Priced per character, so the prompt's length is the cost.",
             "generate_then_edit", "Chain into core:media: 'Make Clip' -> 'Say It' -> 'Add Voice' with "
-                + "params={operation:'mux_audio', video:'{{core:make_clip.output.file}}', "
-                + "audio:'{{core:say_it.output.file}}'}.",
+                + "params={operation:'mux_audio', video:'{{agent:make_clip.output.file}}', "
+                + "audio:'{{agent:say_it.output.file}}'}. The two generate nodes are addressed with "
+                + "agent:, the media node with core: - the prefix follows the node, not the workflow.",
             "own_key", "Add credential_source:'user' to run on a provider key you configured yourself; the "
                 + "platform then bills nothing for that node."
         ));
@@ -850,7 +947,7 @@ public class WorkflowHelpProvider {
             "approval", "approved, rejected, timeout - Example: core:review:approved",
             "guardrail", "pass, fail - Example: agent:safety:pass, agent:safety:fail",
             "classify", "category_0, category_1, ... - Example: agent:router:category_0",
-            "no_port_nodes", "split, merge, transform, wait, exit, stop_on_error, response, aggregate, http_request, download_file, public_link, media, generate, data_input, code, filter, sort, limit, remove_duplicates, summarize, date_time, crypto_jwt, xml, compression, rss, convert_to_file, extract_from_file, compare_datasets, sub_workflow, respond_to_webhook, send_email, email_inbox, set, html_extract, task, ssh, sftp, database - NO ports, single outgoing edge"
+            "no_port_nodes", "split, merge, transform, wait, exit, stop_on_error, response, aggregate, http_request, download_file, public_link, media, generate (agent:), data_input, code, filter, sort, limit, remove_duplicates, summarize, date_time, crypto_jwt, xml, compression, rss, convert_to_file, extract_from_file, compare_datasets, sub_workflow, respond_to_webhook, send_email, email_inbox, set, html_extract, task, ssh, sftp, database - NO ports, single outgoing edge"
         ));
         return result;
     }
@@ -908,9 +1005,7 @@ public class WorkflowHelpProvider {
             "delete_row", "table_id (int) + where (object)",
             "get_rows",   "table_id (int) - where/limit/offset/order_by optional",
             "find_rows",  "table_id (int) [aliases: dataSourceId, datasource_id] - crud.where/crud.limit optional"
-                + (appEditionProvider.isSelfHosted()
-                    ? ", params.similarity={column, queryVector, topK?, threshold?} for vector search (RAG)"
-                    : "")
+                + ", params.similarity={column, queryVector, topK?, threshold?} for vector search (RAG)"
         ));
 
         for (String type : List.of("insert_row", "update_row", "delete_row")) {
@@ -940,12 +1035,15 @@ public class WorkflowHelpProvider {
             "To iterate per-row, connect a Split node after this node.");
         help.put("prefix", "table:");
         help.put("type_field", "crud-find");
-        boolean similarityAvailable = appEditionProvider.isSelfHosted();
+        // Similarity is documented unconditionally since 2026-09-03. It used to be described only
+        // on self-hosted, because vector search was a property of the DEPLOYMENT and this help
+        // could answer that. It is now a property of the WORKSPACE'S PLAN, which this help is
+        // built without: hiding the pattern from everyone to spare the workspaces that cannot use
+        // it would also hide it from the ones paying for it. A run that lacks the plan is refused
+        // at the step, with the plan named.
         help.put("param_format", "dataSourceId at top level. where/limit go in 'crud' block. "
-            + (similarityAvailable
-                ? "similarity goes in 'params' block. Example: {type:'crud-find', label:'X', dataSourceId:6, "
-                    + "crud:{where:{...}, limit:5}, params:{similarity:{column:'embedding', queryVector:'{{...}}', topK:5}}}"
-                : "Example: {type:'crud-find', label:'X', dataSourceId:6, crud:{where:{...}, limit:5}}"));
+            + "similarity goes in 'params' block. Example: {type:'crud-find', label:'X', dataSourceId:6, "
+            + "crud:{where:{...}, limit:5}, params:{similarity:{column:'embedding', queryVector:'{{...}}', topK:5}}}");
 
         // Parameters
         Map<String, Object> params = new LinkedHashMap<>();
@@ -956,19 +1054,19 @@ public class WorkflowHelpProvider {
             "example", Map.of("column", "status", "operator", "=", "value", "active")));
         params.put("crud.limit", Map.of("type", "integer", "required", false, "default", 100,
             "description", "Maximum number of rows to return (inside crud block)"));
-        if (similarityAvailable) {
-            params.put("params.similarity", Map.of("type", "object", "required", false,
-                "description", "Vector similarity search (RAG) - MUST be inside 'params' block. " +
-                    "Fields: column (vector column name), queryVector (template expression e.g. {{mcp:embed.output.data[0].embedding}}), " +
-                    "topK (max results, default 5), threshold (min similarity score, optional). " +
-                    "Can combine with crud.where for hybrid filtering.",
-                "example", Map.of("column", "embedding", "queryVector", "{{mcp:embed_query.output.data[0].embedding}}", "topK", 5)));
-        }
+        params.put("params.similarity", Map.of("type", "object", "required", false,
+            "description", "Vector similarity search (RAG) - MUST be inside 'params' block. " +
+                "Fields: column (vector column name), queryVector (template expression e.g. {{mcp:embed.output.data[0].embedding}}), " +
+                "topK (max results, default 5), threshold (min similarity score, optional). " +
+                "Can combine with crud.where for hybrid filtering. " +
+                "On managed cloud this is a paid capability: a workspace whose plan does not include it " +
+                "gets the step refused with a message naming the plan that does.",
+            "example", Map.of("column", "embedding", "queryVector", "{{mcp:embed_query.output.data[0].embedding}}", "topK", 5)));
         help.put("parameters", params);
 
         // Outputs
         Map<String, Object> outputs = new LinkedHashMap<>();
-        outputs.put("items", "array - All found rows (after limit). Use Split to iterate.");
+        outputs.put("items", "array - All found rows (after limit). Use Split to iterate. A cell from a file or image column is the file OBJECT {_type:'file', id, path, url, name, mimeType, size}: map the WHOLE cell into a parameter that takes a file, never one field of it; path and url are each present only when the file has one.");
         outputs.put("item_count", "number - Number of items found");
         outputs.put("total_before_limit", "number - Total rows before limit cap");
         outputs.put("has_more", "boolean - Whether more rows exist beyond the limit");
@@ -1017,10 +1115,11 @@ public class WorkflowHelpProvider {
             "note", "Find returns items[], Split iterates per-row. mcp:send_email runs once per user with {{item}}."
         ));
 
-        // RAG example: Embed → Find with similarity → Agent. Self-hosted only -
-        // managed cloud rejects similarity queries, so the pattern must not be
-        // advertised there (the agent would build failing plans).
-        if (similarityAvailable) {
+        // RAG example: Embed -> Find with similarity -> Agent. Advertised everywhere since
+        // 2026-09-03: managed cloud runs it too, from the plan the admin set on
+        // feature:vector_search. A workspace below that bar has the step refused with the plan
+        // named, which is a better answer than never being shown the pattern.
+        {
             help.put("example_rag_plan", Map.of(
                 "description", "RAG pattern: embed user query → similarity search → agent generates answer from context",
                 "mcps", List.of(Map.of(
@@ -1122,7 +1221,7 @@ public class WorkflowHelpProvider {
             "list_all", "workflow(action='runs', workflow_id='<uuid>')",
             "overview", "workflow(action='get_run', run_id='<uuid>')",
             "epoch_detail", "workflow(action='get_run', run_id='<uuid>', epoch=1)",
-            "single_node", "workflow(action='get_node_output', run_id='<uuid>', epoch=1, node_id='core:generate_html')",
+            "single_node", "workflow(action='get_node_output', run_id='<uuid>', epoch=1, node_id='core:build_html')",
             "split_node_list", "workflow(action='get_node_output', run_id='<uuid>', epoch=1, node_id='agent:classify') - returns items[] when the node ran across multiple split items.",
             "split_node_zoom", "workflow(action='get_node_output', run_id='<uuid>', epoch=1, node_id='agent:classify', item_index=2) - drills into one specific item.",
             "loop_iteration", "workflow(action='get_node_output', run_id='<uuid>', epoch=1, node_id='mcp:retry_call', iteration=3) - picks iteration 3 of an enclosing loop.",

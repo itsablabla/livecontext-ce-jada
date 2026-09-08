@@ -4,6 +4,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { Edit3, History, Play, Eye } from 'lucide-react';
 import { formatCost } from '@/lib/format-cost';
 import { useTranslations } from 'next-intl';
+import { budgetCapNeverResets, budgetPeriodLabelKey, resolveBudgetPeriod } from '@/components/budget/budgetPeriod';
 import { useRouter, usePathname } from 'next/navigation';
 import { orchestratorApi, type WorkflowRun } from '@/lib/api';
 import { useToast } from '@/components/Toast';
@@ -14,6 +15,7 @@ import { VIEWING_EPOCH_EVENT, shouldAdoptEpochEvent, type EpochEventDetail } fro
 import { isEmbeddedWorkflowCanvas } from '@/lib/workflow/canvasEmbedding';
 import { computeRunInfoPanelWidths } from '@/components/workflow/runInfoPanelWidth';
 import { RunSummaryBar } from '@/components/workflow/run-panel/RunSummaryBar';
+import type { RunPanelAction } from '@/components/workflow/run-panel/runPanelBus';
 import { openRunPanel } from '@/components/workflow/run-panel/runPanelBus';
 
 interface WorkflowModeToggleProps {
@@ -38,6 +40,10 @@ interface WorkflowModeToggleProps {
   onStop?: () => void;
   onCancel?: () => void;
   onReactivate?: () => void;
+  /** Action in flight, so the pill's control spins instead of looking dead. */
+  actionPending?: RunPanelAction | null;
+  /** Whether the last action failed, marked on the pill's control. */
+  actionFailed?: boolean;
   /** How many epochs the run has, i.e. how many rows its epoch selector lists. */
   epochCount?: number;
   /** Pinned (production) version of the workflow, null if unpinned */
@@ -70,6 +76,8 @@ export function WorkflowModeToggle({
   onStop,
   onCancel,
   onReactivate,
+  actionPending = null,
+  actionFailed = false,
   epochCount = 0,
   pinnedVersion,
   isSettingsOpen = false,
@@ -85,17 +93,36 @@ export function WorkflowModeToggle({
   // runBudgetBlocked WS event; we only react to the run this bar is showing.
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { runId?: string; spentCredits?: number; budgetCredits?: number } | undefined;
+      const detail = (e as CustomEvent).detail as {
+        runId?: string; spentCredits?: number; budgetCredits?: number; periodMode?: string | null;
+      } | undefined;
       if (!detail) return;
       const panelRunId = currentRunInfo?.runId;
       if (panelRunId && detail.runId && detail.runId !== panelRunId) return;
+      // A cap that never resets gets its OWN sentence. The ordinary message
+      // ends with "it resumes on its own next period", which is true of the
+      // monthly and weekly cadences and a plain falsehood for a lifetime cap:
+      // there is no next period, and the workflow stays stopped until its owner
+      // changes the cap. Sending a blocked user away to wait for a reset that
+      // will never come is the worst thing this toast could do.
+      // RESOLVED, like the popover: `budgetPeriodLabelKey` two lines below
+      // falls back on a cadence nobody implements and this would not, so on such
+      // a value the toast would name one period and promise the other's reset.
+      // Same answer as before on every cadence in use; see resolveBudgetPeriod.
+      const neverResets = budgetCapNeverResets(resolveBudgetPeriod(detail.periodMode));
       addToast({
         type: 'warning',
         title: t('workflow.runInfo.budgetBlockedTitle'),
-        message: t('workflow.runInfo.budgetBlockedMessage', {
-          spent: formatCost(detail.spentCredits ?? null),
-          budget: formatCost(detail.budgetCredits ?? null),
-        }),
+        message: neverResets
+          ? t('workflow.runInfo.budgetBlockedMessageCumulative', {
+              spent: formatCost(detail.spentCredits ?? null),
+              budget: formatCost(detail.budgetCredits ?? null),
+            })
+          : t('workflow.runInfo.budgetBlockedMessage', {
+              spent: formatCost(detail.spentCredits ?? null),
+              budget: formatCost(detail.budgetCredits ?? null),
+              period: t(budgetPeriodLabelKey(detail.periodMode)),
+            }),
       });
     };
     window.addEventListener('workflow:runBudgetBlocked', handler as EventListener);
@@ -338,6 +365,8 @@ export function WorkflowModeToggle({
                 onStop={onStop}
                 onCancel={onCancel}
                 onReactivate={onReactivate}
+                actionPending={actionPending}
+                actionFailed={actionFailed}
                 onVersionClick={() => openPanel('history')}
               />
             </div>

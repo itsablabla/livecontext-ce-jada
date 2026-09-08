@@ -28,7 +28,7 @@ interface SourceNodeInspectorProps {
 const LoopInfoTooltip = ({ isIterationInput }: { isIterationInput: boolean }) => {
   const t = useTranslations('workflowBuilder.inspector');
   const [isOpen, setIsOpen] = React.useState(false);
-  const { buttonRef, popoverPosition } = usePopoverPosition(isOpen, 256);
+  const { buttonRef, popoverStyle } = usePopoverPosition(isOpen, 256);
 
   const title = isIterationInput ? t('previousIteration') : t('loopOutput');
   const explanation = isIterationInput
@@ -57,8 +57,8 @@ const LoopInfoTooltip = ({ isIterationInput }: { isIterationInput: boolean }) =>
           />
           {/* Tooltip popup */}
           <div
-            className="fixed z-[9999] w-64 p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700"
-            style={{ top: popoverPosition.top, left: popoverPosition.left }}
+            className="fixed z-[9999] p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700"
+            style={popoverStyle}
           >
             <div className="flex items-start justify-between gap-2 mb-2">
               <span className="font-medium text-sm text-slate-700 dark:text-slate-200">

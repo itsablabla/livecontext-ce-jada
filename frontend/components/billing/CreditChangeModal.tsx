@@ -110,7 +110,7 @@ export default function CreditChangeModal({
                   : t('successDescription', { credits: info.newCredits.toLocaleString(getClientLocale()) })
                 }
               </p>
-              <Button onClick={onClose} variant="contrast" className="w-full">
+              <Button onClick={onClose} variant="default" className="w-full">
                 {t('done')}
               </Button>
             </div>
@@ -373,7 +373,7 @@ export default function CreditChangeModal({
           <Button
             onClick={onConfirm}
             disabled={loading}
-            variant="contrast"
+            variant="default"
             className="flex-1"
           >
             {loading ? (

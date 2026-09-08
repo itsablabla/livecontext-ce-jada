@@ -40,6 +40,12 @@ import java.util.Map;
  * @param rating       rating floor; never {@code null}
  * @param windowDays   only publications published within the last N days, or {@code null} for no window
  * @param price        free / paid split; never {@code null}
+ * @param studio       {@code TRUE} to keep only studio applications, {@code null} for no constraint.
+ *                     A SECOND AXIS, not a category: a studio application keeps whatever category it
+ *                     is about, so this narrows the grid without replacing that question.
+ *                     {@code FALSE} is deliberately accepted too - "everything that is not a studio
+ *                     app" is a real question, and silently widening it to "everything" would answer
+ *                     a different one.
  */
 public record MarketplaceQueryFilter(
         String categorySlug,
@@ -47,7 +53,8 @@ public record MarketplaceQueryFilter(
         Sort sort,
         Rating rating,
         Integer windowDays,
-        Price price) {
+        Price price,
+        Boolean studio) {
 
     /** Ordering of the marketplace grid. Each constant owns one ORDER BY clause. */
     public enum Sort {
@@ -130,19 +137,30 @@ public record MarketplaceQueryFilter(
 
     /** The unfiltered marketplace: every type, popularity order, no refinement. */
     public static MarketplaceQueryFilter unfiltered() {
-        return new MarketplaceQueryFilter(null, null, Sort.POPULAR, Rating.ANY, null, Price.ANY);
+        return new MarketplaceQueryFilter(null, null, Sort.POPULAR, Rating.ANY, null, Price.ANY, null);
     }
 
     /** Just a category, everything else neutral (the pre-refinement browse call). */
     public static MarketplaceQueryFilter ofCategory(String categorySlug) {
-        return new MarketplaceQueryFilter(categorySlug, null, null, null, null, null);
+        return new MarketplaceQueryFilter(categorySlug, null, null, null, null, null, null);
     }
 
-    /** Build from raw request params; every unparseable value falls back to its default. */
+    /**
+     * Build from raw request params; every unparseable value falls back to its default.
+     *
+     * <p>There is deliberately NO shorter overload that omits {@code studio}. One existed, and all
+     * three of its production callers were the same bug: the CE proxy and the cloud search silently
+     * dropped the studio axis and answered with the whole marketplace, HTTP 200, heading unchanged.
+     * A defaulted parameter is invisible at the call site, so nothing pointed at them. Every caller
+     * passing the axis explicitly - {@code null} when there is genuinely none - is what makes the
+     * omission a compile error instead of a wrong page.
+     */
     public static MarketplaceQueryFilter fromRequest(
-            String category, String displayMode, String sort, String rating, Integer days, String price) {
+            String category, String displayMode, String sort, String rating, Integer days, String price,
+            Boolean studio) {
         return new MarketplaceQueryFilter(
-                category, displayMode, Sort.parse(sort), Rating.parse(rating), days, Price.parse(price));
+                category, displayMode, Sort.parse(sort), Rating.parse(rating), days, Price.parse(price),
+                studio);
     }
 
     /** True when nothing but the default ordering is asked for. */
@@ -151,7 +169,10 @@ public record MarketplaceQueryFilter(
                 && displayMode == null
                 && rating == Rating.ANY
                 && windowDays == null
-                && price == Price.ANY;
+                && price == Price.ANY
+                // A studio constraint is a refinement like any other. Leaving it out here would let
+                // the caller take the unfiltered fast path and answer the whole catalogue.
+                && studio == null;
     }
 
     /**
@@ -177,6 +198,9 @@ public record MarketplaceQueryFilter(
         if (rating != Rating.ANY) params.put("rating", rating.name());
         if (windowDays != null) params.put("days", String.valueOf(windowDays));
         if (price != Price.ANY) params.put("price", price.name());
+        // Forwarded like any other refinement. Left out, a cloud-linked self-hosted install asks
+        // the cloud for the whole catalogue and renders it under the Studio heading.
+        if (studio != null) params.put("studio", String.valueOf(studio));
         return params;
     }
 

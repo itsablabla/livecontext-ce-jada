@@ -63,6 +63,19 @@ class OrgScopePredicateInvariantTest {
      * just to silence the rule re-introduces the bug shape.
      */
     private static final List<String> RULE_1_ALLOWLIST = List.of(
+            // Execution-log retention sweep (2026-09-02, retention keyed by workspace):
+            // sweep() and sweepScope() read the (organization_id, tenant_id) PAIR of
+            // each candidate scope only to ROUTE two different lookups: the retention
+            // window is asked of auth-service by organization id (the workspace
+            // owner's plan), and the payload purge is issued by tenant id (whose
+            // storage quota the payloads were booked to). There is no owner-vs-org
+            // comparison and no branch on either value: both are arguments. The rows
+            // themselves are selected by the repository's own scope predicate
+            // (organization_id = :organizationId AND tenant_id = :tenantId), and the
+            // job deletes journal, it never grants access. Same category as the
+            // "stamping / routing" entries above.
+            "ExecutionLogRetentionSweeper#sweep",
+            "ExecutionLogRetentionSweeper#sweepScope",
             // Multi-purpose: strict-scope / strict-tenant ownership FIRST, then orgId read for OrgAccessGuard arg.
             "WorkflowManagementService#deleteWorkflow",
             "WorkflowManagementService#saveWorkflow",
@@ -72,6 +85,15 @@ class OrgScopePredicateInvariantTest {
             "RunCloneService#cloneStorageEntries",
             "WorkflowRunPersistenceService#buildRunEntity",
             "ScheduleSyncService#syncSingleSchedule",
+            // Scheduled agent fire: reads the schedule's tenant + org only to PASS them
+            // to conversation-service, so the conversation it finds or creates and the
+            // credits it consumes land in the schedule's workspace instead of the
+            // owner's personal one (the reason the org was threaded here in the first
+            // place, audit 2026-05-17 round-5). There is no predicate at all in this
+            // method, no owner-vs-org comparison and no branch on either value: both are
+            // arguments. Surfaced by bcb970694 extracting this block into its own method,
+            // which is the granularity Rule 1 keys on, not by any change to the scoping.
+            "ScheduleExecutorService#runAgentAfterAdvance",
             "SignalResumeService#onSignalResolved",
             "SignalResumeService#persistSignalResolutionOutput",
             "WorkflowRunStatusService#persistSnapshot",

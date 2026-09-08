@@ -5,6 +5,7 @@ import com.apimarketplace.auth.client.access.OrgAccessGuard;
 import com.apimarketplace.auth.client.access.OrgAccessGuardImpl;
 import com.apimarketplace.auth.client.entitlement.EntitlementGuard;
 import com.apimarketplace.auth.client.entitlement.LimitExceededExceptionHandler;
+import com.apimarketplace.auth.client.entitlement.PlanFeatureGate;
 import com.apimarketplace.common.event.EventBus;
 import com.apimarketplace.common.web.AppEditionProvider;
 import org.springframework.beans.factory.ObjectProvider;
@@ -41,6 +42,21 @@ public class AuthClientConfig {
                 authClient,
                 editionProvider.hasCeFreeUnlimitedLocalResources(),
                 editionProvider.isSelfHostedEnterprise());
+    }
+
+    /**
+     * Per-plan availability of workflow nodes and catalog integrations.
+     *
+     * <p>Enabled on CLOUD only. A self-hosted install has no plans to upgrade
+     * between, so gating there would be a dead end rather than an upsell - the
+     * bean is still created (so nothing has to null-check it) but answers
+     * "allowed" to everything.
+     */
+    @Bean
+    public PlanFeatureGate planFeatureGate(
+            AuthClient authClient,
+            AppEditionProvider editionProvider) {
+        return new PlanFeatureGate(authClient, editionProvider.isCloud());
     }
 
     /**

@@ -72,9 +72,9 @@ public class SwitchNode extends BaseNode {
 
         // Build resolved_params snapshot for inspector visibility (resolved values)
         Map<String, Object> resolvedParams = new LinkedHashMap<>();
-        resolvedParams.put("expression", resolveTemplateString(switchExpression, context));
+        resolvedParams.put("switchExpression", resolveTemplateString(switchExpression, context));
         resolvedParams.put("resolved_value", switchValue);
-        resolvedParams.put("cases", cases.size());
+        resolvedParams.put("switchCases", cases.size());
 
         // Build output with evaluation details
         Map<String, Object> output = new HashMap<>();

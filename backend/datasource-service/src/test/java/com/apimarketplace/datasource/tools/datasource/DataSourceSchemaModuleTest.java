@@ -613,6 +613,6 @@ class DataSourceSchemaModuleTest {
     private static com.apimarketplace.datasource.services.VectorFeatureGate ceVectorGate() {
         org.springframework.mock.env.MockEnvironment env = new org.springframework.mock.env.MockEnvironment();
         env.setProperty("app.edition", "ce");
-        return new com.apimarketplace.datasource.services.VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env));
+        return new com.apimarketplace.datasource.services.VectorFeatureGate(new com.apimarketplace.common.web.AppEditionProvider(env), null);
     }
 }

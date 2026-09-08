@@ -4,11 +4,14 @@ import { Moon, Sun } from 'lucide-react';
 import { useLandingTheme } from '@/components/landing/LandingThemeProvider';
 
 /**
- * Light/dark toggle for the docs only. It drives the docs' OWN theme provider
- * (storageKey 'docs-theme', set in the docs layout), so flipping it never changes
- * the landing/marketing pages, which stay dark. Rendered in the shared header via
- * `LandingShell`'s `headerExtra` slot - which sits inside the docs theme provider,
- * so `useLandingTheme()` resolves to the docs instance here.
+ * Header light/dark toggle for the BLOG surfaces (`/blog`, `/blog/[slug]`, and
+ * their localized twins). It drives whichever `LandingThemeProvider` wraps it -
+ * each of those pages sets its own storageKey - so flipping it never changes the
+ * landing/marketing pages. Rendered through `LandingShell`'s `headerExtra` slot,
+ * which sits inside that provider, so `useLandingTheme()` resolves to it here.
+ *
+ * The docs deliberately do NOT mount this: their header carries no theme control,
+ * the footer toggle every public page already has switches the docs theme.
  */
 export function DocsThemeToggle() {
   const { theme, toggle } = useLandingTheme();

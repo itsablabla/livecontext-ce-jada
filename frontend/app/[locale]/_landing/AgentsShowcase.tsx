@@ -19,25 +19,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  AppWindow,
-  BarChart3,
-  Bot,
-  CalendarClock,
-  Columns3,
-  Folder,
-  Globe,
-  Lock,
-  Monitor,
-  Network,
-  Star,
-  Store,
-  Table,
-  User,
-  Webhook,
-  Workflow,
-  Zap,
-} from 'lucide-react';
+import { BarChart3, Bot, CalendarClock, Globe, Lock, Network, Star, Webhook, Zap } from 'lucide-react';
 import {
   parsePresetValue,
   getAvatarGradient,
@@ -47,7 +29,7 @@ import {
 import { getAvatarTool } from '@/components/agents/avatarTools';
 import { AVATAR_PRESETS } from '@/components/agents/AvatarPicker';
 import { favoritesFirst } from '@/lib/utils/listSort';
-import LogoAnimate from '@/components/LogoAnimate';
+import LandingSidebarRail from './LandingSidebarRail';
 
 // ---------------------------------------------------------------------------
 // Demo team: same value format as real agents (preset:<name>?c1=..&tool=..),
@@ -262,68 +244,9 @@ function LandingAgentAvatar({ avatarUrl, name }: { avatarUrl: string; name: stri
 }
 
 // ---------------------------------------------------------------------------
-// App chrome: the hero-showcase icon rail (logo on top, account at the bottom,
-// Agents active) and the real /app/agent tab bar.
+// App chrome: the shared icon rail (LandingSidebarRail, Agents active) and the
+// real /app/agent tab bar.
 // ---------------------------------------------------------------------------
-
-// Mirrors the real AppSidebar's chatNavItems (same entries, same order, same
-// lucide icons) so the rail matches what a signed-in user actually sees.
-const RAIL_ITEMS = [
-  { key: 'marketplace', label: 'Marketplace', Icon: Store },
-  { key: 'board', label: 'Board', Icon: Columns3 },
-  { key: 'agents', label: 'Agents', Icon: Bot, active: true },
-  { key: 'applications', label: 'Applications', Icon: AppWindow },
-  { key: 'workflows', label: 'Workflows', Icon: Workflow },
-  { key: 'interfaces', label: 'Interfaces', Icon: Monitor },
-  { key: 'tables', label: 'Tables', Icon: Table },
-  { key: 'files', label: 'Files', Icon: Folder },
-] as const;
-
-function SidebarRail() {
-  return (
-    // Purely decorative navigation replica: hidden from assistive tech as a
-    // whole (title tooltips stay for sighted visitors).
-    <div
-      aria-hidden="true"
-      // No border-r: the rail's own surface already separates it from the card
-      // grid, and the divider read as a hard seam inside the window. The frame
-      // border around the whole window (.browser-frame) stays.
-      className="flex w-[54px] flex-shrink-0 flex-col items-center gap-1 py-2.5"
-      style={{ background: 'var(--bg-secondary)' }}
-    >
-      <div className="mb-1.5 flex h-8 w-8 items-center justify-center">
-        <LogoAnimate size="sm" />
-      </div>
-      {RAIL_ITEMS.map(({ key, label, Icon, ...rest }) => (
-        <div
-          key={key}
-          title={label}
-          data-active={'active' in rest && rest.active ? 'true' : undefined}
-          className="flex h-[34px] w-[34px] items-center justify-center rounded-[10px]"
-          style={
-            'active' in rest && rest.active
-              ? { background: 'var(--bg-hover)', color: 'var(--text-primary)' }
-              : { color: 'var(--text-muted)' }
-          }
-        >
-          <Icon className="h-[17px] w-[17px]" strokeWidth={1.8} />
-        </div>
-      ))}
-      <div className="flex-1" />
-      <div
-        title="Account"
-        className="flex h-[30px] w-[30px] items-center justify-center rounded-full border"
-        style={{
-          borderColor: 'var(--border-color)',
-          background: 'linear-gradient(135deg, var(--bg-tertiary), var(--bg-hover))',
-          color: 'var(--text-secondary)',
-        }}
-      >
-        <User className="h-4 w-4" strokeWidth={1.8} />
-      </div>
-    </div>
-  );
-}
 
 const APP_TABS = [
   { key: 'agents', label: 'Agents', Icon: Bot },
@@ -399,7 +322,7 @@ function AgentsAppWindow() {
     // just enough depth; the 1px frame border does the delimiting.
     <figure className="browser-frame" style={{ boxShadow: '0 2px 12px rgba(28, 26, 23, 0.06)' }}>
       <div className="browser-body flex">
-        <SidebarRail />
+        <LandingSidebarRail activeView="agent" />
 
         <div className="min-w-0 flex-1">
           {/* Tab bar, same geometry as AgentPageTabBar */}

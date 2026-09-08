@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useWorkflowMode } from '@/contexts/WorkflowModeContext';
-import { useTheme } from '@/components/ThemeProvider';
+import { useThemeSafely } from '@/hooks/useThemeSafely';
 import { AvatarDisplay } from '@/components/agents';
 import { useAuthedObjectUrl } from '@/hooks/useAuthedObjectUrl';
 
@@ -386,7 +386,12 @@ export function NodeIcon({
   alt = '',
   className,
 }: NodeIconProps) {
-  const { theme } = useTheme();
+  // Safe accessor, not `useTheme`: this icon also renders on the PUBLIC
+  // marketplace pages, which sit outside the app's provider tree (they run the
+  // decoupled landing theme instead). `useTheme` THROWS there, taking the whole
+  // page down; the safe reader falls back to light, which is the public site's
+  // own default. Same call the fleet canvas already makes.
+  const { theme } = useThemeSafely();
   const isDark = theme === 'dark';
   // Dynamic node icon (custom-API icon stored in object storage) - fetched with a
   // Bearer header and rendered from an in-memory blob: URL (no token in the URL).
@@ -720,7 +725,15 @@ export function NodeActionButtons({
 }
 
 interface NodeHeaderProps {
-  visuals: NodeVisuals;
+  /**
+   * Optional because the component does not read it: the icon is resolved
+   * from `nodeId`/`nodeKind`/`nodeFamily` through the registry, not from
+   * these precomputed visuals. Kept in the shape for the builder callers
+   * that already pass it, but not required, so a surface holding only a
+   * node type and a label (the public marketplace diagram) can render the
+   * SAME header instead of forking a lookalike.
+   */
+  visuals?: NodeVisuals;
   label: string;
   iconSlug?: string;
   iconUrl?: string; // Dynamic icon URL (S3 proxy) for custom API icons

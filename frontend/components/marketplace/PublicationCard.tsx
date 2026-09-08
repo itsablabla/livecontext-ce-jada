@@ -306,6 +306,19 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
     <Link
       href={previewHref}
       className="group block cursor-pointer"
+      onClick={() => {
+        // Ids and enums only: never the title. The link navigates as usual.
+        track('publication_card_clicked', {
+          publication_id: publication.id,
+          publication_type: publication.publicationType ?? null,
+          display_mode: displayMode,
+          category_slug: publication.category?.slug ?? null,
+          credits_per_use: publication.creditsPerUse,
+          is_free: isFree,
+          is_acquired: !!isAcquired,
+          is_own: isOwn,
+        });
+      }}
     >
       {/* Thumbnail - fixed 16:10 aspect, framed card */}
       <div
@@ -460,7 +473,7 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
                 });
                 router.push(openHref!);
               }}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--accent-foreground)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0"
             >
               <ArrowUpRight className="h-3 w-3" />
               {t('open')}
@@ -480,7 +493,7 @@ export const PublicationCard = memo(function PublicationCard({ publication, curr
                 if (installBlocked) return;
                 onAcquire!(publication);
               }}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:active:scale-100"
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-lg text-[11px] font-medium bg-[var(--accent-primary)] text-[var(--accent-foreground)] hover:brightness-110 active:scale-95 transition-[filter,transform] shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:active:scale-100"
             >
               <Download className="h-3 w-3" />
               {t('acquire')}

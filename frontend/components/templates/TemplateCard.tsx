@@ -3,6 +3,7 @@
 import { Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
+import { Button } from '@/components/ui/button';
 import { AvatarDisplay } from '@/components/agents';
 import { DataSourceColumnIcons, normalizeColumnType } from '@/components/DataSourceColumnIcons';
 import { WorkflowNodeIcons } from '@/components/WorkflowNodeIcons';
@@ -133,17 +134,18 @@ export function TemplateCard({ meta, busy, disabled, onSelect }: TemplateCardPro
           </div>
         )}
 
-        {/* Solid and theme-inverting: black on light, white on dark. */}
-        <button
+        {/* The app's solid button. It used to hand-write the same fill in slate,
+            which is the spelling no edit to the variant table ever reaches. */}
+        <Button
           type="button"
           disabled={inert}
           aria-busy={busy}
           onClick={() => onSelect(meta)}
-          className="mt-auto inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+          className="mt-auto w-full disabled:opacity-100"
         >
           {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
           {busy ? t('templates.gallery.creating') : t('templates.gallery.use', { name: copy.title })}
-        </button>
+        </Button>
       </div>
     </article>
   );

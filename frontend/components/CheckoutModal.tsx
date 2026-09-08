@@ -132,7 +132,7 @@ export default function CheckoutModal({
               <>
                 <Button
                   onClick={() => window.location.href = '/app/chat'}
-                  variant="contrast"
+                  variant="default"
                   className="flex-1"
                 >
                   <MessageSquare className="w-4 h-4" />
@@ -159,7 +159,7 @@ export default function CheckoutModal({
                   {t('close')}
                 </Button>
                 {showRetryButton && onRetry && (
-                  <Button onClick={onRetry} variant="contrast" className="flex-1">
+                  <Button onClick={onRetry} variant="default" className="flex-1">
                     <RefreshCw className="w-4 h-4" />
                     {t('retry')}
                   </Button>
@@ -168,7 +168,7 @@ export default function CheckoutModal({
             )}
 
             {showDashboardButton && onDashboard && (
-              <Button onClick={onDashboard} variant="contrast" className="flex-1">
+              <Button onClick={onDashboard} variant="default" className="flex-1">
                 {t('dashboard')}
               </Button>
             )}

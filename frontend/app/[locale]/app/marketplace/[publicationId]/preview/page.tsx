@@ -1,8 +1,9 @@
 'use client';
 
-import { use, useMemo, useState, useEffect, useCallback } from 'react';
+import { use, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { Zap } from 'lucide-react';
+import { track } from '@/lib/analytics/analytics';
 import { ApplicationDetailView } from '@/components/views/application/ApplicationDetailView';
 import { PublicationPreviewShell } from '@/components/marketplace/PublicationPreviewShell';
 import { publicationService } from '@/lib/api/orchestrator/publication.service';
@@ -55,6 +56,9 @@ export function MarketplacePreviewInner({ publicationId }: { publicationId: stri
   // (acquirer/owner of a non-public pub). Threaded to the shell so the gated
   // showcase render uses the receipt-gated twin instead of the anonymous one.
   const [authenticatedPreview, setAuthenticatedPreview] = useState(false);
+  // Publication id already reported as viewed: one event per id, even if the
+  // load re-runs (cloud-link status settling, StrictMode double effects).
+  const viewedIdRef = useRef<string | null>(null);
 
   const loadPublication = useCallback(async () => {
     // 1. Anonymous public read - owners see the same sanitized preview as visitors.
@@ -92,6 +96,17 @@ export function MarketplacePreviewInner({ publicationId }: { publicationId: stri
     setAgentSnapshot(nextAgentSnapshot);
     setPublication(pub);
     setAuthenticatedPreview(authed);
+    if (viewedIdRef.current !== pub.id) {
+      viewedIdRef.current = pub.id;
+      track('publication_detail_viewed', {
+        publication_id: pub.id,
+        publication_type: pub.publicationType ?? null,
+        display_mode: pub.displayMode ?? null,
+        category_slug: pub.category?.slug ?? null,
+        credits_per_use: pub.creditsPerUse,
+        is_free: !pub.creditsPerUse,
+      });
+    }
   }, [publicationId, remote, t]);
 
   useEffect(() => {

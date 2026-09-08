@@ -66,7 +66,7 @@ public class ApiToolEntity {
     /**
      * Declarative generation descriptor (JSONB). NULL for an ordinary endpoint.
      * Non-null means this endpoint backs one or more generation models reachable
-     * through the unified {@code generation} tool and the {@code core:generate}
+     * through the unified {@code generation} tool and the {@code agent:generate}
      * node. See V428 and scripts/api-migrations/SCHEMA.md.
      */
     @Column("generation_spec")
