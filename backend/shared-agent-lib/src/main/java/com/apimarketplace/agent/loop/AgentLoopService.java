@@ -491,7 +491,8 @@ public class AgentLoopService {
         agentLogger.logExecutionEnd(runId, isSuccess,
             state.getIterations(), state.getAllToolResults().size(), state.getDuration(), state.getStopReason().name());
 
-        String finalContent = state.getLastResponse() != null ? state.getLastResponse().content() : "";
+        String finalContent = ensureIterationLimitNotice(state,
+            state.getLastResponse() != null ? state.getLastResponse().content() : "", callback);
         return AgentLoopResult.builder()
             .success(isSuccess)
             .response(state.getLastResponse())
@@ -532,6 +533,36 @@ public class AgentLoopService {
             return history != null ? history : Collections.emptyList();
         }
         return List.of(new Message(Message.Role.ASSISTANT, content, null, null, null, null));
+    }
+
+    /**
+     * A tool-only last iteration can leave no human-readable response. Report the
+     * actual limit deterministically, without another model call or pretending
+     * the requested work completed. Keep transport and persisted history aligned.
+     */
+    private static String ensureIterationLimitNotice(
+            LoopExecutionState state, String content, StreamingCallback callback) {
+        if (state.getStopReason() != AgentStopReason.MAX_ITERATIONS
+                || (content != null && !content.isBlank())) {
+            return content;
+        }
+        String notice = "This turn stopped at its limit of " + state.getMaxIterations()
+            + " iterations before producing a final summary. The requested work may be incomplete. "
+            + "Review the tool results, then send a new message to continue.";
+        state.getFullContent().setLength(0);
+        state.getFullContent().append(notice);
+        CompletionResponse previous = state.getLastResponse();
+        state.setLastResponse(CompletionResponse.builder()
+            .content(notice)
+            .finishReason("max_iterations")
+            .model(previous != null ? previous.model() : null)
+            .usage(previous != null ? previous.usage() : null)
+            .build());
+        state.getMessages().add(new Message(Message.Role.ASSISTANT, notice, null, null, null, null));
+        if (callback != null) {
+            callback.onChunk(notice);
+        }
+        return notice;
     }
 
     private AgentLoopResult executeStreamingLoop(LLMProvider provider, String model,
@@ -679,6 +710,7 @@ public class AgentLoopService {
         }
         agentLogger.logExecutionEnd(runId, false, state.getIterations(),
             state.getAllToolResults().size(), state.getDuration(), finishReason.toUpperCase());
+        ensureIterationLimitNotice(state, state.getFullContent().toString(), callback);
         callback.onComplete(CompletionResponse.builder()
             .content(state.getFullContent().toString())
             .finishReason(finishReason)
