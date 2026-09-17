@@ -24,7 +24,7 @@ class ComposeContract(unittest.TestCase):
 
     def test_coolify_has_no_host_ports_or_global_names(self):
         self.assertNotIn("name", self.cloud)
-        self.assertEqual(len(self.cloud["services"]), 10)
+        self.assertEqual(len(self.cloud["services"]), 11)
         for service in self.cloud["services"].values():
             self.assertNotIn("ports", service)
             self.assertNotIn("container_name", service)

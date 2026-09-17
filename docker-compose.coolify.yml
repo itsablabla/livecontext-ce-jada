@@ -1,8 +1,28 @@
 # Git-based Coolify Application. Base directory: /.
 # All paths are relative to this repository root. No host ports are published.
-# Configure frontend :3000 and livecontext :8080 domains in Coolify.
+# Configure only gateway :80 with a public domain in Coolify.
 # See docker/COOLIFY.md before deployment.
 services:
+  gateway:
+    build:
+      context: ./docker/gateway
+    restart: unless-stopped
+    depends_on:
+      frontend:
+        condition: service_healthy
+      livecontext:
+        condition: service_healthy
+    expose: ["80"]
+    environment:
+      BOOTSTRAP_AUTH_REALM: ${BOOTSTRAP_AUTH_REALM:-Setup}
+      BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:?Set BOOTSTRAP_PASSWORD}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    mem_limit: 128m
+
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped

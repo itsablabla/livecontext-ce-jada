@@ -1,0 +1,40 @@
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 80;
+    server_name _;
+    client_max_body_size 100m;
+    auth_basic ${BOOTSTRAP_AUTH_REALM};
+    auth_basic_user_file /etc/nginx/bootstrap.htpasswd;
+
+    location = /healthz {
+        auth_basic off;
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    # Next.js owns the credential-aware proxy and runtime deployment config.
+    location ^~ /api/proxy/ {
+        proxy_pass http://frontend:3000;
+        include /etc/nginx/proxy_params_livecontext;
+    }
+    location = /api/runtime-config {
+        proxy_pass http://frontend:3000;
+        include /etc/nginx/proxy_params_livecontext;
+    }
+    location /api/ {
+        proxy_pass http://livecontext:8080;
+        include /etc/nginx/proxy_params_livecontext;
+    }
+    location /ws {
+        proxy_pass http://livecontext:8080;
+        include /etc/nginx/proxy_params_livecontext;
+    }
+    location / {
+        proxy_pass http://frontend:3000;
+        include /etc/nginx/proxy_params_livecontext;
+    }
+}
