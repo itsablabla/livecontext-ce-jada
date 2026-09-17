@@ -67,10 +67,11 @@ import java.util.Set;
         // Redis-backed adapters it needs explicitly in MonolithAdapterConfig.
         @ComponentScan.Filter(type = FilterType.REGEX,
             pattern = "com\\.apimarketplace\\.conversation\\.streaming\\..*"),
-        // Exclude only conversation controllers that depend on reactive stream state.
-        // AttachmentController stays mounted in CE because it uses the regular storage service.
+        // ChatControllerV3 still needs the cloud streaming orchestration.
+        // StreamControllerV3 must stay mounted: MVC supports its Mono responses,
+        // and MonolithAdapterConfig supplies the real Redis stream state.
         @ComponentScan.Filter(type = FilterType.REGEX,
-            pattern = "com\\.apimarketplace\\.conversation\\.controller\\.v3\\.(ChatControllerV3|StreamControllerV3)"),
+            pattern = "com\\.apimarketplace\\.conversation\\.controller\\.v3\\.ChatControllerV3"),
         @ComponentScan.Filter(type = FilterType.REGEX,
             pattern = "com\\.apimarketplace\\.conversation\\.controller\\.internal\\..*"),
         // Exclude conversation Redis config. CE defines servlet-safe Redis adapters explicitly.

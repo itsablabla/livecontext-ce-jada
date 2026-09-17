@@ -24,11 +24,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Stub controller for conversation-service v3 endpoints in CE monolith mode.
+ * CE model discovery, internal stream lifecycle and conversation tool adapters.
  *
- * ChatControllerV3 and StreamControllerV3 are excluded from the monolith component scan because
- * they are cloud/WebFlux streaming controllers. CE wires the shared Redis stream state adapter
- * explicitly and keeps these servlet endpoints small.
+ * ChatControllerV3 is replaced by MonolithChatController. Stream REST reads and
+ * cancellation use the shared StreamControllerV3, including its workspace checks.
  */
 @Slf4j
 @RestController
@@ -102,32 +101,6 @@ public class CeConversationStubController {
         }
     }
 
-    /**
-     * Active streams for the caller - CE serves this from the same
-     * RedisStreamStateService user index the cloud path reads. Externally-driven
-     * runs (workflow agent nodes, task assignees) are attributed to the
-     * conversation owner at registration, so the main chat page's reconnect
-     * probe can auto-attach mid-flight. Used to always return [] ("no reactive
-     * streaming infrastructure"), which left CE's main chat blind to in-flight
-     * external streams.
-     */
-    @GetMapping("/api/v3/streams/active")
-    public ResponseEntity<List<String>> getActiveStreams(
-            @RequestHeader(value = "X-User-ID", required = false) String authenticatedUserId) {
-        if (authenticatedUserId == null || authenticatedUserId.isBlank()) {
-            return ResponseEntity.ok(List.of());
-        }
-        try {
-            List<String> ids = streamStateService.getStreamingConversationIds(authenticatedUserId)
-                    .collectList()
-                    .block(java.time.Duration.ofSeconds(3));
-            return ResponseEntity.ok(ids == null ? List.of() : ids);
-        } catch (Exception e) {
-            log.warn("[CE] Active-streams lookup failed (best-effort, returning empty): {}", e.getMessage());
-            return ResponseEntity.ok(List.of());
-        }
-    }
-
     @PostMapping("/api/internal/streams/register")
     public ResponseEntity<Void> registerInternalStream(@RequestBody(required = false) Map<String, String> body) {
         String streamId = body == null ? null : body.get("streamId");
@@ -178,81 +151,6 @@ public class CeConversationStubController {
         }
         log.debug("[CE] Stream finalized: streamId={}, state={}", streamId, state);
         return ResponseEntity.ok().build();
-    }
-
-    @GetMapping("/api/v3/streams/by-conversation/{conversationId}/state")
-    public ResponseEntity<Map<String, Object>> getStreamState(@PathVariable String conversationId) {
-        Map<String, Object> response = new java.util.LinkedHashMap<>();
-        response.put("conversationId", conversationId);
-        response.put("content", "");
-        response.put("toolEvents", List.of());
-        response.put("hasActiveStream", false);
-        return ResponseEntity.ok(response);
-    }
-
-    @GetMapping("/api/v3/streams/by-conversation/{conversationId}/status")
-    public ResponseEntity<Map<String, Object>> getStreamStatusByConversation(@PathVariable String conversationId) {
-        Map<String, Object> response = new java.util.LinkedHashMap<>();
-        response.put("streamId", null);
-        response.put("conversationId", conversationId);
-        response.put("model", null);
-        response.put("provider", null);
-        response.put("state", null);
-        response.put("createdAt", null);
-        response.put("lastActivity", null);
-        response.put("contentLength", 0);
-        response.put("hasActiveStream", false);
-        response.put("timestamp", java.time.Instant.now().toString());
-        return ResponseEntity.ok(response);
-    }
-
-    @PostMapping("/api/v3/streams/{streamId}/stop")
-    public ResponseEntity<Void> stopStream(@PathVariable String streamId) {
-        // Actually cancel the run, don't just ack: setCancelKey writes agent:cancel:{streamId}
-        // which the agent loop polls to halt (ConversationRedisStreamingCallback.shouldStop).
-        // Previously this only logged, so pressing Stop in CE never stopped the agent.
-        try {
-            streamStateService.stop(streamId).block();
-            streamStateService.setCancelKey(streamId).block();
-            log.info("[CE] Stream stop applied for stream: {}", streamId);
-        } catch (Exception e) {
-            log.warn("[CE] Stream stop failed for stream {}: {}", streamId, e.getMessage());
-        }
-        return ResponseEntity.ok().build();
-    }
-
-    @PostMapping("/api/v3/streams/by-conversation/{conversationId}/stop")
-    public ResponseEntity<Void> stopStreamByConversation(@PathVariable String conversationId) {
-        try {
-            var metadata = streamStateService.getByConversationId(conversationId).block();
-            if (metadata != null && metadata.state().isActive()) {
-                String streamId = metadata.streamId();
-                streamStateService.stop(streamId).block();
-                streamStateService.setCancelKey(streamId).block();
-                log.info("[CE] Stream stop applied for conversation {} (stream {})", conversationId, streamId);
-            } else {
-                log.info("[CE] No active stream to stop for conversation: {}", conversationId);
-            }
-        } catch (Exception e) {
-            log.warn("[CE] Stream stop failed for conversation {}: {}", conversationId, e.getMessage());
-        }
-        return ResponseEntity.ok().build();
-    }
-
-    @GetMapping("/api/v3/streams/{streamId}/status")
-    public ResponseEntity<Map<String, Object>> getStreamStatus(@PathVariable String streamId) {
-        Map<String, Object> response = new java.util.LinkedHashMap<>();
-        response.put("streamId", streamId);
-        response.put("hasActiveStream", false);
-        return ResponseEntity.ok(response);
-    }
-
-    @GetMapping("/api/v3/streams/metrics")
-    public ResponseEntity<Map<String, Object>> getStreamMetrics() {
-        return ResponseEntity.ok(Map.of(
-            "localActiveStreams", 0,
-            "note", "CE monolith uses servlet WebSocket events without reactive stream state"
-        ));
     }
 
     /**

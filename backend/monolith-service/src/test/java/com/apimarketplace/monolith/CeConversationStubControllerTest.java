@@ -218,30 +218,6 @@ class CeConversationStubControllerTest {
     }
 
     @Test
-    @DisplayName("CE stream recovery endpoints return stable no-active-stream responses")
-    void ceStreamRecoveryEndpointsReturnStableNoActiveStreamResponses() {
-        Map<String, Object> state = controller.getStreamState("conv-1").getBody();
-        Map<String, Object> status = controller.getStreamStatusByConversation("conv-1").getBody();
-        Map<String, Object> streamStatus = controller.getStreamStatus("stream-1").getBody();
-
-        assertThat(controller.getActiveStreams(null).getBody()).isEmpty();
-        assertThat(state)
-            .containsEntry("conversationId", "conv-1")
-            .containsEntry("content", "")
-            .containsEntry("hasActiveStream", false);
-        assertThat(state.get("toolEvents")).isEqualTo(java.util.List.of());
-        assertThat(status)
-            .containsEntry("conversationId", "conv-1")
-            .containsEntry("contentLength", 0)
-            .containsEntry("hasActiveStream", false);
-        assertThat(streamStatus)
-            .containsEntry("streamId", "stream-1")
-            .containsEntry("hasActiveStream", false);
-        assertThat(controller.stopStream("stream-1").getStatusCode().is2xxSuccessful()).isTrue();
-        assertThat(controller.stopStreamByConversation("conv-1").getStatusCode().is2xxSuccessful()).isTrue();
-    }
-
-    @Test
     @DisplayName("CE stream lifecycle endpoints acknowledge ConversationClient internal callbacks")
     void ceStreamLifecycleEndpointsAcknowledgeConversationClientInternalCallbacks() {
         when(streamStateService.registerExternalStream(
@@ -282,24 +258,6 @@ class CeConversationStubControllerTest {
 
         verify(streamStateService).registerExternalStream(
             eq("stream-1"), eq("conv-1"), org.mockito.Mockito.isNull(), org.mockito.Mockito.isNull(), eq("42"));
-    }
-
-    @Test
-    @DisplayName("CE /streams/active returns the caller's active streaming conversations (was hardcoded empty)")
-    void ceActiveStreamsServedFromUserIndex() {
-        when(streamStateService.getStreamingConversationIds("42"))
-            .thenReturn(reactor.core.publisher.Flux.just("conv-1", "conv-2"));
-
-        assertThat(controller.getActiveStreams("42").getBody()).containsExactly("conv-1", "conv-2");
-    }
-
-    @Test
-    @DisplayName("CE /streams/active fails soft to empty when the lookup errors")
-    void ceActiveStreamsFailsSoftToEmpty() {
-        when(streamStateService.getStreamingConversationIds("42"))
-            .thenReturn(reactor.core.publisher.Flux.error(new IllegalStateException("redis down")));
-
-        assertThat(controller.getActiveStreams("42").getBody()).isEmpty();
     }
 
     @Test
