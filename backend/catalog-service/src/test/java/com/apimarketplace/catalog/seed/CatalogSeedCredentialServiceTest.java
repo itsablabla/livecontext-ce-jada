@@ -14,9 +14,17 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.util.List;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("CatalogSeedCredentialService")
@@ -76,27 +84,23 @@ class CatalogSeedCredentialServiceTest {
         ApiToolEntity tool = new ApiToolEntity();
         tool.setId(toolId);
         when(apiToolRepository.findByApiId(apiId)).thenReturn(List.of(tool));
-
-        // Mock the upsert credential returning a UUID
         when(jdbcTemplate.queryForObject(contains("INSERT INTO catalog.credentials"), eq(UUID.class),
                 any(), any(), any(), any(), any(), any()))
                 .thenReturn(credentialId);
 
         service.linkCredentials(apiId, spec);
 
-        // Verify credential upsert was called
         verify(jdbcTemplate).queryForObject(contains("INSERT INTO catalog.credentials"), eq(UUID.class),
                 eq("openweathermap"), eq("openweathermap"), eq("apiKey"), any(String.class), eq("icon"), any());
 
-        // Verify tool_credentials link was created with correct injection metadata for apiKey
         ArgumentCaptor<String> metadataCaptor = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(contains("INSERT INTO catalog.tool_credentials"),
                 eq(toolId), eq(credentialId), eq("openweathermap"), eq("primary"), metadataCaptor.capture());
         String metadata = metadataCaptor.getValue();
-        assertTrue(metadata.contains("\"field\": \"api_key\""), "apiKey must use field=api_key");
-        assertTrue(metadata.contains("\"injection\""), "metadata must contain 'injection' sub-object");
-        assertTrue(metadata.contains("\"type\": \"header\""), "apiKey must inject as header");
-        assertTrue(metadata.contains("\"key\": \"X-API-Key\""), "apiKey must use X-API-Key header");
+        assertTrue(metadata.contains("\"field\": \"api_key\""));
+        assertTrue(metadata.contains("\"injection\""));
+        assertTrue(metadata.contains("\"type\": \"header\""));
+        assertTrue(metadata.contains("\"key\": \"X-API-Key\""));
     }
 
     @Test
@@ -109,7 +113,6 @@ class CatalogSeedCredentialServiceTest {
         ApiToolEntity tool = new ApiToolEntity();
         tool.setId(toolId);
         when(apiToolRepository.findByApiId(apiId)).thenReturn(List.of(tool));
-
         when(jdbcTemplate.queryForObject(contains("INSERT INTO catalog.credentials"), eq(UUID.class),
                 any(), any(), any(), any(), any(), any()))
                 .thenReturn(credentialId);
@@ -119,14 +122,13 @@ class CatalogSeedCredentialServiceTest {
         verify(jdbcTemplate).queryForObject(contains("INSERT INTO catalog.credentials"), eq(UUID.class),
                 eq("myapi"), eq("myapi"), eq("bearer"), any(String.class), eq("myicon"), any());
 
-        // Verify bearer metadata: field=access_token, injection type=header, key=Authorization
         ArgumentCaptor<String> metadataCaptor = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(contains("INSERT INTO catalog.tool_credentials"),
                 eq(toolId), eq(credentialId), eq("myapi"), eq("primary"), metadataCaptor.capture());
         String metadata = metadataCaptor.getValue();
-        assertTrue(metadata.contains("\"field\": \"access_token\""), "bearer must use field=access_token");
-        assertTrue(metadata.contains("\"type\": \"header\""), "bearer must inject as header");
-        assertTrue(metadata.contains("\"key\": \"Authorization\""), "bearer must use Authorization header");
+        assertTrue(metadata.contains("\"field\": \"access_token\""));
+        assertTrue(metadata.contains("\"type\": \"header\""));
+        assertTrue(metadata.contains("\"key\": \"Authorization\""));
     }
 
     @Test
@@ -149,9 +151,9 @@ class CatalogSeedCredentialServiceTest {
         verify(jdbcTemplate).update(contains("INSERT INTO catalog.tool_credentials"),
                 any(UUID.class), any(UUID.class), anyString(), eq("primary"), metadataCaptor.capture());
         String metadata = metadataCaptor.getValue();
-        assertTrue(metadata.contains("\"field\": \"api_key\""), "apiKey must use field=api_key");
-        assertTrue(metadata.contains("\"type\": \"header\""), "apiKey must inject as header");
-        assertTrue(metadata.contains("\"key\": \"X-API-Key\""), "apiKey must use X-API-Key header");
+        assertTrue(metadata.contains("\"field\": \"api_key\""));
+        assertTrue(metadata.contains("\"type\": \"header\""));
+        assertTrue(metadata.contains("\"key\": \"X-API-Key\""));
     }
 
     @Test
@@ -174,14 +176,13 @@ class CatalogSeedCredentialServiceTest {
         verify(jdbcTemplate).update(contains("INSERT INTO catalog.tool_credentials"),
                 any(UUID.class), any(UUID.class), anyString(), eq("primary"), metadataCaptor.capture());
         String metadata = metadataCaptor.getValue();
-        // Default should NOT use Authorization (which triggers Bearer prefix)
-        assertTrue(metadata.contains("\"key\": \"X-API-Key\""), "default must use X-API-Key, not Authorization");
-        assertTrue(metadata.contains("\"field\": \"api_key\""), "default must use field=api_key");
+        assertTrue(metadata.contains("\"key\": \"X-API-Key\""));
+        assertTrue(metadata.contains("\"field\": \"api_key\""));
     }
 
     @Test
-    @DisplayName("should use X-API-Key for basic auth (no Basic prefix support in HttpExecutionService)")
-    void shouldUseApiKeyHeaderForBasicAuth() {
+    @DisplayName("should use basic_auth metadata and username/password fields for basic auth")
+    void shouldUseBasicAuthInjectionMetadata() {
         UUID apiId = UUID.randomUUID();
         UUID credentialId = UUID.randomUUID();
         UUID toolId = UUID.randomUUID();
@@ -193,15 +194,82 @@ class CatalogSeedCredentialServiceTest {
                 any(), any(), any(), any(), any(), any()))
                 .thenReturn(credentialId);
 
-        service.linkCredentials(apiId, "myapi", "basic", "icon");
+        service.linkCredentials(apiId, "myapi", "basic_auth", "icon");
+
+        ArgumentCaptor<String> propertiesCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForObject(contains("INSERT INTO catalog.credentials"), eq(UUID.class),
+                eq("myapi"), eq("myapi"), eq("basic_auth"), propertiesCaptor.capture(), eq("icon"), any());
+        ArgumentCaptor<String> metadataCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).update(contains("INSERT INTO catalog.tool_credentials"),
+                any(UUID.class), any(UUID.class), anyString(), eq("primary"), metadataCaptor.capture());
+        String metadata = metadataCaptor.getValue();
+        String properties = propertiesCaptor.getValue();
+        assertTrue(properties.contains("\"username\""));
+        assertTrue(properties.contains("\"password\""));
+        assertTrue(metadata.contains("\"type\": \"basic_auth\""));
+        assertTrue(metadata.contains("\"key\": \"Authorization\""));
+        assertTrue(metadata.contains("\"field\": \"username\""));
+    }
+
+    @Test
+    @DisplayName("should preserve explicit custom API header auth wiring")
+    void shouldPreserveExplicitHeaderAuthWiring() {
+        UUID apiId = UUID.randomUUID();
+        UUID credentialId = UUID.randomUUID();
+        UUID toolId = UUID.randomUUID();
+
+        ApiToolEntity tool = new ApiToolEntity();
+        tool.setId(toolId);
+        when(apiToolRepository.findByApiId(apiId)).thenReturn(List.of(tool));
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO catalog.credentials"), eq(UUID.class),
+                any(), any(), any(), any(), any(), any()))
+                .thenReturn(credentialId);
+
+        service.linkCredentials(
+                apiId,
+                "myapi",
+                "apikey",
+                "icon",
+                null,
+                new CatalogSeedCredentialService.CustomApiAuthConfig("apikey", "header", "Authorization", "Token "));
 
         ArgumentCaptor<String> metadataCaptor = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(contains("INSERT INTO catalog.tool_credentials"),
                 any(UUID.class), any(UUID.class), anyString(), eq("primary"), metadataCaptor.capture());
         String metadata = metadataCaptor.getValue();
-        // basic falls through to default - Authorization would trigger Bearer prefix
-        assertTrue(metadata.contains("\"key\": \"X-API-Key\""), "basic must use X-API-Key, not Authorization");
-        assertTrue(metadata.contains("\"field\": \"api_key\""), "basic must use field=api_key");
+        assertTrue(metadata.contains("\"type\": \"header\""));
+        assertTrue(metadata.contains("\"key\": \"Authorization\""));
+        assertTrue(metadata.contains("\"prefix\": \"Token \""));
+    }
+
+    @Test
+    @DisplayName("should preserve explicit custom API query auth wiring")
+    void shouldPreserveExplicitQueryAuthWiring() {
+        UUID apiId = UUID.randomUUID();
+        UUID credentialId = UUID.randomUUID();
+        UUID toolId = UUID.randomUUID();
+
+        ApiToolEntity tool = new ApiToolEntity();
+        tool.setId(toolId);
+        when(apiToolRepository.findByApiId(apiId)).thenReturn(List.of(tool));
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO catalog.credentials"), eq(UUID.class),
+                any(), any(), any(), any(), any(), any()))
+                .thenReturn(credentialId);
+
+        service.linkCredentials(
+                apiId,
+                "myapi",
+                "apikey",
+                "icon",
+                null,
+                new CatalogSeedCredentialService.CustomApiAuthConfig("apikey", "query", "api_key", null));
+
+        ArgumentCaptor<String> metadataCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).update(contains("INSERT INTO catalog.tool_credentials"),
+                any(UUID.class), any(UUID.class), anyString(), eq("primary"), metadataCaptor.capture());
+        String metadata = metadataCaptor.getValue();
+        assertTrue(metadata.contains("\"type\": \"query\""));
+        assertTrue(metadata.contains("\"key\": \"api_key\""));
     }
 
     @Test
@@ -224,7 +292,6 @@ class CatalogSeedCredentialServiceTest {
 
         service.deleteCredentialByName("myapi");
 
-        // Verify tool_credentials deleted first, then credentials template
         var inOrder = inOrder(jdbcTemplate);
         inOrder.verify(jdbcTemplate).update(contains("DELETE FROM catalog.tool_credentials"), eq("myapi"));
         inOrder.verify(jdbcTemplate).update(contains("DELETE FROM catalog.credentials"), eq("myapi"));
@@ -258,17 +325,11 @@ class CatalogSeedCredentialServiceTest {
                 any(), any(), any(), any(), any(), any());
         String sql = sqlCaptor.getValue();
 
-        assertTrue(sql.contains("INSERT INTO catalog.credentials"),
-                "SQL must insert into catalog.credentials");
-        assertTrue(sql.contains("variant"),
-                "SQL must include the variant column (post-V103 NOT NULL)");
-        assertTrue(sql.contains("'primary'"),
-                "Custom-API path is single-variant by design - must hard-code variant='primary'");
-        assertTrue(sql.contains("ON CONFLICT (credential_name, variant)"),
-                "ON CONFLICT must target (credential_name, variant) - post-V103 only this UNIQUE exists; "
-                        + "the legacy ON CONFLICT (credential_name) makes Postgres throw bad SQL grammar in prod");
-        assertFalse(sql.matches("(?s).*ON\\s+CONFLICT\\s*\\(\\s*credential_name\\s*\\).*"),
-                "Must NOT reference the legacy ON CONFLICT (credential_name) clause");
+        assertTrue(sql.contains("INSERT INTO catalog.credentials"));
+        assertTrue(sql.contains("variant"));
+        assertTrue(sql.contains("'primary'"));
+        assertTrue(sql.contains("ON CONFLICT (credential_name, variant)"));
+        assertFalse(sql.matches("(?s).*ON\\s+CONFLICT\\s*\\(\\s*credential_name\\s*\\).*"));
     }
 
     @Test
@@ -290,7 +351,6 @@ class CatalogSeedCredentialServiceTest {
 
         service.linkCredentials(apiId, spec);
 
-        // Should link both tools
         verify(jdbcTemplate, times(2)).update(contains("INSERT INTO catalog.tool_credentials"),
                 any(UUID.class), eq(credentialId), eq("myApi"), eq("primary"), any(String.class));
     }

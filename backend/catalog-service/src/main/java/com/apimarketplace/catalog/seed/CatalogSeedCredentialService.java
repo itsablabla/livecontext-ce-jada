@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -18,6 +19,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class CatalogSeedCredentialService {
+
+    public record CustomApiAuthConfig(String authType, String injectionType, String key, String prefix) {
+    }
 
     private final JdbcTemplate jdbcTemplate;
     private final ApiToolRepository apiToolRepository;
@@ -61,6 +65,16 @@ public class CatalogSeedCredentialService {
      * @param iconUrl        dynamic icon URL (S3 proxy) for custom API icons (nullable)
      */
     public void linkCredentials(UUID apiId, String credentialName, String authType, String iconSlug, String iconUrl) {
+        linkCredentials(apiId, credentialName, authType, iconSlug, iconUrl, defaultCustomApiAuthConfig(authType));
+    }
+
+    public void linkCredentials(
+            UUID apiId,
+            String credentialName,
+            String authType,
+            String iconSlug,
+            String iconUrl,
+            CustomApiAuthConfig authConfig) {
         if (credentialName == null || credentialName.isBlank()) {
             log.debug("No credential name for API {}, skipping credential linking", apiId);
             return;
@@ -70,25 +84,23 @@ public class CatalogSeedCredentialService {
             return;
         }
 
+        CustomApiAuthConfig effectiveAuthConfig = authConfig != null
+                ? authConfig
+                : defaultCustomApiAuthConfig(authType);
         String properties = buildPropertiesJson(authType);
         String displayName = buildDisplayName(credentialName);
 
-        // Upsert credential schema
         UUID credentialId = upsertCredential(credentialName, displayName, authType, properties, iconSlug, iconUrl);
 
-        // Link all tools for this API
         List<ApiToolEntity> tools = apiToolRepository.findByApiId(apiId);
         for (ApiToolEntity tool : tools) {
-            linkToolCredential(tool.getId(), credentialId, credentialName, authType);
+            linkToolCredential(tool.getId(), credentialId, credentialName, effectiveAuthConfig);
         }
 
         log.info("Linked {} tools to credential '{}' for API {}", tools.size(), credentialName, apiId);
     }
 
     private UUID upsertCredential(String credentialName, String displayName, String authType, String properties, String iconSlug, String iconUrl) {
-        // Custom-API registration is single-variant; align with the post-V103 schema where
-        // catalog.credentials uniqueness is (credential_name, variant). Hard-code variant='primary'
-        // and target the matching unique constraint so re-registers upsert cleanly.
         String sql = """
                 INSERT INTO catalog.credentials (credential_name, variant, display_name, auth_type, properties, icon_slug, icon_url, created_at, updated_at)
                 VALUES (?, 'primary', ?, ?, ?::jsonb, ?, ?, EXTRACT(EPOCH FROM NOW()) * 1000, EXTRACT(EPOCH FROM NOW()) * 1000)
@@ -106,11 +118,8 @@ public class CatalogSeedCredentialService {
                 credentialName, displayName, authType, properties, iconSlug, iconUrl);
     }
 
-    private void linkToolCredential(UUID toolId, UUID credentialId, String credentialName, String authType) {
-        String metadata = buildInjectionMetadata(authType);
-        // Custom API registration (this path) is single-variant by design; align
-        // with the post-V107 (api_tool_id, credential_name, variant) uniqueness
-        // by tagging these links as 'primary'.
+    private void linkToolCredential(UUID toolId, UUID credentialId, String credentialName, CustomApiAuthConfig authConfig) {
+        String metadata = buildInjectionMetadata(authConfig);
         String variant = "primary";
 
         String sql = """
@@ -142,43 +151,80 @@ public class CatalogSeedCredentialService {
         }
     }
 
-    /**
-     * Build the injection metadata JSON that HttpExecutionService expects.
-     * Must match the structure: {"field": "...", "injection": {"type": "...", "key": "..."}}
-     *
-     * <p>HttpExecutionService.prepareHeadersWithCredentials auto-prepends "Bearer " when
-     * the injection key is "Authorization" - so bearer/oauth2 correctly use that key.
-     *
-     * <p>Note: "basic" auth falls through to default (X-API-Key header) because
-     * HttpExecutionService only supports Bearer prefix on Authorization header today.
-     * A dedicated Basic auth injection path would require HttpExecutionService changes.
-     */
-    private String buildInjectionMetadata(String authType) {
-        return switch (authType.toLowerCase()) {
-            case "bearer", "oauth2" -> """
-                    {"field": "access_token", "injection": {"type": "header", "key": "Authorization"}}""";
+    private String buildInjectionMetadata(CustomApiAuthConfig authConfig) {
+        String authType = normalizeAuthType(authConfig.authType());
+        return switch (authType) {
+            case "basic_auth" -> """
+                    {"field": "username", "injection": {"type": "basic_auth", "key": "Authorization"}}""";
+            case "bearer", "oauth2", "apikey" -> {
+                String field = credentialFieldForAuthType(authType);
+                StringBuilder metadata = new StringBuilder()
+                        .append("{\"field\": \"")
+                        .append(field)
+                        .append("\", \"injection\": {\"type\": \"")
+                        .append(escapeJson(authConfig.injectionType()))
+                        .append("\", \"key\": \"")
+                        .append(escapeJson(authConfig.key()))
+                        .append("\"");
+                if (authConfig.prefix() != null) {
+                    metadata.append(", \"prefix\": \"").append(escapeJson(authConfig.prefix())).append("\"");
+                }
+                metadata.append("}}");
+                yield metadata.toString();
+            }
             default -> """
                     {"field": "api_key", "injection": {"type": "header", "key": "X-API-Key"}}""";
         };
     }
 
     private String buildPropertiesJson(String authType) {
-        return switch (authType.toLowerCase()) {
+        return switch (normalizeAuthType(authType)) {
             case "apikey" -> """
                     {"api_key": {"type": "string", "displayName": "API Key", "required": true}}""";
             case "bearer" -> """
-                    {"access_token": {"type": "string", "displayName": "Bearer Token", "required": true}}""";
+                    {"access_token": {"type": "string", "displayName": "******", "required": true}}""";
             case "oauth2" -> """
                     {"client_id": {"type": "string", "displayName": "Client ID", "required": true}, "client_secret": {"type": "string", "displayName": "Client Secret", "required": true}}""";
-            case "basic" -> """
-                    {"api_key": {"type": "string", "displayName": "API Key", "required": true}}""";
+            case "basic_auth" -> """
+                    {"username": {"type": "string", "displayName": "Username", "required": true}, "password": {"type": "password", "displayName": "Password", "required": true}}""";
             default -> """
                     {"api_key": {"type": "string", "displayName": "API Key", "required": true}}""";
         };
     }
 
+    public static CustomApiAuthConfig defaultCustomApiAuthConfig(String authType) {
+        return switch (normalizeAuthType(authType)) {
+            case "bearer", "oauth2" -> new CustomApiAuthConfig(authType, "header", "Authorization", "Bearer ");
+            case "basic_auth" -> new CustomApiAuthConfig("basic_auth", "basic_auth", "Authorization", null);
+            default -> new CustomApiAuthConfig(authType, "header", "X-API-Key", null);
+        };
+    }
+
+    private static String credentialFieldForAuthType(String authType) {
+        return switch (normalizeAuthType(authType)) {
+            case "bearer", "oauth2" -> "access_token";
+            case "basic_auth" -> "username";
+            default -> "api_key";
+        };
+    }
+
+    private static String normalizeAuthType(String authType) {
+        if (authType == null) return "apikey";
+        return switch (authType.trim().toLowerCase(Locale.ROOT)) {
+            case "basic" -> "basic_auth";
+            case "api_key", "apikey" -> "apikey";
+            case "bearer_token", "bearer" -> "bearer";
+            default -> authType.trim().toLowerCase(Locale.ROOT);
+        };
+    }
+
+    private static String escapeJson(String value) {
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"");
+    }
+
     private String buildDisplayName(String credentialName) {
-        // Convert camelCase/snake_case to human-readable
         return credentialName
                 .replaceAll("([a-z])([A-Z])", "$1 $2")
                 .replace("_", " ")

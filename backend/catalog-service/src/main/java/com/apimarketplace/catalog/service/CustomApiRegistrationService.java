@@ -3,6 +3,7 @@ package com.apimarketplace.catalog.service;
 import com.apimarketplace.catalog.domain.ApiToolEntity;
 import com.apimarketplace.catalog.domain.ApiToolParameterEntity;
 import com.apimarketplace.catalog.domain.ToolNextHintEntity;
+import com.apimarketplace.catalog.seed.CatalogSeedCredentialService;
 import com.apimarketplace.catalog.domain.dto.ApiConfigurationRequest;
 import com.apimarketplace.catalog.domain.dto.ApiConfigurationRequest.*;
 import com.apimarketplace.catalog.domain.dto.ApiResponse;
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.Locale;
 
 /**
  * Service for registering custom APIs from the api-migrations JSON schema format.
@@ -47,6 +49,10 @@ public class CustomApiRegistrationService {
             Set.of("query", "path", "body");
     static final Set<String> ALLOWED_OUTPUT_TYPES =
             Set.of("string", "number", "boolean", "datetime", "object", "array", "fileRef");
+    static final Set<String> ALLOWED_AUTH_TYPES =
+            Set.of("none", "bearer", "apikey", "oauth2", "basic_auth");
+    static final Set<String> ALLOWED_AUTH_INJECTION_TYPES =
+            Set.of("header", "query");
 
     private final ApiService apiService;
     private final com.apimarketplace.catalog.repository.ApiRepository apiRepository;
@@ -82,8 +88,9 @@ public class CustomApiRegistrationService {
         JsonNode primaryAuth = (authArray.isArray() && authArray.size() > 0)
                 ? authArray.get(0)
                 : apiJson.path("auth"); // tolerates legacy object form from in-flight payloads
-        String authType = primaryAuth.path("type").asText(
-                apiJson.path("authType").asText("none"));
+        CustomApiAuthDefinition authDefinition = parseAuthDefinition(
+                primaryAuth, apiJson.path("authType").asText("none"), apiName);
+        String authType = authDefinition.authType();
         String description = apiJson.path("apiDescription").asText(apiName + " API");
         String category = apiJson.path("apiCategory").asText("Custom APIs");
         String categoryGroup = category.endsWith(" APIs") ? category : category + " APIs";
@@ -123,7 +130,11 @@ public class CustomApiRegistrationService {
                 new ApiConfigDto(
                         baseUrl,
                         "",
-                        new AuthorizationDto(authType, "Authentication for " + apiName, "Authorization", ""),
+                        new AuthorizationDto(
+                                authType,
+                                "Authentication for " + apiName,
+                                authDefinition.authorizationHeaderName(),
+                                ""),
                         visibility
                 ),
                 buildFreeMonetization(),
@@ -159,7 +170,13 @@ public class CustomApiRegistrationService {
             String normalizedIconSlug = com.apimarketplace.catalog.util.IconSlugNormalizer.deriveIconSlug(apiName, iconSlug);
             String credentialName = normalizedIconSlug;
             String apiIconUrl = apiJson.path("iconUrl").asText(null);
-            catalogSeedCredentialService.linkCredentials(apiId, credentialName, authType, normalizedIconSlug, apiIconUrl);
+            catalogSeedCredentialService.linkCredentials(
+                    apiId,
+                    credentialName,
+                    authType,
+                    normalizedIconSlug,
+                    apiIconUrl,
+                    authDefinition.toCredentialConfig());
         }
 
         return response;
@@ -218,13 +235,19 @@ public class CustomApiRegistrationService {
 
         var apiResponse = apiService.getApiById(id);
         Map<String, Object> result = new LinkedHashMap<>();
+        List<ApiToolEntity> toolEntities = apiToolRepository.findByApiIdAndIsActiveTrue(id);
+        String authType = normalizeAuthType(apiResponse.authType());
         result.put("id", apiResponse.id().toString());
         result.put("apiName", apiResponse.apiName());
         result.put("description", apiResponse.description());
         result.put("baseUrl", apiResponse.baseUrl());
-        result.put("authType", apiResponse.authType() != null ? apiResponse.authType() : "none");
+        result.put("authType", authType);
         result.put("categoryName", apiResponse.categoryName());
         if (entity.getIconUrl() != null) result.put("iconUrl", entity.getIconUrl());
+        Map<String, Object> authConfig = extractAuthConfig(toolEntities, authType, apiResponse.authHeaderName());
+        if (authConfig != null && !authConfig.isEmpty()) {
+            result.put("authConfig", authConfig);
+        }
 
         // V83: API-level metadata
         if (entity.getApiVersion() != null) result.put("apiVersion", entity.getApiVersion());
@@ -236,9 +259,6 @@ public class CustomApiRegistrationService {
                 log.warn("Malformed rateLimits JSON for API {}, skipping", apiId);
             }
         }
-
-        // Build tool entity lookup for pagination/nextHint overlay
-        List<ApiToolEntity> toolEntities = apiToolRepository.findByApiIdAndIsActiveTrue(id);
 
         // Map tools to endpoint definitions the frontend can use to pre-populate the form
         List<Map<String, Object>> endpoints = new ArrayList<>();
@@ -313,6 +333,168 @@ public class CustomApiRegistrationService {
         }
         result.put("endpoints", endpoints);
         return result;
+    }
+
+    private CustomApiAuthDefinition parseAuthDefinition(JsonNode primaryAuth, String fallbackAuthType, String apiName) {
+        String authType = normalizeAuthType(primaryAuth.path("type").asText(fallbackAuthType));
+        if (!ALLOWED_AUTH_TYPES.contains(authType)) {
+            throw new IllegalArgumentException("Unsupported authentication type for " + apiName + ": " + authType);
+        }
+        if ("none".equals(authType)) {
+            return new CustomApiAuthDefinition("none", null, null, null);
+        }
+        if ("basic_auth".equals(authType)) {
+            return new CustomApiAuthDefinition("basic_auth", "basic_auth", "Authorization", null);
+        }
+
+        String injectionType = textOrNull(primaryAuth, "injectionType");
+        if (injectionType == null) {
+            JsonNode injection = primaryAuth.path("injection");
+            if (injection.isObject()) {
+                injectionType = blankToNull(injection.path("type").asText(null));
+            }
+        }
+        if (injectionType == null) {
+            injectionType = "header";
+        }
+        injectionType = injectionType.toLowerCase(Locale.ROOT);
+        if (!ALLOWED_AUTH_INJECTION_TYPES.contains(injectionType)) {
+            throw new IllegalArgumentException("Unsupported auth injection type for " + apiName + ": " + injectionType);
+        }
+
+        String key = textOrNull(primaryAuth, "key");
+        if (key == null) {
+            JsonNode injection = primaryAuth.path("injection");
+            if (injection.isObject()) {
+                key = blankToNull(injection.path("key").asText(null));
+            }
+        }
+        if (key == null) {
+            key = defaultKeyFor(authType, injectionType);
+        }
+
+        String prefix = primaryAuth.has("prefix") && !primaryAuth.path("prefix").isNull()
+                ? primaryAuth.path("prefix").asText("")
+                : null;
+        if (prefix == null) {
+            JsonNode injection = primaryAuth.path("injection");
+            if (injection.isObject() && injection.has("prefix") && !injection.path("prefix").isNull()) {
+                prefix = injection.path("prefix").asText("");
+            }
+        }
+        if ("query".equals(injectionType)) {
+            prefix = null;
+        } else if (prefix == null && ("bearer".equals(authType) || "oauth2".equals(authType))) {
+            prefix = "Bearer ";
+        }
+
+        return new CustomApiAuthDefinition(authType, injectionType, key, prefix);
+    }
+
+    private Map<String, Object> extractAuthConfig(List<ApiToolEntity> toolEntities, String authType, String authHeaderName) {
+        if ("none".equals(authType)) {
+            return null;
+        }
+        for (ApiToolEntity toolEntity : toolEntities) {
+            for (Map<String, Object> toolCredential : apiService.getToolCredentials(toolEntity.getId())) {
+                Object metadataObj = toolCredential.get("metadata");
+                if (metadataObj == null) continue;
+                try {
+                    JsonNode metadata = objectMapper.readTree(metadataObj.toString());
+                    String injectionType = normalizeInjectionType(blankToNull(metadata.path("injection").path("type").asText(null)));
+                    String key = blankToNull(metadata.path("injection").path("key").asText(null));
+                    JsonNode prefixNode = metadata.path("injection").path("prefix");
+                    String prefix = prefixNode.isMissingNode() || prefixNode.isNull() ? null : prefixNode.asText("");
+                    return buildAuthConfigResponse(authType, injectionType, key, prefix, authHeaderName);
+                } catch (Exception e) {
+                    log.warn("Malformed tool credential metadata for custom API auth config on tool {}", toolEntity.getId(), e);
+                }
+            }
+        }
+        return buildAuthConfigResponse(authType, null, null, null, authHeaderName);
+    }
+
+    private Map<String, Object> buildAuthConfigResponse(
+            String authType,
+            String injectionType,
+            String key,
+            String prefix,
+            String authHeaderName) {
+        String normalizedAuthType = normalizeAuthType(authType);
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("type", normalizedAuthType);
+        if ("basic_auth".equals(normalizedAuthType)) {
+            config.put("injectionType", "basic_auth");
+            config.put("key", "Authorization");
+            return config;
+        }
+        String effectiveInjectionType = normalizeInjectionType(injectionType);
+        config.put("injectionType", effectiveInjectionType);
+        String effectiveKey = blankToNull(key);
+        if (effectiveKey == null && blankToNull(authHeaderName) != null && "header".equals(effectiveInjectionType)) {
+            effectiveKey = authHeaderName;
+        }
+        config.put("key", effectiveKey != null ? effectiveKey : defaultKeyFor(normalizedAuthType, effectiveInjectionType));
+        if (prefix != null) {
+            config.put("prefix", prefix);
+        } else if ("header".equals(effectiveInjectionType)
+                && ("bearer".equals(normalizedAuthType) || "oauth2".equals(normalizedAuthType))) {
+            config.put("prefix", "Bearer ");
+        }
+        return config;
+    }
+
+    private static String normalizeInjectionType(String injectionType) {
+        if (blankToNull(injectionType) == null) {
+            return "header";
+        }
+        return "basic_auth".equalsIgnoreCase(injectionType)
+                ? "basic_auth"
+                : injectionType.toLowerCase(Locale.ROOT);
+    }
+
+    private static String defaultKeyFor(String authType, String injectionType) {
+        if ("query".equals(injectionType)) {
+            return "apikey".equals(authType) ? "api_key" : "access_token";
+        }
+        return switch (authType) {
+            case "bearer", "oauth2", "basic_auth" -> "Authorization";
+            default -> "X-API-Key";
+        };
+    }
+
+    private static String normalizeAuthType(String authType) {
+        if (blankToNull(authType) == null) {
+            return "none";
+        }
+        return switch (authType.trim().toLowerCase(Locale.ROOT)) {
+            case "basic" -> "basic_auth";
+            case "api_key" -> "apikey";
+            case "bearer_token" -> "bearer";
+            default -> authType.trim().toLowerCase(Locale.ROOT);
+        };
+    }
+
+    private static String textOrNull(JsonNode node, String fieldName) {
+        if (node == null || node.isMissingNode() || !node.has(fieldName)) return null;
+        return blankToNull(node.path(fieldName).asText(null));
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private record CustomApiAuthDefinition(String authType, String injectionType, String key, String prefix) {
+        CatalogSeedCredentialService.CustomApiAuthConfig toCredentialConfig() {
+            return new CatalogSeedCredentialService.CustomApiAuthConfig(authType, injectionType, key, prefix);
+        }
+
+        String authorizationHeaderName() {
+            if ("header".equals(injectionType) || "basic_auth".equals(injectionType)) {
+                return key;
+            }
+            return "";
+        }
     }
 
     /**

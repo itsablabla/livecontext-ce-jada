@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -91,6 +92,30 @@ class CustomApiRegistrationServiceTest {
         assertNotNull(result);
         assertEquals(mockResponse.id(), result.id());
         verify(apiService).processApiConfiguration(any(), eq("tenant-1"));
+    }
+
+    @Test
+    void registerCustomApiPreservesExplicitAuthInjectionConfig() {
+        ObjectNode json = buildValidApiJson();
+        json.put("authType", "apikey");
+        json.putArray("auth")
+                .addObject()
+                .put("type", "apikey")
+                .put("injectionType", "query")
+                .put("key", "api_key");
+        ApiResponse mockResponse = mockApiResponse();
+        when(apiService.processApiConfiguration(any(), eq("tenant-1"))).thenReturn(mockResponse);
+
+        service.registerCustomApi(json, "tenant-1");
+
+        verify(catalogSeedCredentialService).linkCredentials(
+                eq(mockResponse.id()),
+                anyString(),
+                eq("apikey"),
+                anyString(),
+                any(),
+                eq(new com.apimarketplace.catalog.seed.CatalogSeedCredentialService.CustomApiAuthConfig(
+                        "apikey", "query", "api_key", null)));
     }
 
     @Test
@@ -337,9 +362,16 @@ class CustomApiRegistrationServiceTest {
         UUID apiId = UUID.randomUUID();
         ApiEntity entity = buildEntity(apiId, "custom", "tenant-1");
         when(apiRepository.findById(apiId)).thenReturn(Optional.of(entity));
+        ApiToolEntity toolEntity = new ApiToolEntity();
+        UUID toolId = UUID.randomUUID();
+        toolEntity.setId(toolId);
+        when(apiToolRepository.findByApiIdAndIsActiveTrue(apiId)).thenReturn(List.of(toolEntity));
 
         ApiResponse apiResponse = mockApiResponse(apiId);
         when(apiService.getApiById(apiId)).thenReturn(apiResponse);
+        when(apiService.getToolCredentials(toolId)).thenReturn(List.of(Map.of(
+                "metadata", "{\"field\":\"api_key\",\"injection\":{\"type\":\"query\",\"key\":\"api_key\"}}"
+        )));
 
         Map<String, Object> details = service.getCustomApiDetails(apiId.toString(), "tenant-1");
 
@@ -348,6 +380,10 @@ class CustomApiRegistrationServiceTest {
         assertEquals("https://localhost", details.get("baseUrl"));
         assertEquals("bearer", details.get("authType"));
         assertNotNull(details.get("endpoints"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> authConfig = (Map<String, Object>) details.get("authConfig");
+        assertEquals("query", authConfig.get("injectionType"));
+        assertEquals("api_key", authConfig.get("key"));
     }
 
     @Test

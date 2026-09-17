@@ -88,11 +88,19 @@ export interface CustomApiEndpoint {
   outputSchema?: CustomApiOutputField[];
 }
 
+export interface CustomApiAuthConfig {
+  type: string;
+  injectionType?: 'header' | 'query' | 'basic_auth';
+  key?: string;
+  prefix?: string;
+}
+
 export interface CustomApiDefinition {
   apiName: string;
   baseUrl: string;
   apiDescription?: string;
   authType?: string;
+  auth?: CustomApiAuthConfig;
   apiCategory?: string;
   iconUrl?: string;
   iconSlug?: string;
@@ -110,6 +118,7 @@ export interface CustomApiDetails {
   description: string;
   baseUrl: string;
   authType: string;
+  authConfig?: CustomApiAuthConfig;
   categoryName: string;
   iconUrl?: string;
   endpoints: CustomApiEndpoint[];

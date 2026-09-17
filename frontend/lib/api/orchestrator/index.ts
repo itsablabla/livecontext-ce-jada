@@ -111,6 +111,7 @@ export type {
   CustomApiOutputField,
   CustomApiFixture,
   CustomApiEndpoint,
+  CustomApiAuthConfig,
   CustomApiDefinition,
   CustomApiDetails,
 } from './custom-api.service';
