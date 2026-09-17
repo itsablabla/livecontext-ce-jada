@@ -3,6 +3,7 @@ package com.apimarketplace.agent.provider;
 import com.apimarketplace.agent.domain.*;
 import com.apimarketplace.agent.streaming.StreamingCallback;
 import com.apimarketplace.agent.streaming.StreamingEvent;
+import com.apimarketplace.common.web.UrlSafetyValidator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -158,6 +159,30 @@ public abstract class AbstractLLMProvider implements LLMProvider {
     }
 
     /**
+     * Resolve the configured endpoint override without outbound validation.
+     * Used by callers that need to derive a sibling path before they make the
+     * request; execution paths must still call {@link #resolveApiUrl()}.
+     */
+    protected String resolveConfiguredApiUrl() {
+        if (credentialResolver != null) {
+            var dbUrl = credentialResolver.resolveApiUrl(getProviderName());
+            if (dbUrl.isPresent()) {
+                return dbUrl.get();
+            }
+        }
+        return getApiUrl();
+    }
+
+    /**
+     * Resolve the effective API URL and validate it before outbound use.
+     */
+    protected String resolveApiUrl() {
+        String apiUrl = resolveConfiguredApiUrl();
+        UrlSafetyValidator.validateUrl(apiUrl);
+        return apiUrl;
+    }
+
+    /**
      * Get or create WebClient for reactive streaming.
      * Lazy-initialized to avoid overhead if not used.
      */
@@ -299,7 +324,7 @@ public abstract class AbstractLLMProvider implements LLMProvider {
 
             @SuppressWarnings("unchecked")
             ResponseEntity<Map> response = restTemplate.exchange(
-                getApiUrl(), HttpMethod.POST, entity, Map.class
+                resolveApiUrl(), HttpMethod.POST, entity, Map.class
             );
 
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
@@ -376,7 +401,7 @@ public abstract class AbstractLLMProvider implements LLMProvider {
             addStreamingRequestOptions(requestBody);
 
             // Create connection
-            URI uri = URI.create(getApiUrl());
+            URI uri = URI.create(resolveApiUrl());
             connection = (HttpURLConnection) uri.toURL().openConnection();
             setupStreamingConnection(connection);
             // Inactivity watchdog: tighten the socket read timeout to a sub-window poll cadence so
@@ -473,7 +498,7 @@ public abstract class AbstractLLMProvider implements LLMProvider {
                     estimatedTokensForStream);
 
             reactor.core.Disposable subscription = getWebClient().post()
-                    .uri(getApiUrl())
+                    .uri(resolveApiUrl())
                     .headers(h -> headers.forEach(h::addAll))
                     .bodyValue(requestBody)
                     .retrieve()

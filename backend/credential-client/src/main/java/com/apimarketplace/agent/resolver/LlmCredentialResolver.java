@@ -37,6 +37,23 @@ public interface LlmCredentialResolver {
     }
 
     /**
+     * Resolve an endpoint override for the given provider name, using the
+     * in-flight request's userId when relevant.
+     *
+     * <p>Empty means "use the provider's configured YAML/env endpoint".
+     */
+    default Optional<String> resolveApiUrl(String providerName) {
+        return Optional.empty();
+    }
+
+    /**
+     * Explicit-userId variant of {@link #resolveApiUrl(String)}.
+     */
+    default Optional<String> resolveApiUrl(String userId, String providerName) {
+        return resolveApiUrl(providerName);
+    }
+
+    /**
      * Invalidate cached key for a specific provider.
      */
     default void invalidate(String providerName) {

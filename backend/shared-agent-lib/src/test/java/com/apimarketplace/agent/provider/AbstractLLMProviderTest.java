@@ -1,6 +1,7 @@
 package com.apimarketplace.agent.provider;
 
 import com.apimarketplace.agent.domain.*;
+import com.apimarketplace.agent.resolver.LlmCredentialResolver;
 import com.apimarketplace.agent.streaming.StreamingCallback;
 import com.apimarketplace.agent.streaming.StreamingEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +15,7 @@ import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -86,6 +88,10 @@ class AbstractLLMProviderTest {
 
         @Override
         public List<String> getSupportedModels() { return supportedModels; }
+
+        String resolvedApiUrlForTest() {
+            return resolveApiUrl();
+        }
     }
 
     @BeforeEach
@@ -184,6 +190,50 @@ class AbstractLLMProviderTest {
             assertThatThrownBy(() -> unconfigured.complete(request))
                     .isInstanceOf(LLMProviderException.class)
                     .hasMessageContaining("not configured");
+        }
+    }
+
+    @Nested
+    @DisplayName("resolveApiUrl()")
+    class ResolveApiUrlTests {
+
+        @Test
+        @DisplayName("uses the resolver override before the configured fallback")
+        void usesResolverOverrideBeforeConfiguredFallback() {
+            provider.setCredentialResolver(new LlmCredentialResolver() {
+                @Override
+                public Optional<String> resolveApiKey(String providerName) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public Optional<String> resolveApiUrl(String providerName) {
+                    return Optional.of("https://93.184.216.34/v1/chat/completions");
+                }
+            });
+
+            assertThat(provider.resolvedApiUrlForTest())
+                    .isEqualTo("https://93.184.216.34/v1/chat/completions");
+        }
+
+        @Test
+        @DisplayName("rejects unsafe endpoint overrides before any outbound call")
+        void rejectsUnsafeEndpointOverrides() {
+            provider.setCredentialResolver(new LlmCredentialResolver() {
+                @Override
+                public Optional<String> resolveApiKey(String providerName) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public Optional<String> resolveApiUrl(String providerName) {
+                    return Optional.of("http://127.0.0.1:8080/v1/chat/completions");
+                }
+            });
+
+            assertThatThrownBy(provider::resolvedApiUrlForTest)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("private/internal network");
         }
     }
 

@@ -501,6 +501,16 @@ public class CredentialClient {
      * Tenant-scoped credential takes priority over platform-wide.
      */
     public Optional<String> getPlatformCredentialForIntegration(String integrationName, String tenantId) {
+        return getPlatformCredentialInfoForIntegration(integrationName, tenantId)
+                .map(AccessTokenResult::getAccessToken);
+    }
+
+    /**
+     * Get platform credential info for an integration, tenant-aware.
+     * The response may contain an endpoint override even when no access token is
+     * stored, so callers that need more than the secret should use this method.
+     */
+    public Optional<AccessTokenResult> getPlatformCredentialInfoForIntegration(String integrationName, String tenantId) {
         try {
             UriComponentsBuilder uriBuilder = UriComponentsBuilder
                     .fromHttpUrl(baseUrl + "/api/internal/credentials/platform-integration/" + integrationName);
@@ -513,11 +523,11 @@ public class CredentialClient {
                     AccessTokenResult.class);
             AccessTokenResult result = resp.getBody();
             if (result != null && result.isFound()) {
-                return Optional.ofNullable(result.getAccessToken());
+                return Optional.of(result);
             }
             return Optional.empty();
         } catch (Exception e) {
-            log.warn("Failed to get platform credential for integration {}: {}", integrationName, e.getMessage());
+            log.warn("Failed to get platform credential info for integration {}: {}", integrationName, e.getMessage());
             return Optional.empty();
         }
     }

@@ -21,7 +21,7 @@ const h = vi.hoisted(() => ({
   invalidateLlmCache: vi.fn(),
   getLlmProviderStatus: vi.fn(),
   // onSave/onDelete captured from the first rendered ProviderCard.
-  captured: { onSave: null as null | ((i: string, k: string) => Promise<void>), onDelete: null as null | ((i: string) => Promise<void>) },
+  captured: { onSave: null as null | ((i: string, k: string, u: string) => Promise<void>), onDelete: null as null | ((i: string) => Promise<void>) },
 }));
 
 vi.mock('next-intl', () => {
@@ -57,7 +57,7 @@ vi.mock('@/lib/api/cloud-link.service', () => ({
 vi.mock('@/lib/edition', () => ({ IS_CE: true, IS_CLOUD: false }));
 // Capture the page's save/delete handlers from the first ProviderCard.
 vi.mock('../components/ProviderCard', () => ({
-  default: ({ onSave, onDelete }: { onSave: (i: string, k: string) => Promise<void>; onDelete: (i: string) => Promise<void> }) => {
+  default: ({ onSave, onDelete }: { onSave: (i: string, k: string, u: string) => Promise<void>; onDelete: (i: string) => Promise<void> }) => {
     if (!h.captured.onSave) {
       h.captured.onSave = onSave;
       h.captured.onDelete = onDelete;
@@ -81,7 +81,7 @@ describe('AiProvidersPage - models cache invalidation on key changes', () => {
     // The page intersects PROVIDER_DEFINITIONS with the backend status list -
     // at least one advertised provider is needed for a ProviderCard to render.
     h.getLlmProviderStatus.mockResolvedValue([
-      { providerName: 'anthropic', configured: false, source: 'none' },
+      { providerName: 'anthropic', configured: false, source: 'none', endpointUrl: null },
     ]);
     h.savePlatformCredential.mockResolvedValue(undefined);
     h.deletePlatformCredential.mockResolvedValue(undefined);
@@ -99,9 +99,12 @@ describe('AiProvidersPage - models cache invalidation on key changes', () => {
   it('drops the models cache after saving a provider API key', async () => {
     await renderAndCaptureHandlers();
 
-    await h.captured.onSave!('llm_anthropic', 'sk-ant-test');
+    await h.captured.onSave!('llm_anthropic', 'sk-ant-test', 'https://api.anthropic.com/v1/messages');
 
     expect(h.savePlatformCredential).toHaveBeenCalledTimes(1);
+    expect(h.savePlatformCredential).toHaveBeenCalledWith(expect.objectContaining({
+      customFields: { endpoint_url: 'https://api.anthropic.com/v1/messages' },
+    }));
     expect(h.clearModelsCache).toHaveBeenCalledTimes(1);
   });
 

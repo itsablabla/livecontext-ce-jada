@@ -73,6 +73,8 @@ public class LlmProviderStatusController {
                 LLMProvider provider = llmProviderFactory.findProvider(providerName).orElse(null);
                 hasDbKey = credentialRepository.hasDbKey(providerName);
                 configured = provider != null && provider.isConfigured();
+                status.put("endpointUrl",
+                        credentialRepository.findPlatformApiUrlByProviderName(providerName).orElse(null));
             } catch (Exception e) {
                 // Graceful degradation: provider not available, show as unconfigured
             }

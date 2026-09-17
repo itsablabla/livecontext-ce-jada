@@ -1544,6 +1544,7 @@ export interface LlmProviderStatus {
   configured: boolean;
   hasDbKey: boolean;
   source: 'database' | 'environment' | 'none';
+  endpointUrl?: string | null;
 }
 
 export interface LlmProviderDefinition {
@@ -1552,6 +1553,7 @@ export interface LlmProviderDefinition {
   displayName: string;
   docsUrl: string;
   placeholder: string;
+  endpointPlaceholder?: string;
 }
 
 // ============================================
@@ -2133,4 +2135,3 @@ export interface UpdateBridgeAccessPolicyRequest {
   accessMode: BridgeAccessMode;
   maxRequestsPerUserPerDay?: number | null;
 }
-

@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -268,6 +269,55 @@ class PlatformCredentialServiceTest {
             ArgumentCaptor<PlatformCredential> captor = ArgumentCaptor.forClass(PlatformCredential.class);
             verify(repository).save(captor.capture());
             assertThat(captor.getValue().showUnverifiedAppWarning()).isFalse();
+        }
+
+        @Test
+        @DisplayName("validates LLM endpoint override URLs before persisting")
+        void saveCredential_rejectsUnsafeEndpointOverride() {
+            when(repository.findByIntegrationName("llmopenai")).thenReturn(Optional.empty());
+
+            CreatePlatformCredentialRequest request = new CreatePlatformCredentialRequest(
+                    "llm_openai", "OpenAI", "api_key",
+                    null, null, "sk-test", null, null,
+                    null, null, null,
+                    null, "llm_provider", null, Map.of("endpoint_url", "http://127.0.0.1:8080/v1/chat/completions"),
+                    null, null
+            );
+
+            assertThatThrownBy(() -> service.saveCredential(request))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("private/internal");
+            verify(repository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("blank endpoint override clears the stored custom field on update")
+        void saveCredential_blankEndpointClearsStoredOverride() {
+            PlatformCredential existing = new PlatformCredential(
+                    42L, "llmopenai", "OpenAI", AuthType.API_KEY,
+                    null, null, "sk-old", null, null,
+                    null, null, null,
+                    null, "llm_provider", null, true, true,
+                    Map.of("endpoint_url", "https://old.example/v1/chat/completions"),
+                    null, 500, Instant.now(), Instant.now(), null, null, "primary", null
+            );
+            when(repository.findByIntegrationName("llmopenai")).thenReturn(Optional.of(existing));
+            when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(repository.findById(42L)).thenReturn(Optional.of(existing));
+
+            CreatePlatformCredentialRequest request = new CreatePlatformCredentialRequest(
+                    "llm_openai", "OpenAI", "api_key",
+                    null, null, null, null, null,
+                    null, null, null,
+                    null, "llm_provider", null, Map.of("endpoint_url", "   "),
+                    null, null
+            );
+
+            service.saveCredential(request);
+
+            ArgumentCaptor<PlatformCredential> captor = ArgumentCaptor.forClass(PlatformCredential.class);
+            verify(repository).save(captor.capture());
+            assertThat(captor.getValue().customFields()).doesNotContainKey("endpoint_url");
         }
 
         @Test

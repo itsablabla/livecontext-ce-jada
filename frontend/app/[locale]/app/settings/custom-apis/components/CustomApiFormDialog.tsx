@@ -26,6 +26,7 @@ import { fileService, getFileUrlById } from '@/lib/api/orchestrator/file.service
 import { useAuthedObjectUrl } from '@/hooks/useAuthedObjectUrl';
 import { useStandardApi } from '@/lib/hooks/useStandardApi';
 import type {
+  CustomApiAuthConfig,
   CustomApiDefinition,
   CustomApiDetails,
   CustomApiEndpoint,
@@ -34,6 +35,14 @@ import type {
   CustomApiExecution,
   CustomApiOutputField,
 } from '@/lib/api/orchestrator';
+import {
+  buildCustomApiAuthPayload,
+  getDefaultCustomApiAuthConfig,
+  normalizeCustomApiAuthConfig,
+  normalizeCustomApiAuthType,
+  type CustomApiAuthInjectionType,
+  type CustomApiAuthType,
+} from '../authConfig';
 
 interface CustomApiFormDialogProps {
   open: boolean;
@@ -72,7 +81,8 @@ export function CustomApiFormDialog({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
-  const [authType, setAuthType] = useState('none');
+  const [authType, setAuthType] = useState<CustomApiAuthType>('none');
+  const [authConfig, setAuthConfig] = useState<CustomApiAuthConfig | undefined>(undefined);
   const [iconUrl, setIconUrl] = useState('');
   const [isUploadingIcon, setIsUploadingIcon] = useState(false);
   const iconInputRef = useRef<HTMLInputElement>(null);
@@ -105,6 +115,8 @@ export function CustomApiFormDialog({
       setName(api.name);
       setDescription(api.description || '');
       setBaseUrl(api.baseUrl);
+      setAuthType('none');
+      setAuthConfig(undefined);
       setIconUrl(api.iconUrl || '');
       setIconError('');
       setEndpoints([{ ...EMPTY_ENDPOINT }]);
@@ -120,6 +132,7 @@ export function CustomApiFormDialog({
       setDescription('');
       setBaseUrl('');
       setAuthType('none');
+      setAuthConfig(undefined);
       setIconUrl('');
       setIconError('');
       setCategory('Custom APIs');
@@ -137,7 +150,9 @@ export function CustomApiFormDialog({
   // Apply fetched details once available
   useEffect(() => {
     if (apiDetails && !detailsApplied && open && api) {
-      setAuthType(apiDetails.authType || 'none');
+      const nextAuthType = normalizeCustomApiAuthType(apiDetails.authType);
+      setAuthType(nextAuthType);
+      setAuthConfig(normalizeCustomApiAuthConfig(nextAuthType, apiDetails.authConfig));
       setCategory(apiDetails.categoryName || 'Custom APIs');
       if (apiDetails.iconUrl) setIconUrl(apiDetails.iconUrl);
       if (apiDetails.endpoints && apiDetails.endpoints.length > 0) {
@@ -155,6 +170,20 @@ export function CustomApiFormDialog({
       setDetailsApplied(true);
     }
   }, [apiDetails, detailsApplied, open, api]);
+
+  const handleAuthTypeChange = useCallback((value: string) => {
+    const nextAuthType = normalizeCustomApiAuthType(value);
+    setAuthType(nextAuthType);
+    setAuthConfig(getDefaultCustomApiAuthConfig(nextAuthType));
+  }, []);
+
+  const updateAuthConfig = useCallback((patch: Partial<CustomApiAuthConfig>) => {
+    setAuthConfig((current) => {
+      const base = normalizeCustomApiAuthConfig(authType, current) || getDefaultCustomApiAuthConfig(authType);
+      if (!base) return undefined;
+      return { ...base, ...patch, type: authType };
+    });
+  }, [authType]);
 
   // Icon preview - fetched with a Bearer header and rendered from an in-memory
   // blob: URL (no token in the URL). A local blob:/external URL passes through
@@ -182,6 +211,9 @@ export function CustomApiFormDialog({
       baseUrl: baseUrl.trim(),
       apiDescription: description.trim() || undefined,
       authType,
+      ...(buildCustomApiAuthPayload(authType, authConfig)
+        ? { auth: buildCustomApiAuthPayload(authType, authConfig) }
+        : {}),
       apiCategory: category.trim() || 'Custom APIs',
       ...(iconUrl.trim() ? { iconUrl: iconUrl.trim() } : {}),
       ...(apiVersion.trim() ? { apiVersion: apiVersion.trim() } : {}),
@@ -201,7 +233,7 @@ export function CustomApiFormDialog({
     };
 
     onSubmit(definition);
-  }, [name, baseUrl, description, authType, category, iconUrl, endpoints, apiVersion, documentation, rateLimitRps, rateLimitRpd, onSubmit]);
+  }, [name, baseUrl, description, authType, authConfig, category, iconUrl, endpoints, apiVersion, documentation, rateLimitRps, rateLimitRpd, onSubmit]);
 
   const addEndpoint = useCallback(() => {
     setEndpoints((prev) => [...prev, { ...EMPTY_ENDPOINT, params: [] }]);
@@ -427,7 +459,7 @@ export function CustomApiFormDialog({
           {/* Auth Type */}
           <div>
             <Label className="text-sm">{t('form.authType')}</Label>
-            <Select value={authType} onValueChange={setAuthType}>
+            <Select value={authType} onValueChange={handleAuthTypeChange}>
               <SelectTrigger className="mt-1">
                 <SelectValue />
               </SelectTrigger>
@@ -436,9 +468,69 @@ export function CustomApiFormDialog({
                 <SelectItem value="bearer">{t('form.authBearer')}</SelectItem>
                 <SelectItem value="apikey">{t('form.authApiKey')}</SelectItem>
                 <SelectItem value="oauth2">{t('form.authOAuth2')}</SelectItem>
+                <SelectItem value="basic_auth">{t('form.authBasic')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
+
+          {authType !== 'none' && authType !== 'basic_auth' && (
+            <div className="grid grid-cols-1 gap-4 rounded-lg border border-theme p-3 md:grid-cols-3">
+              <div>
+                <Label className="text-sm">{t('form.authInjectionType')}</Label>
+                <Select
+                  value={normalizeCustomApiAuthConfig(authType, authConfig)?.injectionType || 'header'}
+                  onValueChange={(value) =>
+                    updateAuthConfig({
+                      injectionType: value as CustomApiAuthInjectionType,
+                      ...(value === 'query' ? { prefix: undefined } : {}),
+                    })
+                  }
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="header">{t('form.authInjectionHeader')}</SelectItem>
+                    <SelectItem value="query">{t('form.authInjectionQuery')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-sm">
+                  {normalizeCustomApiAuthConfig(authType, authConfig)?.injectionType === 'query'
+                    ? t('form.authQueryKey')
+                    : t('form.authHeaderName')}
+                </Label>
+                <Input
+                  value={normalizeCustomApiAuthConfig(authType, authConfig)?.key || ''}
+                  onChange={(e) => updateAuthConfig({ key: e.target.value })}
+                  placeholder={
+                    normalizeCustomApiAuthConfig(authType, authConfig)?.injectionType === 'query'
+                      ? t('form.authQueryKeyPlaceholder')
+                      : t('form.authHeaderNamePlaceholder')
+                  }
+                  className="mt-1"
+                />
+              </div>
+              {normalizeCustomApiAuthConfig(authType, authConfig)?.injectionType === 'header' && (
+                <div>
+                  <Label className="text-sm">{t('form.authPrefix')}</Label>
+                  <Input
+                    value={normalizeCustomApiAuthConfig(authType, authConfig)?.prefix || ''}
+                    onChange={(e) => updateAuthConfig({ prefix: e.target.value })}
+                    placeholder={t('form.authPrefixPlaceholder')}
+                    className="mt-1"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {authType === 'basic_auth' && (
+            <div className="rounded-lg border border-theme p-3 text-sm text-theme-secondary">
+              {t('form.authBasicHint')}
+            </div>
+          )}
 
           {/* Category */}
           <div>

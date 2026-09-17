@@ -97,15 +97,15 @@ docker compose ps
 ```
 
 Then open **http://localhost:3000** and create the first account (the first user becomes the admin).
-Two optional add-ons (interface screenshots/PDFs, and a browser agent with web search) are one env
-file away when you want them, see [Optional features](#optional-features) below.
+The repository Docker Compose stack now includes interface screenshots/PDFs and the browser
+agent/web-search sidecars by default; see [Browser and rendering features](#browser-and-rendering-features) below.
 
 Configuration (LLM keys, SMTP, ports) is documented in [docker/README-CE.md](docker/README-CE.md).
 Copy `docker/.env.ce.example` to set your own values, and never commit it.
 
 ### Running it on a server, NAS or VPS
 
-Nothing extra to build. Publish both ports (`3000` for the web UI, `8080` for the backend)
+The same `docker compose up -d` works remotely too; just note that the first run now builds the bundled browser-agent image locally. Publish both ports (`3000` for the web UI, `8080` for the backend)
 and open the app at that machine's address: `http://192.168.1.50:3000` talks to
 `http://192.168.1.50:8080` on its own. If you put a reverse proxy in front and serve
 everything on a single origin, set `GATEWAY_PUBLIC_URL` on the `frontend` service to the
@@ -118,42 +118,40 @@ Deploying through Portainer, Coolify, Dokploy or a similar platform: see
 
 Built for **linux/amd64** and **linux/arm64**, so the same tag runs on an ordinary server
 and on Apple Silicon, a Raspberry Pi, Ampere or Graviton. Docker picks the right one for
-your machine. The Compose file pulls from GHCR:
+your machine. The Compose file pulls the main images from GHCR:
 
 ```
 ghcr.io/livecontext-ai/livecontext-ce
 ghcr.io/livecontext-ai/livecontext-ce-frontend
 ghcr.io/livecontext-ai/livecontext-ce-bridge
-ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer   # opt-in renderer profile
+ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer
 ```
 
 Each release is tagged `vX.Y.Z` (immutable) plus `vX.Y`, `vX` and `latest` if you would
 rather track a line than pin an exact version.
 
-## Optional features
+## Browser and rendering features
 
-Two heavy features are **opt-in** and start with no container by default, keeping the base stack
-light. Each is enabled by a bundled env file (it turns on both the Docker profile and the matching
-app setting in one shot):
+The repository Docker Compose stack now starts two heavier sidecars by default:
 
-- **Interface screenshots and PDFs** (`renderer` profile). Adds a headless Playwright/Chromium
-  sidecar (~1 GB image) so interface nodes can render a PNG screenshot or a PDF. Enable it with:
-  ```bash
-  docker compose --env-file docker/.env.ce.renderer up -d
-  ```
-- **Browser agent and web search** (`browser-agent` profile). Adds a Chromium browser-use container
-  plus a SearXNG metasearch sidecar (~2 GB) so agents can browse pages (`agent_browse`) and run
-  `web_search`. Enable it with:
-  ```bash
-  docker compose --env-file docker/.env.ce.browser-agent up -d
-  ```
+- **Interface screenshots and PDFs.** A headless Playwright/Chromium renderer
+  (~1 GB image) lets interface nodes render PNG screenshots and PDFs.
+- **Browser agent and web search.** A Chromium browser-use container plus a
+  SearXNG metasearch sidecar (~2 GB) power `agent_browse` and `web_search`.
 
-Run both by passing both env files (repeat `--env-file`). See [docker/README-CE.md](docker/README-CE.md)
-for details and tuning.
+So a plain startup command is enough:
 
-Both add-ons need this repository: the env files above are not part of the `livecontext` npm
-package and `npx livecontext` passes no `--env-file`, so **neither can be enabled through npx**.
-Clone the repo and use `docker compose` directly to turn them on.
+```bash
+docker compose up -d
+```
+
+The first run takes longer because the bundled `websearch-service/` image is built
+locally. See [docker/README-CE.md](docker/README-CE.md) for resource notes and
+extra configuration such as `WEBSEARCH_CDP_JWT_SECRET`.
+
+The `livecontext` npm CLI remains leaner: it does not bundle the browser-agent
+build context, so these heavier sidecars are not available through `npx livecontext`.
+Clone the repository and use `docker compose` directly when you want them.
 
 ## What's in the box
 
@@ -187,7 +185,7 @@ hosted-only features are not part of the Community Edition.
 
 ## Building from source
 
-CE runs from prebuilt images (the Quick start above pulls them). The full source is in this repo.
+CE runs from pulled images plus a locally built browser-agent websearch image by default. The full source is in this repo.
 To build the images yourself instead of pulling, use the per-service Dockerfiles:
 `backend/monolith-service/Dockerfile` (Java 21, the `ce` Maven profile), `frontend/Dockerfile`
 (Node 20), and `mcp/bridge/Dockerfile`.
