@@ -276,12 +276,20 @@ public class MonolithSecurityFilter implements Filter {
                 httpResponse.getWriter().write("{\"error\":\"Unauthorized\",\"message\":\"Invalid or unknown API key.\"}");
                 return;
             }
+            if (isLegacyMcpRestPath(path)) {
+                log.debug("API key rejected on legacy MCP REST path {}", path);
+                httpResponse.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                httpResponse.setContentType("application/json");
+                httpResponse.getWriter().write("{\"error\":\"legacy_mcp_forbidden\",\"message\":\"API keys must use the canonical MCP endpoint (/mcp), not the legacy /api/mcp REST surface.\"}");
+                return;
+            }
             // SECURITY: a SCOPED API key (scopes != null) is confined to the canonical
             // MCP streamable endpoint (/mcp), mirroring the cloud gateway. Without this,
             // a scoped key authenticates the ENTIRE API surface: it could mint itself a
             // full-access key via POST /api/auth/api-keys (privilege escalation) or
             // execute out-of-scope tools through the legacy /api/mcp/* REST surface.
-            // Full-access keys (scopes == null) keep working everywhere.
+            // Full-access keys (scopes == null) keep working everywhere EXCEPT the
+            // deprecated /api/mcp REST facade; API keys must use /mcp.
             if (apiKeyAuth.scopes() != null && !isMcpStreamablePath(path)) {
                 log.debug("Scoped API key rejected on non-MCP path {}", path);
                 httpResponse.setStatus(HttpServletResponse.SC_FORBIDDEN);
@@ -421,6 +429,10 @@ public class MonolithSecurityFilter implements Filter {
      */
     private static boolean isMcpStreamablePath(String path) {
         return path.equals("/mcp") || path.startsWith("/mcp/");
+    }
+
+    private static boolean isLegacyMcpRestPath(String path) {
+        return path.equals("/api/mcp") || path.startsWith("/api/mcp/");
     }
 
     private String extractShareToken(String authHeader) {

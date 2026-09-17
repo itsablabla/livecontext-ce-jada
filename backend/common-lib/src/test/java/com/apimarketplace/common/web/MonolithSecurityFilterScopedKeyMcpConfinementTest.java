@@ -21,7 +21,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * API surface, so it could mint itself a full-access key via
  * POST /api/auth/api-keys and execute out-of-scope tools through the legacy
  * /api/mcp/* REST surface. Full-access keys (scopes == null) and JWT sessions
- * are unaffected.
+ * are unaffected EXCEPT that API keys are now denied on the deprecated
+ * /api/mcp/** REST surface and must use /mcp instead.
  */
 @DisplayName("MonolithSecurityFilter scoped-key MCP confinement")
 class MonolithSecurityFilterScopedKeyMcpConfinementTest {
@@ -68,6 +69,15 @@ class MonolithSecurityFilterScopedKeyMcpConfinementTest {
         assertThat(response.getContentType()).isEqualTo("application/json");
         assertThat(response.getContentAsString()).contains("scope_forbidden");
         assertThat(response.getContentAsString()).contains("limited to the MCP endpoint (/mcp)");
+    }
+
+    private static void assertLegacyMcpForbidden(MockHttpServletResponse response,
+                                                 AtomicReference<ServletRequest> captured) throws Exception {
+        assertThat(captured.get()).as("request must NOT reach the chain").isNull();
+        assertThat(response.getStatus()).isEqualTo(403);
+        assertThat(response.getContentType()).isEqualTo("application/json");
+        assertThat(response.getContentAsString()).contains("legacy_mcp_forbidden");
+        assertThat(response.getContentAsString()).contains("must use the canonical MCP endpoint (/mcp)");
     }
 
     // ========== Scoped key on MCP paths: allowed ==========
@@ -148,7 +158,21 @@ class MonolithSecurityFilterScopedKeyMcpConfinementTest {
 
         filter.doFilter(request, response, capturingChain(captured));
 
-        assertScopeForbidden(response, captured);
+        assertLegacyMcpForbidden(response, captured);
+    }
+
+    @Test
+    @DisplayName("full-access key on the legacy /api/mcp/tools/list REST surface is also 403")
+    void fullAccessKeyOnLegacyMcpRestForbidden() throws Exception {
+        MonolithSecurityFilter filter = filterWithResolver(key ->
+                new MonolithSecurityFilter.ApiKeyAuth(claimsForUser42(), null));
+        MockHttpServletRequest request = externalApiKeyRequest("GET", "/api/mcp/tools/list");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicReference<ServletRequest> captured = new AtomicReference<>();
+
+        filter.doFilter(request, response, capturingChain(captured));
+
+        assertLegacyMcpForbidden(response, captured);
     }
 
     // ========== Full-access key and JWT: unchanged ==========

@@ -44,6 +44,9 @@ class ApiKeyServiceTest {
     @Mock
     private GatewayCacheClient gatewayCacheClient;
 
+    @Mock
+    private McpScopeCatalogClient mcpScopeCatalogClient;
+
     private ApiKeyService apiKeyService;
 
     private static final Long USER_ID = 42L;
@@ -57,7 +60,8 @@ class ApiKeyServiceTest {
                 apiKeyRepository,
                 encryptionService,
                 userResolutionService,
-                gatewayCacheClient
+                gatewayCacheClient,
+                mcpScopeCatalogClient
         );
     }
 

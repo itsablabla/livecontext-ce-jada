@@ -28,8 +28,10 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -60,6 +62,9 @@ class ApiKeyServiceMultiKeyTest {
     @Mock
     private GatewayCacheClient gatewayCacheClient;
 
+    @Mock
+    private McpScopeCatalogClient mcpScopeCatalogClient;
+
     private ApiKeyService apiKeyService;
 
     private static final Long USER_ID = 42L;
@@ -74,8 +79,11 @@ class ApiKeyServiceMultiKeyTest {
                 apiKeyRepository,
                 encryptionService,
                 userResolutionService,
-                gatewayCacheClient
+                gatewayCacheClient,
+                mcpScopeCatalogClient
         );
+        lenient().when(mcpScopeCatalogClient.getAvailableScopeNames(anyLong()))
+                .thenReturn(Set.of("workflow", "table", "agent"));
     }
 
     @Nested
@@ -194,6 +202,30 @@ class ApiKeyServiceMultiKeyTest {
 
             assertThatThrownBy(() -> apiKeyService.createKey(USER_ID, "Scoped", List.of("  ", "")))
                     .isInstanceOf(ApiKeyValidationException.class);
+            verify(apiKeyRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("rejects unknown MCP scopes instead of persisting stale names")
+        void createKey_rejectsUnknownScopes() {
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(buildUser()));
+
+            assertThatThrownBy(() -> apiKeyService.createKey(USER_ID, "Scoped", List.of("workflow", "unknown-tool")))
+                    .isInstanceOf(ApiKeyValidationException.class)
+                    .hasMessageContaining("unknown-tool");
+            verify(apiKeyRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("fails closed when the authoritative MCP scope catalog cannot be reached")
+        void createKey_rejectsWhenScopeCatalogUnavailable() {
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(buildUser()));
+            when(mcpScopeCatalogClient.getAvailableScopeNames(USER_ID))
+                    .thenThrow(new IllegalStateException("boom"));
+
+            assertThatThrownBy(() -> apiKeyService.createKey(USER_ID, "Scoped", List.of("workflow")))
+                    .isInstanceOf(ApiKeyValidationException.class)
+                    .hasMessageContaining("Unable to validate");
             verify(apiKeyRepository, never()).save(any());
         }
 

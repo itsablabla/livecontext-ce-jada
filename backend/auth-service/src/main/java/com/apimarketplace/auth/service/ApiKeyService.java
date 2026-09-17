@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -50,18 +51,21 @@ public class ApiKeyService {
     private final CredentialEncryptionService encryptionService;
     private final UserResolutionService userResolutionService;
     private final GatewayCacheClient gatewayCacheClient;
+    private final McpScopeCatalogClient mcpScopeCatalogClient;
     private final SecureRandom secureRandom;
 
     public ApiKeyService(UserRepository userRepository,
                          ApiKeyRepository apiKeyRepository,
                          CredentialEncryptionService encryptionService,
                          UserResolutionService userResolutionService,
-                         GatewayCacheClient gatewayCacheClient) {
+                         GatewayCacheClient gatewayCacheClient,
+                         McpScopeCatalogClient mcpScopeCatalogClient) {
         this.userRepository = userRepository;
         this.apiKeyRepository = apiKeyRepository;
         this.encryptionService = encryptionService;
         this.userResolutionService = userResolutionService;
         this.gatewayCacheClient = gatewayCacheClient;
+        this.mcpScopeCatalogClient = mcpScopeCatalogClient;
         this.secureRandom = new SecureRandom();
     }
 
@@ -169,6 +173,7 @@ public class ApiKeyService {
         }
 
         List<String> normalizedScopes = normalizeScopes(scopes);
+        validateRequestedScopes(userId, normalizedScopes);
 
         if (apiKeyRepository.countByUserIdAndRevokedAtIsNull(userId) >= MAX_ACTIVE_KEYS) {
             throw new ApiKeyValidationException("Maximum of " + MAX_ACTIVE_KEYS + " active API keys reached");
@@ -247,6 +252,24 @@ public class ApiKeyService {
                     "Scope list must contain at least one tool name (omit scopes for full access)");
         }
         return new ArrayList<>(normalized);
+    }
+
+    private void validateRequestedScopes(Long userId, List<String> normalizedScopes) {
+        if (normalizedScopes == null) {
+            return;
+        }
+        final Set<String> availableScopes;
+        try {
+            availableScopes = mcpScopeCatalogClient.getAvailableScopeNames(userId);
+        } catch (IllegalStateException e) {
+            throw new ApiKeyValidationException("Unable to validate MCP tool scopes right now. Please try again.");
+        }
+        List<String> unknownScopes = normalizedScopes.stream()
+                .filter(scope -> !availableScopes.contains(scope.toLowerCase(Locale.ROOT)))
+                .toList();
+        if (!unknownScopes.isEmpty()) {
+            throw new ApiKeyValidationException("Unknown MCP tool scope(s): " + String.join(", ", unknownScopes));
+        }
     }
 
     private ApiKeyEntryResponse toEntryResponse(ApiKey key) {
