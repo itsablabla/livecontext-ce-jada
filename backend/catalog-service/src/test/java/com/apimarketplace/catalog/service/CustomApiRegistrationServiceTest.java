@@ -1,6 +1,7 @@
 package com.apimarketplace.catalog.service;
 
 import com.apimarketplace.catalog.domain.ApiEntity;
+import com.apimarketplace.catalog.domain.ApiToolEntity;
 import com.apimarketplace.catalog.domain.dto.ApiConfigurationRequest;
 import com.apimarketplace.catalog.domain.dto.ApiResponse;
 import com.apimarketplace.catalog.repository.ApiRepository;
@@ -724,7 +725,13 @@ class CustomApiRegistrationServiceTest {
         service.registerCustomApi(json, "tenant-1");
 
         verify(catalogSeedCredentialService).linkCredentials(
-                eq(apiId), eq("testapi"), eq("bearer"), anyString(), any());
+                eq(apiId),
+                eq("testapi"),
+                eq("bearer"),
+                anyString(),
+                any(),
+                eq(new com.apimarketplace.catalog.seed.CatalogSeedCredentialService.CustomApiAuthConfig(
+                        "bearer", "header", "Authorization", "Bearer ")));
     }
 
     @Test
@@ -738,7 +745,7 @@ class CustomApiRegistrationServiceTest {
         service.registerCustomApi(json, "tenant-1");
 
         verify(catalogSeedCredentialService, never()).linkCredentials(
-                any(UUID.class), anyString(), anyString(), anyString(), any());
+                any(UUID.class), anyString(), anyString(), anyString(), any(), any());
     }
 
     // registerCustomApiSetsCredentialModeForAuthenticatedApis removed (V154):
