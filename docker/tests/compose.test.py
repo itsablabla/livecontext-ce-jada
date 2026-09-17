@@ -52,6 +52,15 @@ class ComposeContract(unittest.TestCase):
         for name in ("WEBSEARCH_CDP_JWT_SECRET", "WEBSEARCH_GATEWAY_SECRET"):
             self.assertEqual(env[name], self.cloud["services"]["websearch"]["environment"][name])
 
+    def test_gateway_protects_bootstrap_and_routes_realtime(self):
+        gateway = self.cloud["services"]["gateway"]
+        self.assertIn(":?", gateway["environment"]["BOOTSTRAP_PASSWORD"])
+        config = (ROOT / "docker/gateway/default.conf.template").read_text()
+        self.assertIn("auth_basic ${BOOTSTRAP_AUTH_REALM}", config)
+        self.assertIn("location /ws", config)
+        self.assertIn("location = /api/runtime-config", config)
+        self.assertIn("location ^~ /api/proxy/", config)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,11 @@ Unchanged bridge and renderer services retain their version-pinned upstream imag
 - Raw Compose deployment: **off**. Coolify must generate its proxy/network labels.
 - Preserve repository: **on**, for the catalog and SearXNG bind-mounted configuration.
 - Build sequentially on smaller hosts: `docker compose --parallel 1 build`.
+- Enable **Use Build Secrets** and disable **Inject Build Args to Dockerfile**.
+  Required Compose variables must be marked both build-time and runtime in Coolify:
+  the build-time flag makes them available for Compose interpolation, while secret
+  mode avoids passing their values as Docker build arguments. The Dockerfiles do
+  not consume these runtime secrets. Do not enable automatic ARG injection.
 - Configure a domain only for `gateway`, with internal port `80`.
   Leave `frontend` and `livecontext` without public domains.
 - Do not add host port mappings. The Coolify proxy can already occupy port 8080.
@@ -29,7 +34,8 @@ deployment sizing recommendations, not a guarantee of workload capacity.
 
 ## Required environment values
 
-Set these as runtime secrets in Coolify, not Git or Docker build arguments:
+Set these as secrets in Coolify, not Git or Docker build arguments. Mark them
+build-time and runtime with the settings above so Compose validation can run:
 
 ```text
 DB_PASSWORD=<unique random password>
