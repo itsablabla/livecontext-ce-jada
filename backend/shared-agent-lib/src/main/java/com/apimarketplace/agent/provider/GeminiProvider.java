@@ -117,11 +117,11 @@ public class GeminiProvider extends AbstractLLMProvider {
     }
 
     private String getApiUrlForModel(String model) {
-        return apiBaseUrl + "/" + model + ":generateContent?key=" + getCleanApiKey();
+        return resolveApiUrl().replaceAll("/+$", "") + "/" + model + ":generateContent?key=" + getCleanApiKey();
     }
 
     private String getStreamingUrlForModel(String model) {
-        return apiBaseUrl + "/" + model + ":streamGenerateContent?alt=sse&key=" + getCleanApiKey();
+        return resolveApiUrl().replaceAll("/+$", "") + "/" + model + ":streamGenerateContent?alt=sse&key=" + getCleanApiKey();
     }
 
     // Track current model for streaming (thread-local to handle concurrent requests)

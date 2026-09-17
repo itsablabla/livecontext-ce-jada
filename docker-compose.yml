@@ -5,9 +5,9 @@
 #   docker compose up -d
 #   Open http://localhost:3000
 #
-# This compose mostly PULLS prebuilt images from GHCR. The browser-agent service
-# additionally builds the bundled websearch-service/ image locally on first run.
-# The pinned image tags keep the pulled services matched to this release.
+# The backend and frontend BUILD this fork's source. Upstream v0.2.15 images
+# do not contain Jada's endpoint, custom-auth, scoped-key, or reconnect changes.
+# For Coolify use docker-compose.coolify.yml (no published host ports).
 #
 # Configuration (cloud connection, SMTP, ports): copy docker/.env.ce.example to
 # docker/.env.ce and pass it with `--env-file docker/.env.ce`. For agents to run, connect
@@ -46,7 +46,7 @@ services:
     volumes:
       - livecontext_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -73,7 +73,7 @@ services:
           memory: 384M
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: livecontext-minio
     restart: unless-stopped
     environment:
@@ -94,13 +94,13 @@ services:
           memory: 256M
 
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     container_name: livecontext-minio-init
     depends_on:
       minio:
         condition: service_healthy
     entrypoint: >
-      /bin/sh -c "
+      /bin/sh -ec "
       mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin};
       mc mb myminio/workflow-files --ignore-existing;
       echo 'Bucket workflow-files ready';
@@ -137,7 +137,11 @@ services:
           memory: 512M
 
   livecontext:
-    image: ghcr.io/livecontext-ai/livecontext-ce:v0.2.15
+    build:
+      context: ./backend
+      dockerfile: monolith-service/Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-jada-source}
     container_name: livecontext-app
     restart: unless-stopped
     depends_on:
@@ -147,6 +151,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
       bridge:
         condition: service_healthy
     ports:
@@ -361,7 +367,12 @@ services:
           memory: 1024M
 
   frontend:
-    image: ghcr.io/livecontext-ai/livecontext-ce-frontend:v0.2.15
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_APP_EDITION: ce
+        NEXT_PUBLIC_AUTH_MODE: embedded
+        NEXT_PUBLIC_SPRING_BASE_URL: http://livecontext:8080
     container_name: livecontext-frontend
     restart: unless-stopped
     depends_on:

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { RATE_LIMIT_RETRY_ATTEMPTS, writeWithRateLimitRetry } from '../e2e/_fixtures/workflows';
+import { RATE_LIMIT_RETRY_ATTEMPTS, writeWithRateLimitRetry } from '../test-utils/writeWithRateLimitRetry';
 
 /**
  * The retry helper used by every e2e write that is not safe to repeat.

@@ -1,5 +1,18 @@
 # LiveContext
 
+## Jada fork: deploy the code in this repository
+
+This fork adds per-provider **Endpoint URL** settings, configurable custom API
+authentication, stricter MCP API-key scopes, and chat recovery when returning to
+a conversation. Its backend and frontend must be built from source; the upstream
+v0.2.15 images do not include these changes.
+
+- Local Docker: `docker compose up -d --build`
+- Coolify: use [`docker-compose.coolify.yml`](docker-compose.coolify.yml) and
+  follow the [Coolify deployment guide](docker/COOLIFY.md).
+- Existing installs: back up the database, MinIO data and signing/encryption keys
+  before switching configurations. Never remove data volumes during an upgrade.
+
 **The AI automation platform.** One message in, a working automation out.
 
 Describe the job in chat and LiveContext builds it in front of you: a workflow you can read,
