@@ -84,25 +84,28 @@ This repository is the **Community Edition (CE)**: the full platform as a single
 ## Requirements
 
 - Docker Engine 24+ with Compose v2 (or Docker Desktop 4.x and later)
-- 4 GB RAM minimum, 8 GB recommended
+- An AMD64 host for the bundled Chrome browser service
+- 12 GB RAM recommended for source builds and the complete browser/rendering stack
 
 ## Quick start
 
-The fastest way is one npm command (Docker must be installed and running):
+Build this fork from its checked-out source (Docker must be installed and running):
 
 ```bash
-npx livecontext
+git clone https://github.com/itsablabla/livecontext-ce-jada
+cd livecontext-ce-jada
+docker compose up -d --build
 ```
 
-It pulls the images, boots the whole stack, and serves on **http://localhost:3000**.
-`npx livecontext down` stops it and `npx livecontext update` upgrades it. The CLI wraps
-Docker Compose, it does not replace Docker.
+This builds Jada's backend and frontend, boots the stack, and serves on
+**http://localhost:3000**. The public `npx livecontext` package installs upstream,
+not this fork; do not use it to deploy or upgrade Jada.
 
 Or run **Docker Compose** directly from a clone of this repo:
 
 ```bash
 # From the repo root:
-docker compose up -d
+docker compose up -d --build
 
 # Watch it come up. The "livecontext" service runs database migrations and registers
 # its tools on first boot; wait until it reports "healthy" and "frontend" is up:
@@ -118,30 +121,29 @@ Copy `docker/.env.ce.example` to set your own values, and never commit it.
 
 ### Running it on a server, NAS or VPS
 
-The same `docker compose up -d` works remotely too; just note that the first run now builds the bundled browser-agent image locally. Publish both ports (`3000` for the web UI, `8080` for the backend)
+For a direct Docker installation, `docker compose up -d --build` builds the backend,
+frontend and browser service locally. Publish both ports (`3000` for the web UI, `8080` for the backend)
 and open the app at that machine's address: `http://192.168.1.50:3000` talks to
 `http://192.168.1.50:8080` on its own. If you put a reverse proxy in front and serve
 everything on a single origin, set `GATEWAY_PUBLIC_URL` on the `frontend` service to the
 browser-facing backend URL instead.
 
-Deploying through Portainer, Coolify, Dokploy or a similar platform: see
-[templates/README.md](templates/README.md).
+For Coolify, use [docker/COOLIFY.md](docker/COOLIFY.md) and
+`docker-compose.coolify.yml`, which keeps host ports private and exposes one HTTPS
+gateway. Upstream templates in `templates/` are not the Jada source-build deployment.
 
 ### Images
 
-Built for **linux/amd64** and **linux/arm64**, so the same tag runs on an ordinary server
-and on Apple Silicon, a Raspberry Pi, Ampere or Graviton. Docker picks the right one for
-your machine. The Compose file pulls the main images from GHCR:
+The backend and frontend are built from this repository. Unchanged bridge and
+renderer services use version-pinned upstream images:
 
 ```
-ghcr.io/livecontext-ai/livecontext-ce
-ghcr.io/livecontext-ai/livecontext-ce-frontend
 ghcr.io/livecontext-ai/livecontext-ce-bridge
 ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer
 ```
 
-Each release is tagged `vX.Y.Z` (immutable) plus `vX.Y`, `vX` and `latest` if you would
-rather track a line than pin an exact version.
+The bundled browser Dockerfile installs AMD64 Google Chrome. Do not assume the
+complete stack runs natively on ARM merely because some upstream images are multi-arch.
 
 ## Browser and rendering features
 

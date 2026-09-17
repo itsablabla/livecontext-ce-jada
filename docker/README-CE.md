@@ -6,22 +6,22 @@ GitHub Actions, not via this directory.
 
 | Mode | File | Containers | Keycloak | Best for |
 |------|------|-----------|----------|----------|
-| **Monolith** | `docker-compose.yml` | 8 | No | Local dev, self-hosting |
+| **Monolith** | `docker-compose.yml` | 10 | No | Local dev, self-hosting |
+| **Coolify with gateway** | `docker-compose.coolify.yml` | 11 | No | See [COOLIFY.md](COOLIFY.md) |
 
 ---
 
 ## Prerequisites
 
 - Docker Desktop 4.x+ (or Docker Engine 24+ with Compose v2)
-- 4 GB RAM minimum (8 GB recommended)
+- AMD64 host; 12 GB RAM recommended for source builds and the full stack
 - An LLM provider for agents: connect to LiveContext Cloud (recommended), or add your own OpenAI / Anthropic / Google key in the app
 
 ## Quick Start
 
 ```bash
-# From the repo root. This pulls the prebuilt images and, on first run, builds the
-# bundled browser-agent websearch image locally:
-docker compose up -d
+# From the repo root. Build the fork's backend, frontend, and browser service:
+docker compose up -d --build
 
 # Wait ~2-3 minutes for the backend to initialize (Flyway migrations + tool registration)
 docker compose ps
@@ -30,10 +30,9 @@ docker compose ps
 # Open http://localhost:3000 and create an account (the first user becomes the admin)
 ```
 
-> **Build from source instead?** The compose pulls the main prebuilt images and builds
-> the bundled websearch service locally. To build the pulled images yourself instead, use
-> the per-service Dockerfiles (`backend/monolith-service/Dockerfile` with the
-> `ce` Maven profile, `frontend/Dockerfile`, `mcp/bridge/Dockerfile`).
+> **Source build is required for Jada.** The main frontend and backend build from
+> this fork; pulling upstream v0.2.15 images omits Jada's code changes. For a
+> Coolify installation use [COOLIFY.md](COOLIFY.md), not the local host-port setup.
 
 > **Accessing from another machine (not localhost)?** Works out of the box, nothing to
 > rebuild. The web UI resolves the backend origin at runtime from the address you opened
@@ -99,8 +98,8 @@ MINIO_ROOT_PASSWORD=minioadmin
 CREDENTIAL_ENCRYPTION_PASSWORD=
 CREDENTIAL_ENCRYPTION_SALT=
 
-# Ports (optional - change if conflicts). NOTE: changing BACKEND_PORT requires a
-# frontend rebuild - the API URL is baked into the web bundle (see the build-args table).
+# Ports for direct Docker installs. Browser-facing origins resolve at runtime;
+# set PUBLIC_BASE_URL and GATEWAY_PUBLIC_URL for a reverse-proxied server.
 BACKEND_PORT=8080
 FRONTEND_PORT=3000
 ```
@@ -308,13 +307,12 @@ normally within seconds of startup but is delayed if the database is not up yet.
 ## Common Commands
 
 ```bash
-# Start everything (pulls the main images and builds websearch locally on first run)
-docker compose up -d
+# Start everything, including the fork's source builds
+docker compose up -d --build
 
-# Update to a newer release: the compose pins the image version, so pull the repo
-# (which carries the new pinned compose), then restart
+# Update the fork: back up persistent data, review changes, then rebuild
 git pull
-docker compose up -d
+docker compose up -d --build
 
 # View backend / frontend logs
 docker compose logs -f livecontext

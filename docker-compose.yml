@@ -1,8 +1,8 @@
 # LiveContext Community Edition: Docker Compose
 # Usage:
-#   git clone https://github.com/livecontext-ai/livecontext-ce
-#   cd livecontext-ce
-#   docker compose up -d
+#   git clone https://github.com/itsablabla/livecontext-ce-jada
+#   cd livecontext-ce-jada
+#   docker compose up -d --build
 #   Open http://localhost:3000
 #
 # The backend and frontend BUILD this fork's source. Upstream v0.2.15 images
