@@ -48,6 +48,7 @@ import { useSidePanelSafe } from '@/contexts/SidePanelContext';
 import { buildAgentConfigPanelTab } from '@/lib/sidePanel/agentConfigPanelTab';
 import { togglePanelFromHeader } from '@/lib/sidePanel/togglePanelFromHeader';
 import { PROVIDER_ICON_MAP } from '@/lib/ai-providers/providerIcons';
+import { shouldAttemptConversationReconnect } from './reconnectPolicy';
 
 export interface ChatPageV2Props {
   conversationIdFromParams?: string;
@@ -265,26 +266,20 @@ export function ChatPageV2({ conversationIdFromParams, enableDataSource = false 
   streamingRef.current = streaming;
 
   useEffect(() => {
-    if (!isExistingConversation || !conversationIdFromParams) return;
-    // Wait until server active streams have been fetched before checking
-    if (!streaming.serverStreamsLoaded) return;
-    if (reconnectionAttemptedRef.current === conversationIdFromParams) return;
-
     const currentStreaming = streamingRef.current;
-    const convStreamState = currentStreaming.getStreamState(conversationIdFromParams);
-
-    // Check if there's an actual LOCAL stream running
-    const hasLocalActiveStream = convStreamState?.status === 'streaming';
-
-    // Check if server reported this conversation as streaming (needs verification)
-    const isServerReportedStreaming = currentStreaming.isStreamingConversation(conversationIdFromParams) && !hasLocalActiveStream;
-
-    // Skip if already streaming locally
-    if (hasLocalActiveStream) return;
-
-    // Only call checkAndReconnect if server reported this as streaming
-    // This avoids unnecessary API calls for conversations that aren't streaming
-    if (!isServerReportedStreaming) return;
+    const convStreamState = conversationIdFromParams
+      ? currentStreaming.getStreamState(conversationIdFromParams)
+      : undefined;
+    if (!shouldAttemptConversationReconnect({
+      isExistingConversation,
+      conversationId: conversationIdFromParams,
+      serverStreamsLoaded: currentStreaming.serverStreamsLoaded,
+      attemptedConversationId: reconnectionAttemptedRef.current,
+      localStreamStatus: convStreamState?.status,
+    })) {
+      return;
+    }
+    if (!conversationIdFromParams) return;
 
     reconnectionAttemptedRef.current = conversationIdFromParams;
 

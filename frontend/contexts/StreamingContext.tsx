@@ -2012,16 +2012,30 @@ export function StreamingProvider({ children }: { children: ReactNode }) {
       // A newer operation owns the conversation now - report "active" and stand down.
       if (takenOver()) return true;
 
-      if (!status?.hasActiveStream) {
+      // Step 2: Get reconnection state (buffered content + tool events)
+      // Even after the server stops calling a stream "active", the state endpoint can
+      // still carry recoverable terminal or paused data for a just-finished run
+      // (final content, approval cards, terminal snapshots). Returning early on the
+      // status check made reopened conversations look like the assistant reply vanished
+      // until a manual refresh reloaded the transcript from the database.
+      const reconnState = await unifiedApiService.getStreamReconnectionState(conversationId);
+      if (takenOver()) return true;
+
+      const hasRecoverableServerState = Boolean(reconnState?.streamId) && (
+        reconnState?.hasActiveStream
+        || reconnState?.state === 'COMPLETED'
+        || reconnState?.state === 'STOPPED_BY_USER'
+        || reconnState?.state === 'ERROR'
+        || reconnState?.state === 'INTERRUPTED'
+        || reconnState?.state === 'AWAITING_APPROVAL'
+      );
+
+      if (!status?.hasActiveStream && !hasRecoverableServerState) {
         dispatch({ type: 'REMOVE_SERVER_ACTIVE_STREAM', conversationId });
         return false;
       }
 
-      // Step 2: Get reconnection state (buffered content + tool events)
-      const reconnState = await unifiedApiService.getStreamReconnectionState(conversationId);
-      if (takenOver()) return true;
-
-      if (!reconnState?.hasActiveStream) {
+      if (!hasRecoverableServerState) {
         dispatch({ type: 'REMOVE_SERVER_ACTIVE_STREAM', conversationId });
         return false;
       }
@@ -2159,6 +2173,13 @@ export function StreamingProvider({ children }: { children: ReactNode }) {
       }
       if (reconnState.state === 'STOPPED_BY_USER') {
         dispatch({ type: 'STOPPED', conversationId, streamId: reconnStreamId });
+        return true;
+      }
+      if (reconnState.state === 'INTERRUPTED') {
+        dispatch({ type: 'STOPPED', conversationId, streamId: reconnStreamId });
+        if (refs.content && callbacks?.onStreamComplete) {
+          callbacks.onStreamComplete(conversationId, refs.content, refs.model);
+        }
         return true;
       }
       if (reconnState.state === 'ERROR') {
@@ -2387,4 +2408,3 @@ function ConversationStreamSubscriber({
   );
   return null;
 }
-

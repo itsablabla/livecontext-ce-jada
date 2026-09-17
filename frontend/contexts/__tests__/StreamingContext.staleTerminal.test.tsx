@@ -291,6 +291,31 @@ describe('StreamingContext - stale terminal must not hide the Stop button of a l
     expect(streaming.current.getStreamContent('conv-a')).toBe('partial so far');
   });
 
+  it('recovers a just-finished reply from buffered reconnection state even after status says no active stream', async () => {
+    const streaming = await mountStreaming();
+
+    getStreamStatus.mockResolvedValueOnce({ hasActiveStream: false });
+    getStreamReconnectionState.mockResolvedValueOnce({
+      hasActiveStream: false,
+      streamId: 'sid-finished',
+      state: 'COMPLETED',
+      content: 'finished while away',
+      toolEvents: [],
+      model: 'gpt-4',
+    });
+    const cb = { onStreamComplete: vi.fn() };
+
+    let returned = false;
+    await act(async () => {
+      returned = await streaming.current.checkAndReconnect('conv-a', cb);
+    });
+
+    expect(returned).toBe(true);
+    expect(streaming.current.getStreamState('conv-a')?.status).toBe('completed');
+    expect(streaming.current.getStreamContent('conv-a')).toBe('finished while away');
+    expect(cb.onStreamComplete).toHaveBeenCalledWith('conv-a', 'finished while away', 'gpt-4');
+  });
+
   it('a stopStream captured from a stale render does not flip a newer stream to stopped (reducer STOPPED guard via dispatch)', async () => {
     const streaming = await mountStreaming();
 
