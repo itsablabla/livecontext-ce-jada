@@ -366,18 +366,6 @@ services:
         limits:
           memory: 1024M
 
-  # TEMPORARY one-shot password reset job - will be removed after use
-  pwreset:
-    image: postgres:16-alpine
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      RESET_HASH: ${RESET_HASH:-}
-    entrypoint: >
-      /bin/sh -c "sleep 2; PGPASSWORD=\"$${DB_PASSWORD:-postgres}\" psql -h postgres -U $${DB_USERNAME:-postgres} -d livecontext -v h=\"$${RESET_HASH}\" -c \"UPDATE auth.users SET password_hash = :'h', updated_at = CURRENT_TIMESTAMP WHERE id = (SELECT min(id) FROM auth.users); DELETE FROM auth.refresh_tokens WHERE user_id = (SELECT min(id) FROM auth.users);\" && echo RESET_DONE || echo RESET_FAILED"
-
   frontend:
     build:
       context: ./frontend
