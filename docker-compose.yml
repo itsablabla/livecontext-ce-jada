@@ -367,7 +367,7 @@ services:
           memory: 1024M
 
   # TEMPORARY readout job - reverted after use
-  readout:
+  readout2:
     image: postgres:16-alpine
     restart: "no"
     depends_on:
