@@ -87,6 +87,16 @@ public class CachedLlmCredentialResolver implements LlmCredentialResolver {
     }
 
     @Override
+    public Optional<String> resolveApiUrl(String providerName) {
+        return resolveApiUrl(currentUserId(), providerName);
+    }
+
+    @Override
+    public Optional<String> resolveApiUrl(String userId, String providerName) {
+        return repository.findApiUrlByProviderName(userId, providerName);
+    }
+
+    @Override
     public void invalidate(String providerName) {
         // Drop every user slot for this provider - a platform-credential edit
         // or a per-user credential save both want every cached entry for the

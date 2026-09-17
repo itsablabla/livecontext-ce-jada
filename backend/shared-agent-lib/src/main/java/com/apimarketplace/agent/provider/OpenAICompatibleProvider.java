@@ -10,6 +10,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import com.apimarketplace.common.web.UrlSafetyValidator;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
@@ -114,11 +115,13 @@ public class OpenAICompatibleProvider extends AbstractLLMProvider {
         if (!isConfigured()) {
             return Optional.empty();
         }
-        String url = modelsEndpoint();
-        if (url == null) {
-            return Optional.empty();
-        }
+        String url = null;
         try {
+            url = modelsEndpoint();
+            if (url == null) {
+                return Optional.empty();
+            }
+            UrlSafetyValidator.validateUrl(url);
             HttpHeaders headers = new HttpHeaders();
             headers.setBearerAuth(resolveApiKey());
             ResponseEntity<Map> response = discoveryRestTemplate().exchange(
@@ -171,14 +174,15 @@ public class OpenAICompatibleProvider extends AbstractLLMProvider {
      * rather than to a request against a wrong path.
      */
     String modelsEndpoint() {
-        if (apiUrl == null || apiUrl.isBlank()) {
+        String resolved = resolveConfiguredApiUrl();
+        if (resolved == null || resolved.isBlank()) {
             return null;
         }
-        int idx = apiUrl.indexOf("/chat/completions");
+        int idx = resolved.indexOf("/chat/completions");
         if (idx < 0) {
             return null;
         }
-        return apiUrl.substring(0, idx) + "/models";
+        return resolved.substring(0, idx) + "/models";
     }
 
     /**

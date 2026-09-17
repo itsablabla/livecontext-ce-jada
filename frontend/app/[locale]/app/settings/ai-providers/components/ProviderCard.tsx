@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Eye,
   EyeOff,
@@ -20,27 +20,38 @@ import type { LlmProviderStatus, LlmProviderDefinition } from "@/lib/api/orchest
 interface ProviderCardProps {
   definition: LlmProviderDefinition;
   status: LlmProviderStatus | undefined;
-  onSave: (integrationName: string, apiKey: string) => Promise<void>;
+  onSave: (integrationName: string, apiKey: string, endpointUrl: string) => Promise<void>;
   onDelete: (integrationName: string) => Promise<void>;
   t: (key: string, values?: Record<string, string>) => string;
 }
 
 export default function ProviderCard({ definition, status, onSave, onDelete, t }: ProviderCardProps) {
   const [apiKey, setApiKey] = useState("");
+  const [endpointUrl, setEndpointUrl] = useState(status?.endpointUrl ?? "");
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const source = status?.source ?? "none";
-  const configured = status?.configured ?? false;
   const hasDbKey = status?.hasDbKey ?? false;
+  const savedEndpointUrl = status?.endpointUrl?.trim() ?? "";
+  const hasStoredConfig = hasDbKey || savedEndpointUrl.length > 0;
+  const canSave = useMemo(() => {
+    const trimmedKey = apiKey.trim();
+    const trimmedEndpoint = endpointUrl.trim();
+    return trimmedKey.length > 0 || trimmedEndpoint !== savedEndpointUrl;
+  }, [apiKey, endpointUrl, savedEndpointUrl]);
+
+  useEffect(() => {
+    setEndpointUrl(status?.endpointUrl ?? "");
+  }, [status?.endpointUrl]);
 
   const handleSave = async () => {
-    if (!apiKey.trim()) return;
+    if (!canSave) return;
     setSaving(true);
     try {
-      await onSave(definition.integrationName, apiKey.trim());
+      await onSave(definition.integrationName, apiKey.trim(), endpointUrl.trim());
       setApiKey("");
       setShowKey(false);
       setSaved(true);
@@ -123,10 +134,23 @@ export default function ProviderCard({ definition, status, onSave, onDelete, t }
           </button>
         </div>
 
+        <div className="space-y-1">
+          <div className="text-xs text-theme-secondary">{t("endpointLabel")}</div>
+          <input
+            type="url"
+            value={endpointUrl}
+            onChange={(e) => setEndpointUrl(e.target.value)}
+            placeholder={definition.endpointPlaceholder}
+            className="w-full h-9 px-3 text-sm rounded-lg border border-theme bg-theme-primary text-theme-primary placeholder:text-theme-secondary/60 focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/40"
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
+          />
+          <p className="text-xs text-theme-secondary">{t("endpointHint")}</p>
+        </div>
+
         <div className="flex items-center justify-end gap-2">
           <Button
             onClick={handleSave}
-            disabled={!apiKey.trim() || saving}
+            disabled={!canSave || saving}
             size="sm"
             variant={saved ? "outline" : "default"}
             className="h-8 px-3"
@@ -141,7 +165,7 @@ export default function ProviderCard({ definition, status, onSave, onDelete, t }
             {saved ? t("saved") : t("save")}
           </Button>
 
-          {hasDbKey && (
+          {hasStoredConfig && (
             <Button
               onClick={handleDelete}
               disabled={deleting}
@@ -154,7 +178,7 @@ export default function ProviderCard({ definition, status, onSave, onDelete, t }
               ) : (
                 <Trash2 className="w-3.5 h-3.5 mr-1.5" />
               )}
-              {t("removeKey")}
+              {t("removeSavedConfig")}
             </Button>
           )}
         </div>

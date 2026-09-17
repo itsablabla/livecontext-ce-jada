@@ -2,12 +2,14 @@ package com.apimarketplace.auth.credential.service;
 
 import com.apimarketplace.auth.credential.domain.PlatformCredentialModels.*;
 import com.apimarketplace.auth.credential.repository.PlatformCredentialRepository;
+import com.apimarketplace.common.web.UrlSafetyValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -18,6 +20,7 @@ import java.util.Optional;
  */
 @Service
 public class PlatformCredentialService {
+    static final String LLM_ENDPOINT_URL_FIELD = "endpoint_url";
 
     private static final Logger log = LoggerFactory.getLogger(PlatformCredentialService.class);
 
@@ -326,11 +329,8 @@ public class PlatformCredentialService {
         if (existing.isPresent()) {
             // Update existing
             PlatformCredential current = existing.get();
-            Map<String, String> mergedCustomFields = new java.util.HashMap<>(
-                    current.customFields() != null ? current.customFields() : Map.of());
-            if (request.customFields() != null) {
-                mergedCustomFields.putAll(request.customFields());
-            }
+            Map<String, String> mergedCustomFields = mergeCustomFields(
+                    current.customFields(), request.customFields());
 
             credential = new PlatformCredential(
                     current.id(),
@@ -422,7 +422,7 @@ public class PlatformCredentialService {
                     request.showUnverifiedAppWarning() != null
                             ? request.showUnverifiedAppWarning() : true,
                     true,
-                    request.customFields() != null ? request.customFields() : Map.of(),
+                    sanitizeCustomFieldsForSave(request.customFields()),
                     request.defaultMarkupCredits() != null && !isOauth2
                             ? request.defaultMarkupCredits() : markupDefault,
                     request.maxCallsPerRun() != null && !isOauth2
@@ -442,6 +442,42 @@ public class PlatformCredentialService {
 
         PlatformCredential saved = repository.save(credential);
         return toPersistedResponse(saved);
+    }
+
+    private static Map<String, String> mergeCustomFields(Map<String, String> current, Map<String, String> requested) {
+        Map<String, String> merged = new HashMap<>(current != null ? current : Map.of());
+        if (requested == null || requested.isEmpty()) {
+            return merged;
+        }
+
+        Map<String, String> sanitized = sanitizeCustomFieldsForSave(requested);
+        for (Map.Entry<String, String> entry : sanitized.entrySet()) {
+            merged.put(entry.getKey(), entry.getValue());
+        }
+
+        if (requested.containsKey(LLM_ENDPOINT_URL_FIELD)
+                && !sanitized.containsKey(LLM_ENDPOINT_URL_FIELD)) {
+            merged.remove(LLM_ENDPOINT_URL_FIELD);
+        }
+        return merged;
+    }
+
+    private static Map<String, String> sanitizeCustomFieldsForSave(Map<String, String> customFields) {
+        if (customFields == null || customFields.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> sanitized = new HashMap<>(customFields);
+        if (customFields.containsKey(LLM_ENDPOINT_URL_FIELD)) {
+            String endpoint = customFields.get(LLM_ENDPOINT_URL_FIELD);
+            if (endpoint == null || endpoint.isBlank()) {
+                sanitized.remove(LLM_ENDPOINT_URL_FIELD);
+            } else {
+                String trimmed = endpoint.trim();
+                UrlSafetyValidator.validateUrlFormat(trimmed);
+                sanitized.put(LLM_ENDPOINT_URL_FIELD, trimmed);
+            }
+        }
+        return sanitized;
     }
 
     /**

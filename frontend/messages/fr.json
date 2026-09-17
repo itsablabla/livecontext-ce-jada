@@ -3375,7 +3375,10 @@
     "save": "Enregistrer",
     "saved": "Enregistré",
     "removeKey": "Supprimer",
+    "removeSavedConfig": "Supprimer la configuration enregistrée",
     "updateKey": "Entrez une nouvelle clé pour mettre à jour...",
+    "endpointLabel": "Endpoint personnalisé",
+    "endpointHint": "Endpoint complet facultatif pour la requête. Laissez vide pour utiliser la valeur par défaut du serveur.",
     "source": {
       "database": "Base de données",
       "environment": "Environnement",

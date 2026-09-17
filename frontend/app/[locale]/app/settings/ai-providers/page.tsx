@@ -28,6 +28,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "Anthropic (Claude)",
     docsUrl: "https://console.anthropic.com/settings/keys",
     placeholder: "sk-ant-...",
+    endpointPlaceholder: "https://api.anthropic.com/v1/messages",
   },
   {
     providerName: "openai",
@@ -35,6 +36,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "OpenAI (GPT)",
     docsUrl: "https://platform.openai.com/api-keys",
     placeholder: "sk-...",
+    endpointPlaceholder: "https://api.openai.com/v1/chat/completions",
   },
   {
     providerName: "google",
@@ -42,6 +44,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "Google (Gemini)",
     docsUrl: "https://aistudio.google.com/app/apikey",
     placeholder: "AIza...",
+    endpointPlaceholder: "https://generativelanguage.googleapis.com/v1beta/models",
   },
   {
     providerName: "mistral",
@@ -49,6 +52,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "Mistral AI",
     docsUrl: "https://console.mistral.ai/api-keys/",
     placeholder: "...",
+    endpointPlaceholder: "https://api.mistral.ai/v1/chat/completions",
   },
   {
     providerName: "deepseek",
@@ -56,6 +60,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "DeepSeek",
     docsUrl: "https://platform.deepseek.com/api_keys",
     placeholder: "sk-...",
+    endpointPlaceholder: "https://api.deepseek.com/v1/chat/completions",
   },
   {
     providerName: "xai",
@@ -63,6 +68,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "xAI (Grok)",
     docsUrl: "https://console.x.ai/",
     placeholder: "xai-...",
+    endpointPlaceholder: "https://api.x.ai/v1/chat/completions",
   },
   {
     providerName: "perplexity",
@@ -70,6 +76,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "Perplexity (Sonar)",
     docsUrl: "https://www.perplexity.ai/settings/api",
     placeholder: "pplx-...",
+    endpointPlaceholder: "https://api.perplexity.ai/chat/completions",
   },
   {
     providerName: "cohere",
@@ -77,6 +84,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "Cohere (Command R+)",
     docsUrl: "https://dashboard.cohere.com/api-keys",
     placeholder: "...",
+    endpointPlaceholder: "https://api.cohere.ai/compatibility/v1/chat/completions",
   },
   {
     providerName: "zai",
@@ -84,6 +92,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "Z.AI (GLM)",
     docsUrl: "https://z.ai/manage-apikey/apikey-list",
     placeholder: "...",
+    endpointPlaceholder: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
   },
   {
     providerName: "openrouter",
@@ -91,6 +100,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "OpenRouter (Multi-provider)",
     docsUrl: "https://openrouter.ai/settings/keys",
     placeholder: "sk-or-...",
+    endpointPlaceholder: "https://openrouter.ai/api/v1/chat/completions",
   },
   {
     providerName: "qwen",
@@ -98,6 +108,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "Qwen (Alibaba)",
     docsUrl: "https://bailian.console.alibabacloud.com/",
     placeholder: "sk-...",
+    endpointPlaceholder: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
   },
   {
     providerName: "moonshot",
@@ -105,6 +116,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "Moonshot (Kimi)",
     docsUrl: "https://platform.moonshot.ai/console/api-keys",
     placeholder: "sk-...",
+    endpointPlaceholder: "https://api.moonshot.ai/v1/chat/completions",
   },
   {
     providerName: "minimax",
@@ -112,6 +124,7 @@ const PROVIDER_DEFINITIONS: LlmProviderDefinition[] = [
     displayName: "MiniMax",
     docsUrl: "https://platform.minimax.io/user-center/basic-information/interface-key",
     placeholder: "eyJ...",
+    endpointPlaceholder: "https://api.minimax.io/v1/chat/completions",
   },
 ];
 
@@ -235,7 +248,7 @@ export default function AiProvidersPage() {
     }
   };
 
-  const handleSave = async (integrationName: string, apiKey: string) => {
+  const handleSave = async (integrationName: string, apiKey: string, endpointUrl: string) => {
     const def = PROVIDER_DEFINITIONS.find((d) => d.integrationName === integrationName);
     if (!def) return;
 
@@ -243,8 +256,11 @@ export default function AiProvidersPage() {
       integrationName,
       displayName: def.displayName,
       authType: "api_key",
-      apiKey,
+      apiKey: apiKey.trim() || undefined,
       category: "llm_provider",
+      customFields: {
+        endpoint_url: endpointUrl.trim(),
+      },
     });
     track('ai_provider_key_saved', { integration_name: integrationName, provider_name: def.providerName });
 

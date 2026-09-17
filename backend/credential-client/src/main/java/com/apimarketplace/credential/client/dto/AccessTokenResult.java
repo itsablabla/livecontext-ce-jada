@@ -10,6 +10,7 @@ public class AccessTokenResult {
 
     private String accessToken;
     private boolean found;
+    private String endpointUrl;
     // V103: auth type of the resolved credential (oauth2, api_key, bearer_token, ...).
     // Used as the variant filter when selecting tool_credentials injection metadata
     // for APIs that expose multiple auth variants. Null for platform-sourced tokens
@@ -34,6 +35,9 @@ public class AccessTokenResult {
 
     public boolean isFound() { return found; }
     public void setFound(boolean found) { this.found = found; }
+
+    public String getEndpointUrl() { return endpointUrl; }
+    public void setEndpointUrl(String endpointUrl) { this.endpointUrl = endpointUrl; }
 
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }

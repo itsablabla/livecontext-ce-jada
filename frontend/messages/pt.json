@@ -3196,7 +3196,10 @@
     "save": "Salvar",
     "saved": "Salvo",
     "removeKey": "Remover",
+    "removeSavedConfig": "Remover configuração salva",
     "updateKey": "Digite a nova chave para atualizar...",
+    "endpointLabel": "Endpoint personalizado",
+    "endpointHint": "Endpoint completo opcional da solicitação. Deixe em branco para usar o padrão do servidor.",
     "source": {
       "database": "Do banco de dados",
       "environment": "Do ambiente",

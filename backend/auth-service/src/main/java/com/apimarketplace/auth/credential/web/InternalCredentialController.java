@@ -37,7 +37,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/internal/credentials")
 public class InternalCredentialController {
-
+    private static final String LLM_ENDPOINT_URL_FIELD = "endpoint_url";
     private static final Logger log = LoggerFactory.getLogger(InternalCredentialController.class);
 
     private final InternalCredentialService credentialService;
@@ -387,11 +387,29 @@ public class InternalCredentialController {
         // V362: thread the active workspace (forwarded by the credential-client's
         // OrgContextHeaderForwarder) so a BYOK key resolves workspace-isolated;
         // null org falls back to tenant-keyed for backward compatibility.
+        Optional<com.apimarketplace.auth.credential.domain.PlatformCredentialModels.PlatformCredential> credential =
+                platformCredentialService.getRawCredential(integrationName, tenantId, organizationId);
         Optional<String> token = credentialService.getPlatformAccessToken(integrationName, tenantId, organizationId);
-        if (token.isPresent()) {
-            return ResponseEntity.ok(Map.of("accessToken", token.get(), "found", true));
+        if (credential.isPresent()) {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("found", true);
+            token.ifPresent(value -> body.put("accessToken", value));
+            extractLlmEndpointUrl(credential.get().customFields())
+                    .ifPresent(value -> body.put("endpointUrl", value));
+            return ResponseEntity.ok(body);
         }
         return ResponseEntity.ok(Map.of("found", false));
+    }
+
+    private static Optional<String> extractLlmEndpointUrl(Map<String, String> customFields) {
+        if (customFields == null) {
+            return Optional.empty();
+        }
+        String value = customFields.get(LLM_ENDPOINT_URL_FIELD);
+        if (value == null || value.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(value.trim());
     }
 
     // ========== Platform Credential Markup - Orchestrator Internal API ==========

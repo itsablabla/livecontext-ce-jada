@@ -3196,7 +3196,10 @@
     "save": "Speichern",
     "saved": "Gespeichert",
     "removeKey": "Entfernen",
+    "removeSavedConfig": "Gespeicherte Konfiguration entfernen",
     "updateKey": "Neuen Schlüssel zum Aktualisieren eingeben...",
+    "endpointLabel": "Benutzerdefinierter Endpoint",
+    "endpointHint": "Optionaler vollständiger Request-Endpoint. Leer lassen, um den Serverstandard zu verwenden.",
     "source": {
       "database": "Aus Datenbank",
       "environment": "Aus Umgebung",

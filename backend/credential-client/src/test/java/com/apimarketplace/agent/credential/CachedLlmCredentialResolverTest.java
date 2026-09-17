@@ -185,4 +185,16 @@ class CachedLlmCredentialResolverTest {
         verify(repository, times(2)).findApiKeyByProviderName("user-A", "openai");
         verify(repository, times(2)).findApiKeyByProviderName("user-B", "openai");
     }
+
+    @Test
+    @DisplayName("resolveApiUrl delegates to the repository with the explicit user slot")
+    void resolveApiUrlDelegatesToRepository() {
+        when(repository.findApiUrlByProviderName("user-A", "openai"))
+                .thenReturn(Optional.of("https://user-a.example/v1/chat/completions"));
+
+        Optional<String> result = resolver.resolveApiUrl("user-A", "openai");
+
+        assertThat(result).contains("https://user-a.example/v1/chat/completions");
+        verify(repository).findApiUrlByProviderName("user-A", "openai");
+    }
 }

@@ -1,11 +1,13 @@
 package com.apimarketplace.agent.provider;
 
+import com.apimarketplace.agent.resolver.LlmCredentialResolver;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -39,6 +41,27 @@ class OpenAICompatibleProviderModelListingTest {
                 .isEqualTo("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models");
         assertThat(provider("https://api.minimax.io/v1/chat/completions").modelsEndpoint())
                 .isEqualTo("https://api.minimax.io/v1/models");
+    }
+
+    @Test
+    @DisplayName("Endpoint derivation uses the DB override when one is configured")
+    void derivesModelsEndpointFromOverride() {
+        OpenAICompatibleProvider provider =
+                new OpenAICompatibleProvider("zai", "https://fallback.example/v1/chat/completions", "sk", List.of(), 1);
+        provider.setCredentialResolver(new LlmCredentialResolver() {
+            @Override
+            public Optional<String> resolveApiKey(String providerName) {
+                return Optional.of("sk");
+            }
+
+            @Override
+            public Optional<String> resolveApiUrl(String providerName) {
+                return Optional.of("https://override.example/api/paas/v4/chat/completions");
+            }
+        });
+
+        assertThat(provider.modelsEndpoint())
+                .isEqualTo("https://override.example/api/paas/v4/models");
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.apimarketplace.agent.credential;
 
 import com.apimarketplace.credential.client.CredentialClient;
+import com.apimarketplace.credential.client.dto.AccessTokenResult;
 import com.apimarketplace.credential.client.dto.CredentialSummaryDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -329,5 +330,57 @@ class LlmCredentialRepositoryTest {
 
         assertThat(result).isPresent().contains("sk-legacy-user");
         verify(credentialClient, never()).getPlatformCredentialForIntegration(any());
+    }
+
+    @Test
+    @DisplayName("user endpoint override wins over platform endpoint")
+    void userEndpointOverrideWinsOverPlatform() {
+        CredentialSummaryDto userCred = new CredentialSummaryDto();
+        Map<String, Object> data = new HashMap<>();
+        data.put("api_key", "sk-user");
+        data.put("endpoint_url", " https://user.example/v1/chat/completions ");
+        userCred.setCredentialData(data);
+        when(credentialClient.getDefaultCredential("user-8", "llm_openai"))
+                .thenReturn(Optional.of(userCred));
+
+        Optional<String> result = repository.findApiUrlByProviderName("user-8", "openai");
+
+        assertThat(result).contains("https://user.example/v1/chat/completions");
+        verify(credentialClient, never()).getPlatformCredentialInfoForIntegration(any(), any());
+    }
+
+    @Test
+    @DisplayName("platform endpoint override is returned from internal credential info")
+    void platformEndpointOverrideResolves() {
+        AccessTokenResult info = new AccessTokenResult();
+        info.setFound(true);
+        info.setEndpointUrl(" https://platform.example/v1/messages ");
+        when(credentialClient.getPlatformCredentialInfoForIntegration("llm_anthropic", null))
+                .thenReturn(Optional.of(info));
+
+        Optional<String> result = repository.findPlatformApiUrlByProviderName("anthropic");
+
+        assertThat(result).contains("https://platform.example/v1/messages");
+    }
+
+    @Test
+    @DisplayName("proxy-mode user endpoint is ignored and falls through to platform")
+    void proxyModeUserEndpointFallsThroughToPlatform() {
+        CredentialSummaryDto userCred = new CredentialSummaryDto();
+        Map<String, Object> data = new HashMap<>();
+        data.put("endpoint_url", "https://user.example/v1/chat/completions");
+        data.put("mode", "proxy");
+        userCred.setCredentialData(data);
+        when(credentialClient.getDefaultCredential("user-11", "llm_openai"))
+                .thenReturn(Optional.of(userCred));
+        AccessTokenResult info = new AccessTokenResult();
+        info.setFound(true);
+        info.setEndpointUrl("https://platform.example/v1/chat/completions");
+        when(credentialClient.getPlatformCredentialInfoForIntegration("llm_openai", null))
+                .thenReturn(Optional.of(info));
+
+        Optional<String> result = repository.findApiUrlByProviderName("user-11", "openai");
+
+        assertThat(result).contains("https://platform.example/v1/chat/completions");
     }
 }

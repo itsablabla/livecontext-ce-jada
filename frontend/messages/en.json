@@ -3375,7 +3375,10 @@
     "save": "Save",
     "saved": "Saved",
     "removeKey": "Remove",
+    "removeSavedConfig": "Remove saved config",
     "updateKey": "Enter new key to update...",
+    "endpointLabel": "Custom endpoint",
+    "endpointHint": "Optional full request endpoint. Leave blank to use the server default.",
     "source": {
       "database": "From database",
       "environment": "From environment",

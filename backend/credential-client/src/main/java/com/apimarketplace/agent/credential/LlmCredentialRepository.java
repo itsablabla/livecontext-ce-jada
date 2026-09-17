@@ -39,6 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 @Repository
 public class LlmCredentialRepository {
+    static final String ENDPOINT_URL_FIELD = "endpoint_url";
 
     /**
      * Convention: integration_name = {@value #INTEGRATION_PREFIX} + provider name.
@@ -151,6 +152,57 @@ public class LlmCredentialRepository {
         }
     }
 
+    public Optional<String> findApiUrlByProviderName(String providerName) {
+        return findApiUrlByProviderName(TenantResolver.currentRequestUserId(), providerName);
+    }
+
+    /**
+     * Resolve an endpoint override for the given provider.
+     *
+     * <p>Resolution order mirrors {@link #findApiKeyByProviderName(String, String)}:
+     * user-default credential first (when not in proxy mode), then the platform
+     * credential. Empty means "use the configured YAML/env endpoint".
+     */
+    public Optional<String> findApiUrlByProviderName(String userId, String providerName) {
+        String integrationName = toIntegrationName(providerName);
+        if (integrationName == null) {
+            log.debug("Unknown provider name: {}", providerName);
+            return Optional.empty();
+        }
+
+        if (userId != null && !userId.isBlank()) {
+            try {
+                Optional<CredentialSummaryDto> userCred =
+                        credentialClient.getDefaultCredential(userId, integrationName);
+                if (userCred.isPresent()) {
+                    Map<String, Object> data = userCred.get().getCredentialData();
+                    if (isProxyMode(data)) {
+                        log.debug("User cred for {}={} is proxy-mode - endpoint falls through to platform",
+                                userId, integrationName);
+                    } else {
+                        Optional<String> userUrl = extractEndpointUrl(data);
+                        if (userUrl.isPresent()) {
+                            return userUrl;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to resolve user endpoint override for user={}, integration={}: {}",
+                        userId, integrationName, e.getMessage());
+            }
+        }
+
+        return findPlatformApiUrlByIntegrationName(integrationName);
+    }
+
+    public Optional<String> findPlatformApiUrlByProviderName(String providerName) {
+        String integrationName = toIntegrationName(providerName);
+        if (integrationName == null) {
+            return Optional.empty();
+        }
+        return findPlatformApiUrlByIntegrationName(integrationName);
+    }
+
     /**
      * Returns true when the user's credential is configured as
      * {@code mode="proxy"}, opting into platform-managed routing instead of
@@ -180,6 +232,40 @@ public class LlmCredentialRepository {
         Object value = credentialData.get("api_key");
         if (value instanceof String s && !s.isBlank()) {
             return Optional.of(s);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<String> findPlatformApiUrlByIntegrationName(String integrationName) {
+        try {
+            return credentialClient.getPlatformCredentialInfoForIntegration(integrationName, null)
+                    .flatMap(info -> normalizeNonBlank(info.getEndpointUrl()));
+        } catch (Exception e) {
+            log.warn("Failed to get platform endpoint override for integration {}: {}",
+                    integrationName, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Optional<String> extractEndpointUrl(Map<String, Object> credentialData) {
+        if (credentialData == null) {
+            return Optional.empty();
+        }
+        Optional<String> direct = normalizeNonBlank(credentialData.get(ENDPOINT_URL_FIELD));
+        if (direct.isPresent()) {
+            return direct;
+        }
+        Object customFields = credentialData.get("customFields");
+        if (customFields instanceof Map<?, ?> map) {
+            return normalizeNonBlank(((Map<String, Object>) map).get(ENDPOINT_URL_FIELD));
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<String> normalizeNonBlank(Object value) {
+        if (value instanceof String s && !s.isBlank()) {
+            return Optional.of(s.trim());
         }
         return Optional.empty();
     }
