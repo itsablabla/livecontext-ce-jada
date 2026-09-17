@@ -1,0 +1,147 @@
+# Lago v1.53.0, adapted from https://github.com/getlago/lago/blob/v1.53.0/docker-compose.yml
+# Deploy as an independent Coolify Service in each project, not in the LiveContext network.
+# Assign HTTPS domains to front:80 and api:3000. Never publish database ports.
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql://lago:${POSTGRES_PASSWORD}@db:5432/lago?search_path=public
+  REDIS_URL: redis://redis:6379
+  LAGO_REDIS_CACHE_URL: redis://redis:6379
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+  RAILS_ENV: production
+  RAILS_LOG_TO_STDOUT: "true"
+  WEB_CONCURRENCY: "0"
+  RAILS_MAX_THREADS: "3"
+  SIDEKIQ_CONCURRENCY: "5"
+  LAGO_RSA_PRIVATE_KEY: ${LAGO_RSA_PRIVATE_KEY}
+  LAGO_ENCRYPTION_PRIMARY_KEY: ${LAGO_ENCRYPTION_PRIMARY_KEY}
+  LAGO_ENCRYPTION_DETERMINISTIC_KEY: ${LAGO_ENCRYPTION_DETERMINISTIC_KEY}
+  LAGO_ENCRYPTION_KEY_DERIVATION_SALT: ${LAGO_ENCRYPTION_KEY_DERIVATION_SALT}
+  LAGO_API_URL: ${LAGO_API_URL}
+  LAGO_FRONT_URL: ${LAGO_FRONT_URL}
+  LAGO_PDF_URL: http://pdf:3000
+  LAGO_USE_AWS_S3: "false"
+  LAGO_USE_GCS: "false"
+  LAGO_DISABLE_SEGMENT: "true"
+  LAGO_DISABLE_SIGNUP: "true"
+  LAGO_SIDEKIQ_WEB: "false"
+  LAGO_DISABLE_PDF_GENERATION: "false"
+  LAGO_CREATE_ORG: "false"
+  LAGO_ORG_NAME: ${LAGO_ORG_NAME}
+  LAGO_ORG_USER_EMAIL: ${LAGO_ORG_USER_EMAIL}
+  LAGO_ORG_USER_PASSWORD: ${LAGO_ORG_USER_PASSWORD}
+  LAGO_ORG_API_KEY: ${LAGO_ORG_API_KEY}
+
+x-backend: &backend
+  image: getlago/api:v1.53.0
+  restart: unless-stopped
+  environment: *backend-env
+  mem_limit: 1536m
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  db:
+    image: getlago/postgres-partman:15.0-alpine
+    restart: unless-stopped
+    mem_limit: 768m
+    environment:
+      POSTGRES_DB: lago
+      POSTGRES_USER: lago
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /data/postgres
+      POSTGRES_SCHEMA: public
+    volumes:
+      - lago-postgres:/data/postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lago -d lago -h localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "192mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - lago-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  migrate:
+    image: getlago/api:v1.53.0
+    restart: "no"
+    mem_limit: 2048m
+    command: ["./scripts/migrate.sh"]
+    environment:
+      <<: *backend-env
+      LAGO_CREATE_ORG: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    exclude_from_hc: true
+  api:
+    <<: *backend
+    command: ["./scripts/start.api.sh"]
+    expose: ["3000"]
+    volumes:
+      - lago-storage:/app/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+  worker:
+    <<: *backend
+    command: ["./scripts/start.worker.sh"]
+    volumes:
+      - lago-storage:/app/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+  clock:
+    <<: *backend
+    mem_limit: 1024m
+    command: ["./scripts/start.clock.sh"]
+  pdf:
+    image: getlago/lago-gotenberg:7.8.2
+    restart: unless-stopped
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+  front:
+    image: getlago/front:v1.53.0
+    restart: unless-stopped
+    mem_limit: 128m
+    expose: ["80"]
+    environment:
+      API_URL: ${LAGO_API_URL}
+      LAGO_API_URL: ${LAGO_API_URL}
+      LAGO_FRONT_URL: ${LAGO_FRONT_URL}
+      APP_ENV: production
+      LAGO_DISABLE_PDF_GENERATION: "false"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  lago-postgres:
+  lago-redis:
+  lago-storage:
