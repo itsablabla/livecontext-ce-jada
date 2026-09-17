@@ -12,8 +12,14 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Collection;
+import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -29,23 +35,29 @@ import java.util.Set;
 public class McpScopeCatalogClient {
 
     private static final Logger log = LoggerFactory.getLogger(McpScopeCatalogClient.class);
+    private static final String HMAC_ALGO = "HmacSHA256";
+    private static final String SIGNATURE_PREFIX = "gw_";
+    private static final String INTERNAL_PROVIDER_ID = "internal-mcp-scope-client";
 
     private final RestTemplate restTemplate;
     private final String orchestratorUrl;
+    private final String gatewaySecretKey;
 
     @Autowired
-    public McpScopeCatalogClient(@Value("${services.orchestrator-url:http://localhost:8099}") String orchestratorUrl) {
-        this(buildRestTemplate(), orchestratorUrl);
+    public McpScopeCatalogClient(
+            @Value("${services.orchestrator-url:http://localhost:8099}") String orchestratorUrl,
+            @Value("${gateway.filter.secret-key:}") String gatewaySecretKey) {
+        this(buildRestTemplate(), orchestratorUrl, gatewaySecretKey);
     }
 
-    McpScopeCatalogClient(RestTemplate restTemplate, String orchestratorUrl) {
+    McpScopeCatalogClient(RestTemplate restTemplate, String orchestratorUrl, String gatewaySecretKey) {
         this.restTemplate = restTemplate;
         this.orchestratorUrl = stripTrailingSlash(orchestratorUrl);
+        this.gatewaySecretKey = gatewaySecretKey;
     }
 
     public Set<String> getAvailableScopeNames(Long userId) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("X-User-ID", String.valueOf(userId));
+        HttpHeaders headers = buildHeaders(userId);
         try {
             Map<String, Object> body = restTemplate.exchange(
                     orchestratorUrl + "/api/mcp-server/connection",
@@ -57,6 +69,41 @@ public class McpScopeCatalogClient {
         } catch (Exception e) {
             log.warn("Failed to fetch MCP scope catalog for userId={}: {}", userId, e.getMessage());
             throw new IllegalStateException("Failed to fetch MCP scope catalog", e);
+        }
+    }
+
+    private HttpHeaders buildHeaders(Long userId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-User-ID", String.valueOf(userId));
+        applyGatewaySignature(headers);
+        return headers;
+    }
+
+    private void applyGatewaySignature(HttpHeaders headers) {
+        if (gatewaySecretKey == null || gatewaySecretKey.isBlank()) {
+            return;
+        }
+        String timestamp = String.valueOf(System.currentTimeMillis());
+        headers.set("X-Provider-ID", INTERNAL_PROVIDER_ID);
+        headers.set("X-Gateway-Timestamp", timestamp);
+        headers.set("X-Gateway-Secret", computeGatewaySignature(
+                INTERNAL_PROVIDER_ID,
+                headers.getFirst("X-User-ID"),
+                headers.getFirst("X-Organization-ID"),
+                timestamp));
+    }
+
+    private String computeGatewaySignature(String providerId, String userId, String organizationId, String timestamp) {
+        String safeUser = userId != null ? userId : "";
+        String safeOrg = organizationId != null ? organizationId : "";
+        String data = providerId + "|" + safeUser + "|" + safeOrg + "|" + timestamp;
+        try {
+            Mac mac = Mac.getInstance(HMAC_ALGO);
+            mac.init(new SecretKeySpec(gatewaySecretKey.getBytes(StandardCharsets.UTF_8), HMAC_ALGO));
+            byte[] hash = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+            return SIGNATURE_PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            throw new IllegalStateException("HmacSHA256 unavailable", e);
         }
     }
 
