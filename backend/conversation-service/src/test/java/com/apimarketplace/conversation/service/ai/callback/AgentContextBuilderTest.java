@@ -85,7 +85,13 @@ class AgentContextBuilderTest {
         // Set default max iterations via reflection (it's a @Value field)
         Field maxIterationsField = AgentContextBuilder.class.getDeclaredField("defaultMaxIterations");
         maxIterationsField.setAccessible(true);
-        maxIterationsField.setInt(agentContextBuilder, 10);
+        // Read the production @Value fallback instead of hiding default drift
+        // behind a separately hard-coded test value.
+        String expression = maxIterationsField.getAnnotation(
+                org.springframework.beans.factory.annotation.Value.class).value();
+        int fallback = Integer.parseInt(expression.substring(
+                expression.lastIndexOf(':') + 1, expression.length() - 1));
+        maxIterationsField.setInt(agentContextBuilder, fallback);
 
         Field customPromptField = AgentContextBuilder.class.getDeclaredField("customSystemPrompt");
         customPromptField.setAccessible(true);
@@ -125,7 +131,7 @@ class AgentContextBuilderTest {
             assertThat(context.model()).isEqualTo("gpt-4");
             assertThat(context.userPrompt()).isEqualTo("Hello");
             assertThat(context.tenantId()).isEqualTo("user-1");
-            assertThat(context.maxIterations()).isEqualTo(10);
+            assertThat(context.maxIterations()).isEqualTo(100);
             // Empty core-tools list triggers the degraded fallback: allow RRF
             // discovery so the agent isn't stranded with zero tools.
             assertThat(context.autoDiscoverTools()).isTrue();
@@ -1190,7 +1196,7 @@ class AgentContextBuilderTest {
             AgentLoopContext context = agentContextBuilder.build(request, "conv-1", null);
 
             // "hacked" toolsMode sanitized to "all" → uses general chat prompt (full default)
-            assertThat(context.maxIterations()).isEqualTo(10); // default, since chatConfig had no maxIterations
+            assertThat(context.maxIterations()).isEqualTo(100); // default, since chatConfig had no maxIterations
             assertThat(context.systemPrompt()).isNotNull();
         }
 

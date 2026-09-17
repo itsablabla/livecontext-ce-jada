@@ -85,7 +85,7 @@ public class AgentContextBuilder {
     @Value("${conversation.agent.system-prompt:}")
     private String customSystemPrompt;
 
-    @Value("${conversation.agent.max-iterations:10}")
+    @Value("${conversation.agent.max-iterations:100}")
     private int defaultMaxIterations;
 
     @Value("${conversation.agent.execution-timeout-seconds:3600}")

@@ -128,6 +128,8 @@ services:
     expose: ["8080"]
     environment:
       PORT: "8080"
+      # Keep unconfigured chats aligned with the UI default across redeploys.
+      CONVERSATION_AGENT_MAX_ITERATIONS: "100"
       DB_HOST: postgres
       DB_PORT: "5432"
       DB_NAME: livecontext

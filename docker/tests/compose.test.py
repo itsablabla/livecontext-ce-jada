@@ -34,6 +34,10 @@ class ComposeContract(unittest.TestCase):
                        "livecontext_files", "livecontext_browser", "livecontext_redis"):
             self.assertIn(volume, self.cloud["volumes"])
 
+    def test_chat_iteration_default_survives_redeploys(self):
+        env = self.cloud["services"]["livecontext"]["environment"]
+        self.assertEqual(env["CONVERSATION_AGENT_MAX_ITERATIONS"], "100")
+
     def test_init_must_succeed(self):
         for compose in (self.local, self.cloud):
             services = compose["services"]

@@ -84,6 +84,14 @@ Test each with the actual chosen provider before claiming complete model support
 
 ## Verification and upgrades
 
+General chats without an explicit iteration setting default to **100 iterations**.
+The backend fallback and Coolify Compose's
+`CONVERSATION_AGENT_MAX_ITERATIONS: "100"` deliberately agree with the chat UI.
+This setting survives restarts and source redeployments. Explicit conversation
+and agent limits still take precedence. User/workspace defaults seed new
+conversations; changing them does not retroactively rewrite existing chats.
+An existing chat with no iteration key uses the backend fallback.
+
 Run `python3 docker/tests/compose.test.py` with PyYAML installed. For native Compose
 validation, strip the Coolify-only `exclude_from_hc` service key first; Coolify
 removes it before calling Docker. `minio-init` is a successful one-shot, not a
