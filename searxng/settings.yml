@@ -1,4 +1,4 @@
-# SearXNG settings for the LiveContext CE web_search sidecar (opt-in browser-agent profile).
+# SearXNG settings for the LiveContext CE web_search sidecar (enabled by default in repository Docker Compose).
 # Mounted read-only into the searxng container at /etc/searxng/settings.yml by docker-compose.yml.
 #
 # The websearch service queries {searxng}/search?format=json, so the `json` output format MUST

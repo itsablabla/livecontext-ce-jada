@@ -6,7 +6,7 @@ GitHub Actions, not via this directory.
 
 | Mode | File | Containers | Keycloak | Best for |
 |------|------|-----------|----------|----------|
-| **Monolith** | `docker-compose.yml` | 5 | No | Local dev, self-hosting |
+| **Monolith** | `docker-compose.yml` | 8 | No | Local dev, self-hosting |
 
 ---
 
@@ -19,7 +19,8 @@ GitHub Actions, not via this directory.
 ## Quick Start
 
 ```bash
-# From the repo root. This PULLS the prebuilt images (no local build):
+# From the repo root. This pulls the prebuilt images and, on first run, builds the
+# bundled browser-agent websearch image locally:
 docker compose up -d
 
 # Wait ~2-3 minutes for the backend to initialize (Flyway migrations + tool registration)
@@ -29,8 +30,9 @@ docker compose ps
 # Open http://localhost:3000 and create an account (the first user becomes the admin)
 ```
 
-> **Build from source instead?** The compose pulls prebuilt images. To build them
-> yourself, use the per-service Dockerfiles (`backend/monolith-service/Dockerfile` with the
+> **Build from source instead?** The compose pulls the main prebuilt images and builds
+> the bundled websearch service locally. To build the pulled images yourself instead, use
+> the per-service Dockerfiles (`backend/monolith-service/Dockerfile` with the
 > `ce` Maven profile, `frontend/Dockerfile`, `mcp/bridge/Dockerfile`).
 
 > **Accessing from another machine (not localhost)?** Works out of the box, nothing to
@@ -176,23 +178,20 @@ Next.js compression is disabled. This is required for Docker Desktop on Windows 
 | `spring.flyway.baseline-on-migrate` | `true` | Safe start on empty or existing DB |
 | `hikari.connection-init-sql` | `SET search_path TO orchestrator,auth,...` | All schemas accessible without prefixes |
 | `piston.embedded` | `true` | In-process code execution (no Piston container; CE image includes bash, Node.js, Python, and tsx) |
-| `websearch.enabled` | `false` (env `WEBSEARCH_ENABLED`) | Browser agent off by default; the opt-in `browser-agent` profile sets it to `true` (see "Browser agent" below) |
+| `websearch.enabled` | `true` (env `WEBSEARCH_ENABLED`) | Browser agent enabled by default in the repository Docker Compose stack |
 | `credit.unlimited` | `true` | No billing, infinite credits |
 | All `services.*-url` | `http://localhost:${PORT}` | Loopback - all services in same JVM |
 
-## Browser agent (agent_browse) - opt-in
+## Browser agent (agent_browse) - enabled by default
 
 The browser agent (an LLM that drives a real Chromium to navigate, click, and
-extract from web pages) is **off by default** because it needs a heavy
-Chromium + browser-use container (~1 GB image, +2 GB shared memory). Turn it on
-with the bundled env file, which sets both halves at once - the `browser-agent`
-Docker profile (starts the `websearch` container, built on demand from the
-bundled `websearch-service/` source) and `WEBSEARCH_ENABLED=true` (loads the
-browser-agent module in the app):
+extract from web pages) is **enabled by default** in the repository Docker
+Compose stack. It needs a heavy Chromium + browser-use container (~1 GB image,
++2 GB shared memory), so the first `docker compose up -d` also builds the
+bundled `websearch-service/` image from source:
 
 ```bash
-# First run builds the Chromium image (a few minutes); later runs reuse it.
-docker compose --env-file docker/.env.ce.browser-agent up -d
+docker compose up -d
 ```
 
 - **Model:** the agent node picks the model per AI provider
@@ -203,7 +202,7 @@ docker compose --env-file docker/.env.ce.browser-agent up -d
   provider's API key in the app (Settings > AI providers), or set the matching
   env key (e.g. `GEMINI_API_KEY` for Google); otherwise the run fails with the
   provider's "No API key" error.
-- **web_search:** the same `browser-agent` profile also starts a **SearXNG**
+- **web_search:** the same default stack also starts a **SearXNG**
   metasearch sidecar, wired via `WEBSEARCH_SEARXNG_URL`, so `web_search` returns
   results. Its config (kept engines + JSON output) is mounted read-only from
   `searxng/settings.yml`; set a unique `server.secret_key` there for your install.
@@ -211,27 +210,24 @@ docker compose --env-file docker/.env.ce.browser-agent up -d
   (captured screenshot). The real-time screencast additionally needs
   `WEBSEARCH_CDP_JWT_SECRET` set to the same value on both the app and the
   `websearch` container.
-- Set only one of the two and the feature is broken (a container the app never
-  calls, or a module with no container) - always use the env file so they stay
-  coupled.
+- The legacy `docker/.env.ce.browser-agent` file remains compatible, but it is
+  no longer required for the repository compose stack.
 
-## Interface screenshots + PDF renderer - opt-in
+## Interface screenshots + PDF renderer - enabled by default
 
 Interface nodes can render a page to a **PNG screenshot** (`generateScreenshot`)
-or a **PDF** (`generatePdf`). That needs a headless Playwright/Chromium sidecar,
-which is **off by default** (~1 GB image). Turn it on with the bundled env file,
-which starts the `screenshot-renderer` container (`renderer` Docker profile) and
-points the app at it (`SCREENSHOT_RENDERER_URL=http://screenshot-renderer:8094`):
+or a **PDF** (`generatePdf`). That needs a headless Playwright/Chromium sidecar
+(~1 GB image), and the repository Docker Compose stack starts it by default:
 
 ```bash
-docker compose --env-file docker/.env.ce.renderer up -d
+docker compose up -d
 ```
 
 - **Best-effort when off:** with the renderer disabled the interface node still
   runs, it just emits no screenshot/PDF output - the rest of the workflow is
   unaffected.
-- Set only one half and it stays off (a container the app never calls, or the URL
-  with no container) - always use the env file so they stay coupled.
+- The legacy `docker/.env.ce.renderer` file remains compatible, but it is no
+  longer required for the repository compose stack.
 
 ## Update check and anonymous install count
 
@@ -312,7 +308,7 @@ normally within seconds of startup but is delayed if the database is not up yet.
 ## Common Commands
 
 ```bash
-# Start everything (pulls the prebuilt images)
+# Start everything (pulls the main images and builds websearch locally on first run)
 docker compose up -d
 
 # Update to a newer release: the compose pins the image version, so pull the repo
@@ -455,4 +451,3 @@ curl http://localhost:8080/api/agent-tools | python -m json.tool | head -5
 | Backend | 1536 MB | ~800 MB after startup |
 | Frontend | 256 MB | ~100 MB after startup |
 | **Total** | **~2.4 GB** | **~1 GB idle** |
-
