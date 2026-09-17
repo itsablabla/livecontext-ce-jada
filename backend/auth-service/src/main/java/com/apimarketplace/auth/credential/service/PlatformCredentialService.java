@@ -473,7 +473,7 @@ public class PlatformCredentialService {
                 sanitized.remove(LLM_ENDPOINT_URL_FIELD);
             } else {
                 String trimmed = endpoint.trim();
-                UrlSafetyValidator.validateUrlFormat(trimmed);
+                UrlSafetyValidator.validateUrl(trimmed);
                 sanitized.put(LLM_ENDPOINT_URL_FIELD, trimmed);
             }
         }

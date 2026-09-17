@@ -208,12 +208,12 @@ class AbstractLLMProviderTest {
 
                 @Override
                 public Optional<String> resolveApiUrl(String providerName) {
-                    return Optional.of("https://override.example/v1/chat/completions");
+                    return Optional.of("https://93.184.216.34/v1/chat/completions");
                 }
             });
 
             assertThat(provider.resolvedApiUrlForTest())
-                    .isEqualTo("https://override.example/v1/chat/completions");
+                    .isEqualTo("https://93.184.216.34/v1/chat/completions");
         }
 
         @Test
