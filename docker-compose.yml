@@ -258,11 +258,11 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 120s
+      start_period: 300s
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: 3072M
 
   # ── Browser agent (agent_browse), enabled by default, heavy (Chromium + browser-use) ──
   # Unlike the other services (prebuilt images), this builds from the bundled
